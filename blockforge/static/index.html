@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BlockForge</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/": "./vendor/"
+} }
+</script>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><img src="icon.svg" alt=""><span>BlockForge</span><em>AI Minecraft build generator</em></div>
+  <div class="top-right">
+    <button id="engine-pill" class="pill" title="How BlockForge talks to Claude"><span class="dot"></span><span id="engine-text">Checking Claude…</span></button>
+    <button id="usage-btn" class="btn ghost" title="How much Claude has used">Usage</button>
+    <button id="theme-btn" class="icon-btn" title="Light / dark">◐</button>
+    <button id="settings-btn" class="btn ghost">Settings</button>
+  </div>
+</header>
+
+<main class="layout">
+  <!-- ============ left: create + gallery ============ -->
+  <aside class="panel left">
+    <section class="card create">
+      <h2>Create</h2>
+      <div class="prompt-wrap" id="drop-zone">
+        <textarea id="prompt" rows="5" placeholder="Describe a build… e.g. a cozy medieval blacksmith with a water wheel, stone base and spruce frame"></textarea>
+        <div id="image-chip" class="image-chip" hidden><img id="image-preview" alt=""><button id="image-clear" title="Remove image">×</button></div>
+        <div class="prompt-tools">
+          <label class="link-btn" title="Turn a picture into a 3D build">＋ Image<input id="image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden></label>
+          <span class="hint">or drop / paste an image</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>Size</label>
+        <div class="seg" id="size-seg">
+          <button data-v="tiny">Tiny</button><button data-v="small">Small</button><button data-v="medium" class="on">Medium</button><button data-v="large">Large</button><button data-v="huge">Huge</button>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field"><label for="palette">Palette</label>
+          <select id="palette">
+            <option value="auto">Auto</option><option value="medieval">Medieval</option><option value="modern">Modern</option>
+            <option value="fantasy">Fantasy</option><option value="nature">Rustic / nature</option><option value="desert">Desert</option>
+            <option value="japanese">Japanese</option><option value="nether">Nether</option><option value="ice">Frozen</option>
+            <option value="steampunk">Steampunk / copper</option><option value="snapshot">Newest blocks</option>
+          </select></div>
+        <div class="field"><label for="model">Model</label><select id="model"></select></div>
+      </div>
+      <label class="toggle" title="Claude looks at real builds on schematic sites before designing yours">
+        <input type="checkbox" id="research" checked>
+        <span class="switch"></span>
+        <span><b>Research real builds online</b><small id="research-sites" class="muted"></small></span>
+      </label>
+      <button id="generate" class="btn primary big">Generate build</button>
+      <div class="examples" id="examples"></div>
+    </section>
+
+    <section class="card gallery">
+      <div class="gallery-head">
+        <h2>My builds <span id="count" class="muted"></span></h2>
+        <label class="link-btn" title="Open a .schem, .litematic or .nbt file">Import<input id="import-input" type="file" accept=".schem,.litematic,.nbt" hidden></label>
+      </div>
+      <input id="search" class="search" placeholder="Search builds">
+      <div id="gallery" class="gallery-grid"></div>
+    </section>
+  </aside>
+
+  <!-- ============ centre: 3D view ============ -->
+  <section class="stage">
+    <div id="viewer" class="viewer"></div>
+    <div id="empty" class="empty">
+      <div class="empty-inner">
+        <img src="icon.svg" alt="">
+        <h1>Describe it. Claude builds it.</h1>
+        <p>Type what you want on the left, or drop in a picture. You get a 3D preview and a schematic for WorldEdit, Litematica, structure blocks or Bedrock. Every download is free.</p>
+      </div>
+    </div>
+    <div id="progress" class="progress" hidden>
+      <div class="spinner"></div>
+      <div class="progress-title" id="progress-title">Generating…</div>
+      <div class="progress-time" id="progress-time">0s</div>
+      <ul id="progress-log"></ul>
+    </div>
+    <div class="build-banner" id="build-banner" hidden><span id="build-banner-text">Building…</span><div class="bar"><i id="build-banner-bar"></i></div><button class="btn ghost small" id="skip-build">Skip</button></div>
+    <div class="toolbar" id="toolbar" hidden>
+      <div class="layer">
+        <span>Layers</span>
+        <input type="range" id="layer" min="0" max="1" value="1">
+        <span id="layer-val" class="mono"></span>
+      </div>
+      <button class="icon-btn" id="reset-view" title="Reset camera">⟲</button>
+      <button class="icon-btn" id="shot" title="Save a screenshot">📷</button>
+    </div>
+  </section>
+
+  <!-- ============ right: details ============ -->
+  <aside class="panel right" id="details" hidden>
+    <section class="card">
+      <input id="title" class="title-input" maxlength="80">
+      <div class="stats" id="stats"></div>
+      <p class="prompt-text" id="prompt-text"></p>
+      <div id="parent-link" class="muted small"></div>
+    </section>
+
+    <section class="card">
+      <h3>Download</h3>
+      <div class="downloads" id="downloads"></div>
+      <button class="link-btn small" id="reveal">Show file in folder</button>
+    </section>
+
+    <section class="card" id="edit-card">
+      <h3>Change it with Claude</h3>
+      <textarea id="edit-prompt" rows="3" placeholder="e.g. make the roof dark oak, add a balcony and a garden"></textarea>
+      <button class="btn primary" id="edit-btn">Apply change</button>
+      <p class="muted small" id="edit-note"></p>
+    </section>
+
+    <section class="card">
+      <div class="tabs"><button data-tab="materials" class="on">Materials</button><button data-tab="sources">Sources</button><button data-tab="usage">Usage</button><button data-tab="script">Script</button></div>
+      <div id="tab-materials" class="tab"><ul id="materials" class="materials"></ul></div>
+      <div id="tab-sources" class="tab" hidden><div id="sources" class="sources"></div></div>
+      <div id="tab-usage" class="tab" hidden><div id="build-usage"></div></div>
+      <div id="tab-script" class="tab" hidden>
+        <textarea id="code" class="code" spellcheck="false"></textarea>
+        <button class="btn" id="run-code">Run script</button>
+        <p class="muted small">Edit the build script by hand and run it to make a new version.</p>
+      </div>
+    </section>
+
+    <button class="btn danger ghost small" id="delete">Delete build</button>
+  </aside>
+</main>
+
+<!-- ============ settings ============ -->
+<dialog id="settings">
+  <form method="dialog" class="settings-form">
+    <h2>Settings</h2>
+    <div class="tabs set-tabs">
+      <button type="button" data-stab="claude" class="on">Claude</button><button type="button" data-stab="research">Research</button>
+      <button type="button" data-stab="look">Appearance</button><button type="button" data-stab="guide">Guide</button><button type="button" data-stab="defaults">Defaults &amp; palettes</button>
+    </div>
+
+    <div class="stab" id="stab-claude">
+    <h3>How BlockForge talks to Claude</h3>
+    <label class="radio"><input type="radio" name="engine" value="claude_code">
+      <div><b>My Claude account (Claude Code)</b><span>Uses the Claude Code program on this PC and your Claude subscription. No API key needed.</span>
+        <div class="status" id="cc-status">Checking…</div>
+        <div class="row-btns"><button type="button" class="btn small" id="cc-login">Sign in to Claude</button><button type="button" class="btn ghost small" id="cc-refresh">Check again</button></div>
+      </div></label>
+    <label class="radio"><input type="radio" name="engine" value="api">
+      <div><b>Anthropic API key</b><span>Pay-as-you-go from console.anthropic.com. The key stays on this PC.</span>
+        <input id="api-key" type="password" placeholder="sk-ant-…" autocomplete="off">
+      </div></label>
+    <h3>Build from a Claude Code chat</h3>
+    <p class="muted small">BlockForge is also linked to Claude Code: in a Claude Code chat opened in a folder with BlockForge’s <code>.mcp.json</code> (like the BlockForge source folder), ask Claude to “make a build in BlockForge” and it shows up in your gallery here.</p>
+    </div>
+
+    <div class="stab" id="stab-research" hidden>
+      <label class="toggle"><input type="checkbox" id="set-research"><span class="switch"></span>
+        <span><b>Research real builds before designing</b><small class="muted">Claude searches these schematic sites, reads the closest builds (size, palette, details) and then designs an original build. It takes longer and uses more of your Claude usage.</small></span></label>
+      <h3>Sites to search (one per line, best first)</h3>
+      <textarea id="set-sites" rows="6" class="code small-code" spellcheck="false"></textarea>
+      <div class="row-btns"><button type="button" class="btn ghost small" id="reset-sites">Reset to the default 4 sites</button></div>
+    </div>
+
+    <div class="stab" id="stab-look" hidden>
+      <h3>Theme</h3>
+      <div class="seg" id="set-theme"><button type="button" data-v="system">System</button><button type="button" data-v="dark">Dark</button><button type="button" data-v="light">Light</button></div>
+      <h3>Accent colour</h3>
+      <div class="swatches" id="set-accent"></div>
+      <h3>Style</h3>
+      <div class="row2">
+        <div class="field"><label for="set-corners">Corners</label>
+          <select id="set-corners"><option value="round">Rounded</option><option value="soft">Soft</option><option value="square">Blocky (square)</option></select></div>
+        <div class="field"><label for="set-font">Font</label>
+          <select id="set-font"><option value="system">Clean (Segoe UI)</option><option value="mono">Monospace</option><option value="rounded">Rounded</option><option value="serif">Classic serif</option></select></div>
+      </div>
+      <div class="field"><label for="set-scale">Size of everything <span id="set-scale-val" class="muted"></span></label>
+        <input type="range" id="set-scale" min="80" max="130" step="5"></div>
+      <h3>3D view</h3>
+      <div class="row2">
+        <div class="field"><label for="set-viewer-bg">Background</label>
+          <div class="row-btns"><input type="color" id="set-viewer-bg"><button type="button" class="btn ghost small" id="reset-viewer-bg">Match theme</button></div></div>
+        <div class="field checks">
+          <label><input type="checkbox" id="set-grid"> Show ground grid</label>
+          <label><input type="checkbox" id="set-rotate"> Slowly spin builds</label>
+          <label><input type="checkbox" id="set-examples"> Show example prompts</label>
+        </div>
+      </div>
+      <div class="row-btns"><button type="button" class="btn ghost small" id="reset-look">Reset appearance</button></div>
+    </div>
+
+    <div class="stab" id="stab-guide" hidden>
+      <label class="toggle"><input type="checkbox" id="g-enabled"><span class="switch"></span>
+        <span><b>Show the guide</b><small class="muted">A little builder who shows you around, talks you through each build, and reacts to what happens.</small></span></label>
+      <div class="row2">
+        <div class="field"><label for="g-name">Name</label><input id="g-name" class="search" maxlength="20"></div>
+        <div class="field"><label for="g-chatty">How chatty</label>
+          <select id="g-chatty"><option value="quiet">Quiet (important stuff only)</option><option value="normal">Normal</option><option value="chatty">Chatty (tips and jokes)</option></select></div>
+      </div>
+      <h3>Voice</h3>
+      <div class="row2">
+        <div class="field"><label for="g-style">Voice type</label>
+          <select id="g-style"><option value="speech">Spoken voice</option><option value="blips">Game blips</option><option value="off">Silent (text only)</option></select></div>
+        <div class="field"><label for="g-voice">Spoken voice</label><select id="g-voice"></select></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label for="g-pitch">Pitch <span id="g-pitch-val" class="muted"></span></label><input type="range" id="g-pitch" min="0.5" max="2" step="0.05"></div>
+        <div class="field"><label for="g-rate">Speed <span id="g-rate-val" class="muted"></span></label><input type="range" id="g-rate" min="0.6" max="1.6" step="0.05"></div>
+      </div>
+      <div class="row-btns"><button type="button" class="btn small" id="g-test">▶ Test voice</button><button type="button" class="btn ghost small" id="g-tour">Replay the tour</button></div>
+      <h3>Look</h3>
+      <div class="look-grid">
+        <label><input type="color" id="g-hoodie"> Hoodie</label><label><input type="color" id="g-hair"> Hair</label><label><input type="color" id="g-skin"> Skin</label>
+        <label><input type="color" id="g-bandana"> Bandana</label><label><input type="color" id="g-pants"> Trousers</label><label><input type="color" id="g-shoes"> Shoes</label>
+      </div>
+      <div class="field checks">
+        <label><input type="checkbox" id="g-viewer"> Let them build in the 3D view (block-by-block build animation)</label>
+      </div>
+      <div class="row-btns"><button type="button" class="btn ghost small" id="g-reset">Reset guide</button></div>
+    </div>
+
+    <div class="stab" id="stab-defaults" hidden>
+      <div class="row2">
+        <div class="field"><label for="default-model">Default model</label><select id="default-model"></select></div>
+        <div class="field"><label for="default-size">Default size</label>
+          <select id="default-size"><option value="tiny">Tiny</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="huge">Huge</option></select></div>
+      </div>
+      <div class="field"><label for="default-palette">Default palette</label><select id="default-palette"></select></div>
+      <h3>My palettes</h3>
+      <p class="muted small">Make your own palettes. They show up in the Palette menu. Describe the blocks you want, e.g. “dark oak and deepslate with copper trim and lots of lanterns”.</p>
+      <div id="palette-list" class="palette-list"></div>
+      <button type="button" class="btn small" id="add-palette">＋ Add palette</button>
+    </div>
+
+    <div class="row-btns end"><button class="btn primary" id="save-settings" value="save">Save</button><button class="btn ghost" value="cancel">Close</button></div>
+  </form>
+</dialog>
+
+<!-- ============ usage ============ -->
+<dialog id="usage">
+  <div class="settings-form">
+    <div class="usage-head"><h2>Claude usage</h2><button class="btn ghost small" id="usage-close">Close</button></div>
+    <p class="muted small" id="usage-note"></p>
+    <div class="usage-cards" id="usage-cards"></div>
+    <h3>By model</h3>
+    <div id="usage-models"></div>
+    <h3>Recent schematics</h3>
+    <div class="usage-table-wrap"><table class="usage-table" id="usage-table"></table></div>
+  </div>
+</dialog>
+
+<div id="toast" class="toast" hidden></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>
