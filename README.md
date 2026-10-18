@@ -21,6 +21,14 @@ Then you download it in the format you need. There's no paywall and no per-downl
 ## Features
 
 - **Text or image to build.** Describe anything, or attach a picture to rebuild it in 3D.
+- **Use the AI you like.** Claude (your Claude account or an API key) is the default and gives the best builds.
+  You can also use OpenAI, Google Gemini, OpenRouter, DeepSeek, xAI Grok, Mistral or Groq with your own API key,
+  any OpenAI-compatible service, or a free local model with **LM Studio** or **Ollama**.
+- **Working redstone.** Doors, farms, sorters, clocks and contraptions get a redstone design guide, helpers that
+  set repeater, comparator, piston and observer directions correctly, automatic wiring for dust and rails (pasted
+  schematics don't update, so BlockForge connects them for you, along with fences, panes and walls), and a checker
+  that catches floating parts and missing power. The AI then fixes whatever the checker finds. It switches on by
+  itself when your prompt sounds like redstone.
 - **Researches real builds first.** Before designing, Claude searches
   [minecraft-schematics.com](https://www.minecraft-schematics.com/), [abfielder.com](https://abfielder.com/),
   [PhantomMarket](https://market.phantom-node.com/) and [MineSchematic](https://mineschematic.com/). It studies
@@ -82,6 +90,21 @@ Uninstalling the app keeps them.
 | Pro | Claude Opus 5.5 | The most detail. This is the default. |
 | Standard | Claude Sonnet 5.5 | Faster builds |
 | Quick | Claude Haiku 5.5 | Quick tests and small props |
+
+### Other AIs
+
+Open **Settings → AI**, pick a provider, paste your API key (there's a "Get a key" link) and click **Load models**.
+The model list comes straight from the provider, so new models show up without a BlockForge update.
+
+| Provider | What you need |
+|---|---|
+| OpenAI, Google Gemini, OpenRouter, DeepSeek, xAI Grok, Mistral, Groq | Your own API key from that provider |
+| Custom | The API address (and key, if needed) of any OpenAI-compatible service |
+| LM Studio / Ollama | The app running on your PC with a model loaded and its local server started. Free, but slower and simpler builds |
+
+Online research uses Claude's web search, so it's only available with Claude. Other AIs still get the redstone
+guide, the redstone checker and automatic error fixing. Usage shows their token counts. OpenRouter also reports
+real cost, while other providers bill your account directly.
 
 ## Build from a Claude Code chat
 
