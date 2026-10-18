@@ -11,10 +11,11 @@ import time
 import traceback
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import engine, exporters, prompts, sandbox, store  # noqa: E402
+from blockforge import engine, exporters, prompts, sandbox, store, tts, updater  # noqa: E402
+from blockforge.version import VERSION  # noqa: E402
 
 PORT = int(os.environ.get("BLOCKFORGE_PORT", "8765"))
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -33,7 +34,7 @@ def start_job(fn, **kw):
         try:
             job["build"] = fn(log=log, **kw)
             job["status"] = "done"
-        except (engine.EngineError, sandbox.ScriptError) as e:
+        except (engine.EngineError, sandbox.ScriptError, updater.UpdateError) as e:
             job["error"] = str(e)
             job["status"] = "error"
         except Exception as e:                       # noqa: BLE001
@@ -114,7 +115,23 @@ class H(BaseHTTPRequestHandler):
                     "claude_code": engine.claude_status(),
                     "models": engine.MODELS, "formats": {k: v[0] for k, v in exporters.FORMATS.items()},
                     "default_sites": prompts.DEFAULT_SITES, "palettes": list(prompts.PALETTES),
+                    "version": VERSION, "hd_voice": tts.available(), "hd_voices": tts.voices(),
                 })
+            if parts[1:] == ["tts"]:
+                q = parse_qs(urlparse(self.path).query)
+                try:
+                    wav = tts.speak(q.get("text", [""])[0], q.get("voice", ["joe"])[0], q.get("speed", ["1"])[0])
+                except FileNotFoundError as e:
+                    return self.err(404, str(e))
+                except (ValueError, RuntimeError, subprocess.TimeoutExpired) as e:
+                    return self.err(400, str(e))
+                return self.send(200, wav, "audio/wav")
+            if parts[1:] == ["update"]:
+                force = "force" in parse_qs(urlparse(self.path).query)
+                try:
+                    return self.send(200, updater.check(force))
+                except updater.UpdateError as e:
+                    return self.err(502, str(e))
             if parts[1:] == ["usage"]:
                 return self.send(200, store.usage_summary())
             if parts[1] == "jobs" and len(parts) == 3:
@@ -193,6 +210,13 @@ class H(BaseHTTPRequestHandler):
                     if k in b and not isinstance(b[k], dict):
                         b.pop(k)
                 return self.send(200, {"ok": True, "engine": store.save_settings(b)["engine"]})
+            if route == ["update"]:
+                def do_update(log=print):
+                    res = updater.install(log)
+                    threading.Timer(2.5, os._exit, [0]).start()     # close so the installer can replace our files
+                    return res
+                job = start_job(do_update)
+                return self.send(200, {"job": job["id"]})
             if route == ["login"]:
                 engine.open_claude_login()
                 return self.send(200, {"ok": True})
