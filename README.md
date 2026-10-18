@@ -1,0 +1,143 @@
+<p align="center">
+  <img src="blockforge/static/icon.svg" width="88" alt="BlockForge logo">
+</p>
+
+<h1 align="center">BlockForge</h1>
+
+<p align="center"><b>Describe a Minecraft build, or drop in a picture, and Claude designs it for you.</b><br>
+3D preview, block-by-block build animation, and free downloads for WorldEdit, Litematica, structure blocks and Bedrock.</p>
+
+<p align="center">
+  <a href="https://github.com/Ryn-labs/BlockForge/releases/latest"><b>⬇ Download the Windows installer</b></a>
+</p>
+
+![BlockForge main window](docs/main.jpg)
+
+BlockForge is a Windows desktop app for making Minecraft schematics with AI. Type something like
+*"a medieval nether portal with stone towers and lava braziers"*. Claude looks at how real builders
+have made it on popular schematic sites, designs an original build, and BlockForge shows it to you in 3D.
+Then you download it in the format you need. There's no paywall and no per-download fee.
+
+## Features
+
+- **Text or image to build.** Describe anything, or attach a picture to rebuild it in 3D.
+- **Researches real builds first.** Before designing, Claude searches
+  [minecraft-schematics.com](https://www.minecraft-schematics.com/), [abfielder.com](https://abfielder.com/),
+  [PhantomMarket](https://market.phantom-node.com/) and [MineSchematic](https://mineschematic.com/). It studies
+  the closest builds' size, palette and details, then designs its own. The Sources tab lists every build it
+  looked at, with links. You can edit the site list in Settings.
+- **Meet Flint, your guide.** A blocky story-mode-style builder with a voice, an expressive face and lots of
+  animations (wave, think, search, type, build, celebrate, dance and more). He gives you a tour, talks you
+  through each build as it happens, and builds the schematic in front of you, layer by layer.
+- **Change it with Claude.** For example, "make the roof dark oak and add a balcony". You get a new version,
+  and the original is kept.
+- **Free downloads in every format:** `.schem` (WorldEdit / FAWE), `.litematic` (Litematica), `.nbt` (structure
+  block) and `.mcstructure` (Bedrock, beta).
+- **Claude usage tracking.** See the tokens, web searches, time and estimated cost for each build, plus
+  today / 7-day / all-time totals.
+- **Make it yours.** Theme, accent colour, corner style, font, UI size, 3D background, your own block palettes,
+  and Flint's name, voice and outfit.
+- **Also included:** a layers slider to see inside, a material list in stacks, editable build scripts, a gallery,
+  and import of existing `.schem` / `.litematic` / `.nbt` files.
+
+| Flint talks you through it | ...then builds it in front of you |
+|---|---|
+| ![Flint the guide](docs/flint.png) | ![Build animation](docs/building.jpg) |
+
+| Real builds Claude studied | Claude usage per build |
+|---|---|
+| <img src="docs/sources.png" width="300" alt="Sources tab"> | ![Usage dashboard](docs/usage.png) |
+
+| Restyle the app | Customise Flint |
+|---|---|
+| ![Appearance settings](docs/settings-appearance.png) | ![Guide settings](docs/settings-guide.png) |
+
+## Install
+
+1. Download **`BlockForge-<version>.msi`** from the [latest release](https://github.com/Ryn-labs/BlockForge/releases/latest) and run it.
+   BlockForge installs to `C:\Program Files\BlockForge` and adds Desktop and Start-menu shortcuts.
+   The installer isn't code-signed yet, so Windows SmartScreen may warn you. Click **More info → Run anyway**.
+2. Open **BlockForge**, go to **Settings → Claude**, and choose how it talks to Claude:
+   - **My Claude account (Claude Code).** This uses the [Claude Code](https://claude.com/claude-code) program
+     on your PC with your Claude subscription, so no API key is needed. Click **Sign in to Claude** if it says
+     you're not signed in. If you have the Claude desktop app, BlockForge finds the Claude Code that comes with it.
+   - **Anthropic API key.** Pay-as-you-go from [console.anthropic.com](https://console.anthropic.com/). The key
+     is stored only on your PC.
+3. Describe a build and click **Generate build**. A researched build usually takes 2–5 minutes.
+
+Requirements: Windows 10/11 (64-bit) with the Microsoft Edge WebView2 runtime (Windows 11 already has it),
+and an internet connection to generate builds. Your builds and settings are saved in `%LOCALAPPDATA%\BlockForge`.
+Uninstalling the app keeps them.
+
+## Models
+
+| In the app | Model | Good for |
+|---|---|---|
+| Pro | Claude Opus 5.5 | The most detail. This is the default. |
+| Standard | Claude Sonnet 5.5 | Faster builds |
+| Quick | Claude Haiku 5.5 | Quick tests and small props |
+
+## Build from a Claude Code chat
+
+Claude Code can make builds straight into BlockForge. In the cloned folder, create a file named `.mcp.json`
+containing:
+
+```json
+{
+  "mcpServers": {
+    "blockforge": { "command": "python", "args": ["blockforge/mcp_server.py"] }
+  }
+}
+```
+
+Then open a Claude Code chat in that folder, approve the **blockforge** server, and ask for something like
+*"make me a wizard tower in BlockForge"*.
+Claude writes the build, researches the same schematic sites, and the result appears in the app's gallery.
+
+## How it works
+
+Claude doesn't output blocks directly. It writes a short Python build script using BlockForge's building toolkit
+(`fill`, `walls`, `gable_roof`, `sphere`, `cylinder`, `mirror`, `tree`, `noise` and more), shown in the Script tab.
+The script runs in a locked-down sandbox: no file or network access, and only a few safe imports. If it fails,
+the error goes back to Claude to fix (up to 2 tries). Then BlockForge writes the schematic files itself.
+That keeps builds editable and lets you tweak the script by hand and run it again.
+
+```
+blockforge/
+  server.py       local web server for the app window (127.0.0.1:8765)
+  engine.py       talks to Claude (Claude Code or the API), research, usage tracking
+  prompts.py      the builder prompt and research instructions
+  buildkit.py     the building toolkit build scripts use
+  sandbox.py      checks and runs build scripts in a separate process
+  exporters.py    .schem / .litematic / .nbt / .mcstructure writers and importers
+  mcp_server.py   Claude Code chat link (MCP over stdio)
+  app_main.py     desktop entry point (pywebview window)
+  static/         the UI: three.js viewer, Flint (character.js, guide.js)
+installer/        PyInstaller spec + WiX installer source
+```
+
+## Run or build from source
+
+```bat
+pip install -r requirements.txt
+python blockforge\launcher.pyw
+```
+
+To build the installer you also need the [WiX Toolset](https://wixtoolset.org/) v5 and its Util extension:
+
+```bat
+dotnet tool install --global wix --version 5.0.2
+wix extension add -g WixToolset.Util.wixext/5.0.2
+installer\build_msi.bat
+```
+
+Bump `VERSION` in `installer/build_msi.bat` for each release. Installing a newer MSI replaces the old version.
+The installer never restarts your PC.
+
+## Notes
+
+- Online research uses reference builds for inspiration only. Claude designs an original build and doesn't copy
+  anyone's schematic. Credit for the reference builds goes to their creators, and the Sources tab links to them.
+- The Bedrock `.mcstructure` export is a best effort. Some block states may differ on Bedrock.
+- BlockForge is not an official Minecraft product and is not approved by or associated with Mojang or Microsoft.
+- The 3D viewer uses [three.js](https://threejs.org/) (MIT licence).

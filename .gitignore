@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+blockforge/data/
+installer/build/
+installer/dist/
+installer/*.msi

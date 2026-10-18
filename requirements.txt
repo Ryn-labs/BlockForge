@@ -1,0 +1,5 @@
+# Run from source
+pywebview>=5.0          # the native app window (uses Microsoft Edge WebView2)
+anthropic>=1.0          # only needed for the "Anthropic API key" engine
+# Build the installer
+pyinstaller>=6.0
