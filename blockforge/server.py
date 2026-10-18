@@ -110,12 +110,16 @@ class H(BaseHTTPRequestHandler):
                 s = store.load_settings()
                 key = s.get("api_key") or ""
                 return self.send(200, {
-                    "settings": {**s, "api_key": ("•" * 8 + key[-4:]) if key else ""},
+                    "settings": {**{k: v for k, v in s.items() if k != "providers"}, "api_key": ("•" * 8 + key[-4:]) if key else ""},
                     "has_api_key": bool(key or os.environ.get("ANTHROPIC_API_KEY")),
                     "claude_code": engine.claude_status(),
                     "models": engine.MODELS, "formats": {k: v[0] for k, v in exporters.FORMATS.items()},
                     "default_sites": prompts.DEFAULT_SITES, "palettes": list(prompts.PALETTES),
                     "version": VERSION, "hd_voice": tts.available(), "hd_voices": tts.voices(),
+                    "providers": {pid: {**meta, "key_set": bool(((s.get("providers") or {}).get(pid) or {}).get("api_key")),
+                                        **{k: v for k, v in ((s.get("providers") or {}).get(pid) or {}).items() if k != "api_key"}}
+                                  for pid, meta in engine.PROVIDERS.items()},
+                    "engine_label": engine.engine_label(s.get("engine", "claude_code")),
                 })
             if parts[1:] == ["tts"]:
                 q = parse_qs(urlparse(self.path).query)
@@ -126,6 +130,16 @@ class H(BaseHTTPRequestHandler):
                 except (ValueError, RuntimeError, subprocess.TimeoutExpired) as e:
                     return self.err(400, str(e))
                 return self.send(200, wav, "audio/wav")
+            if parts[1:] == ["models"]:
+                pid = parse_qs(urlparse(self.path).query).get("provider", [""])[0]
+                try:
+                    models = engine.list_models(pid)
+                except engine.EngineError as e:
+                    return self.err(400, str(e))
+                provs = store.load_settings().get("providers") or {}
+                provs.setdefault(pid, {})["models"] = models[:400]
+                store.save_settings({"providers": provs})
+                return self.send(200, {"models": models})
             if parts[1:] == ["update"]:
                 force = "force" in parse_qs(urlparse(self.path).query)
                 try:
@@ -182,7 +196,8 @@ class H(BaseHTTPRequestHandler):
                     return self.err(400, "Describe a build or attach an image.")
                 job = start_job(engine.generate, prompt=b.get("prompt", ""), size=b.get("size", "medium"),
                                 palette=b.get("palette", "auto"), model=b.get("model"), engine=b.get("engine"),
-                                image=image, parent_id=b.get("parent_id"), research=b.get("research"))
+                                image=image, parent_id=b.get("parent_id"), research=b.get("research"),
+                                redstone=b.get("redstone"))
                 return self.send(200, {"job": job["id"]})
             if route == ["run"]:
                 b = self.json_body()
@@ -206,6 +221,18 @@ class H(BaseHTTPRequestHandler):
                 if "custom_palettes" in b:
                     b["custom_palettes"] = [{"name": str(p.get("name", ""))[:40], "description": str(p.get("description", ""))[:400]}
                                             for p in b["custom_palettes"] or [] if str(p.get("name", "")).strip()][:30]
+                if "providers" in b:
+                    cur = store.load_settings().get("providers") or {}
+                    for pid, cfg in (b["providers"] or {}).items():
+                        if pid not in engine.PROVIDERS or not isinstance(cfg, dict):
+                            continue
+                        old = cur.get(pid, {})
+                        new = {**old, **{k: str(cfg[k]).strip() for k in ("base_url", "model") if k in cfg}}
+                        k = cfg.get("api_key")
+                        if k is not None and not str(k).startswith("•"):
+                            new["api_key"] = str(k).strip()
+                        cur[pid] = new
+                    b["providers"] = cur
                 for k in ("ui", "guide"):
                     if k in b and not isinstance(b[k], dict):
                         b.pop(k)

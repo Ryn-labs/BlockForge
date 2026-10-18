@@ -43,6 +43,11 @@ def main():
         err = f"{type(e).__name__}: {e}" + (f" (line {line})" if line else "")
     blocks = buildkit._blocks
     if not err and blocks:
+        try:
+            buildkit._meta["warnings"] = buildkit._redstone.finalize(blocks)
+        except Exception as e:                       # noqa: BLE001 - never lose a build over the checker
+            buildkit._meta["warnings"] = [f"redstone check failed: {e}"]
+    if not err and blocks:
         xs, ys, zs = zip(*blocks)
         span = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs)) + 1
         if span > buildkit.MAX_SPAN:

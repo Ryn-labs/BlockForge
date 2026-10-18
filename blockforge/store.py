@@ -35,7 +35,8 @@ DEFAULT_SETTINGS = {
     "default_size": "medium", "default_palette": "auto",
     "custom_palettes": [],                                 # [{"name": ..., "description": ...}]
     "ui": {},                                              # appearance choices made in Settings > Appearance
-    "guide": {},                                           # the guide character (name, voice, colours...)
+    "guide": {},
+    "providers": {},                                       # other AIs: {id: {"api_key", "base_url", "model", "models"}}                                           # the guide character (name, voice, colours...)
 }
 USAGE_LOG = os.path.join(DATA, "usage.jsonl")
 
@@ -70,7 +71,8 @@ def slug(text):
 
 
 def save_build(blocks, title, prompt="", code=None, source="app", parent=None, model=None,
-               description="", image_bytes=None, image_ext=None, usage=None, references=None, researched=False):
+               description="", image_bytes=None, image_ext=None, usage=None, references=None, researched=False,
+               redstone=False, warnings=None):
     bid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     d = _dir(bid)
     os.makedirs(d)
@@ -86,6 +88,7 @@ def save_build(blocks, title, prompt="", code=None, source="app", parent=None, m
         "materials": sorted(counts.items(), key=lambda kv: -kv[1]),
         "has_image": bool(image_bytes),
         "usage": usage, "references": references or [], "researched": researched,
+        "redstone": redstone, "warnings": warnings or [],
     }
     with open(os.path.join(d, "blocks.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, separators=(",", ":"))

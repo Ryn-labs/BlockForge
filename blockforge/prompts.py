@@ -1,4 +1,5 @@
-"""Prompts that turn Claude into a Minecraft build generator."""
+"""Prompts that turn an AI model into a Minecraft build generator."""
+import re
 
 SIZES = {
     "tiny": "about 8-12 blocks wide (a small prop, statue or hut)",
@@ -60,6 +61,15 @@ y=0 is the ground level the build sits on. All ranges are inclusive.
 - noise(x, z, scale=8, seed=0) -> 0..1                 smooth noise for terrain / weathering
 - pick(*blocks, weights=None)                          random texture choice
 - bounds(), count()
+Redstone helpers (they set the tricky block states for you; directions are north/south/east/west/up/down):
+- dust(x,y,z), dust_line(x1,z1,x2,z2,y)          redstone dust; connections are wired up automatically
+- repeater(x,y,z, toward, delay=1, locked=False)  outputs TOWARD that direction
+- comparator(x,y,z, toward, subtract=False)       outputs TOWARD that direction
+- redstone_torch(x,y,z, attach='floor'|direction of the block it's stuck to)
+- lever / button(x,y,z, attach='floor'|'ceiling'|direction, facing=..., kind='stone' for buttons)
+- pressure_plate(x,y,z, kind='stone')   piston(x,y,z, push, sticky=False)   observer(x,y,z, watch)
+- hopper(x,y,z, into='down'|side)   dropper/dispenser(x,y,z, out)   lamp(x,y,z)
+- rail(x,y,z, kind='rail'|'powered'|'detector'|'activator', shape=None)   shapes are worked out automatically
 Plain Python (loops, functions, lists, dicts, math) is encouraged. Only math/random/itertools/
 functools/collections/colorsys may be imported. No files, no network.
 
@@ -68,7 +78,8 @@ functools/collections/colorsys may be imported. No files, no network.
   stairs on the south slope of an east-west ridge face north (they climb toward the ridge).
 - slabs: type=bottom|top|double.  logs/pillars: axis=x|y|z.  leaves: persistent=true (always set it!).
 - doors: two blocks: B('spruce_door', half='lower', facing='south', hinge='left') then half='upper' above.
-- trapdoors: facing, half, open=true|false.  fences/panes/walls/bars connect automatically in game.
+- trapdoors: facing, half, open=true|false.  fences/panes/walls/bars/dust/rails: BlockForge connects them
+  for you when the build is saved, so just place the plain block.
 - lanterns: hanging=true when under a ceiling. wall torches: B('wall_torch', facing='north').
 - glass_pane, iron_bars, chain(axis), candles(candles=1-4, lit=true), campfire(lit), beds need part=head/foot.
 - Use only real Minecraft Java 1.21 block ids (e.g. short_grass not grass, dirt_path not grass_path).
@@ -127,9 +138,49 @@ Your reply must contain, in this order:
 """
 
 
+REDSTONE_WORDS = re.compile(
+    r"redstone|piston|observer|repeater|comparator|hopper|dropper|dispenser|lever|pressure plate|tnt|cannon|"
+    r"\bfarm\b|sorter|sorting|auto(matic|mated)?\b|contraption|circuit|clock|elevator|flying machine|minecart|"
+    r"\brails?\b|hidden door|secret door|piston door|trap\b|lamp|logic|gate\b.*(and|or|xor)|t flip|item elevator|"
+    r"storage system|smelter|xp farm|iron farm|mob farm|crop farm|vault door|drawbridge|bridge that|retract",
+    re.I)
+
+REDSTONE_GUIDE = """## Redstone build (this request needs working redstone)
+Think like a technical Minecraft player. Before the script, plan the circuit in comments: inputs -> logic -> outputs,
+with exact coordinates. Then build it with the redstone helpers. Rules that make circuits actually work:
+- Power travels 15 blocks through dust; put a repeater at least every 15 dust. Repeaters/comparators are one-way.
+- Dust, repeaters, comparators, rails and floor torches must sit on a solid block (or a top slab / glass / hopper).
+- Dust powers the block it points into and the block under it. A powered solid block powers dust, repeaters and
+  mechanisms touching it (pistons, lamps, doors, dispensers, droppers, note blocks, hoppers get disabled).
+- A redstone torch on the side of a block turns OFF when that block is powered (inverter / NOT gate).
+- Pistons push up to 12 blocks; obsidian, bedrock and (for regular pistons) block entities can't be pushed.
+  Sticky pistons pull back one block. Pistons are not powered from their front (head) face.
+- Observers pulse out of their back when the block in front of their face changes; use them for clocks
+  (two facing each other), farms (watching crops/sugar cane/kelp) and flying machines.
+- Comparators read container fullness (item sorters, storage readouts) and can subtract signals.
+- Hopper chains move items in their 'into' direction; a powered hopper is locked (item sorter filters use this).
+- Leave 1 block of air or a non-conductive block (glass, slabs) between separate lines so signals don't cross.
+- Keep the mechanism compact, hide wiring under floors or behind walls if the build has a look to it, and make
+  the player-facing input obvious (a lever or button on the outside, with a sign if helpful).
+- Classic patterns to reuse: 2x2 piston door (4 sticky pistons + pulse from both sides), observer clock,
+  hopper-clock / comparator clock, item sorter (hopper line + comparators + torches with 1 stack of filter items),
+  zero-tick-free sugar cane / kelp / bamboo farms with observers, minecart station with powered + detector rails.
+- Design for Java Edition behaviour (quasi-connectivity, update order). Note any manual setup the player must do
+  (e.g. "put 41 filter items in each sorter hopper") in name(..., description=...).
+"""
+
+
+def wants_redstone(prompt, previous_code=None):
+    if previous_code and re.search(r"\b(dust|repeater|comparator|piston|observer|hopper|lever)\(", previous_code):
+        return True
+    return bool(REDSTONE_WORDS.search(prompt or ""))
+
+
 def user_message(prompt, size="medium", palette="auto", previous_code=None, has_image=False,
-                 research_sites=None, palette_text=None):
+                 research_sites=None, palette_text=None, redstone=None):
     parts = []
+    if redstone is None:
+        redstone = wants_redstone(prompt, previous_code)
     if previous_code:
         parts.append("Here is the current build script:\n```python\n" + previous_code + "\n```\n")
         parts.append("Change request: " + prompt.strip())
@@ -143,6 +194,8 @@ def user_message(prompt, size="medium", palette="auto", previous_code=None, has_
     pal = palette_text or PALETTES.get(palette)
     if pal and palette != "auto":
         parts.append("Palette: " + pal)
+    if redstone:
+        parts.append(REDSTONE_GUIDE)
     if research_sites:
         parts.append(research_brief(research_sites, editing=bool(previous_code)))
     return "\n\n".join(parts)
@@ -151,3 +204,9 @@ def user_message(prompt, size="medium", palette="auto", previous_code=None, has_
 def fix_message(error):
     return ("The script failed when it ran:\n```\n" + error + "\n```\n"
             "Fix it and reply with the complete corrected script in one ```python block.")
+
+
+def redstone_fix_message(problems):
+    return ("The build ran, but BlockForge's redstone checker found problems that would stop it working in game:\n- "
+            + "\n- ".join(problems) +
+            "\nFix them and reply with the complete corrected script in one ```python block.")

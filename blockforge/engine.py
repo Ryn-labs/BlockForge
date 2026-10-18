@@ -127,13 +127,35 @@ class Usage:
         pi, po = PRICES.get(model, PRICES["claude-opus-5-5"])
         d["cost_usd"] += (inp * pi + cr * pi * 0.1 + cw * pi * 1.25 + out * po) / 1e6 + ws * WEB_SEARCH_USD
 
+    def add_openai(self, u, seconds, local=False):
+        d = self.d
+        d["requests"] += 1
+        d["turns"] += 1
+        d["seconds"] += seconds
+        cached = ((u.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
+        d["input_tokens"] += max(0, (u.get("prompt_tokens") or 0) - cached)
+        d["cache_read_tokens"] += cached
+        d["output_tokens"] += u.get("completion_tokens") or 0
+        d["thinking_tokens"] += ((u.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0)
+        if u.get("cost"):                            # OpenRouter reports the real cost
+            d["cost_usd"] += float(u["cost"])
+        self.local = local
+
     def record(self):
         r = dict(self.d)
         r["cost_usd"] = round(r["cost_usd"], 4)
         r["seconds"] = round(r["seconds"], 1)
         r["total_tokens"] = r["input_tokens"] + r["output_tokens"] + r["cache_read_tokens"] + r["cache_write_tokens"]
-        r["billing"] = "Included in your Claude plan (cost shown at API list price)" if r["engine"] == "claude_code" \
-            else "Charged to your API key"
+        if r["engine"] == "claude_code":
+            r["billing"] = "Included in your Claude plan (cost shown at API list price)"
+        elif r["engine"] == "api":
+            r["billing"] = "Charged to your Anthropic API key"
+        elif getattr(self, "local", False):
+            r["billing"] = "Free: ran on your own PC"
+        elif r["cost_usd"]:
+            r["billing"] = f"Charged by {engine_label(r['engine'])}"
+        else:
+            r["billing"] = f"Charged by {engine_label(r['engine'])} (it doesn't report the cost, so check your account)"
         return r
 
 
@@ -321,27 +343,228 @@ def extract(text):
     return title, code, refs[:10]
 
 
+# ------------------------------------------------------------------ other AIs (OpenAI-style chat APIs)
+PROVIDERS = {
+    "openai": {"name": "OpenAI (ChatGPT)", "base": "https://api.openai.com/v1", "key": True,
+               "key_url": "https://platform.openai.com/api-keys"},
+    "gemini": {"name": "Google Gemini", "base": "https://generativelanguage.googleapis.com/v1beta/openai", "key": True,
+               "key_url": "https://aistudio.google.com/apikey"},
+    "openrouter": {"name": "OpenRouter (hundreds of models)", "base": "https://openrouter.ai/api/v1", "key": True,
+                   "key_url": "https://openrouter.ai/keys"},
+    "deepseek": {"name": "DeepSeek", "base": "https://api.deepseek.com/v1", "key": True,
+                 "key_url": "https://platform.deepseek.com/api_keys"},
+    "xai": {"name": "xAI Grok", "base": "https://api.x.ai/v1", "key": True, "key_url": "https://console.x.ai/"},
+    "mistral": {"name": "Mistral", "base": "https://api.mistral.ai/v1", "key": True,
+                "key_url": "https://console.mistral.ai/api-keys"},
+    "groq": {"name": "Groq", "base": "https://api.groq.com/openai/v1", "key": True,
+             "key_url": "https://console.groq.com/keys"},
+    "lmstudio": {"name": "LM Studio (on this PC, free)", "base": "http://localhost:1234/v1", "key": False, "local": True},
+    "ollama": {"name": "Ollama (on this PC, free)", "base": "http://localhost:11434/v1", "key": False, "local": True},
+    "custom": {"name": "Custom (any OpenAI-compatible API)", "base": "", "key": None},
+}
+CLAUDE_ENGINES = ("claude_code", "api")
+
+
+def engine_label(engine):
+    if engine == "claude_code":
+        return "Claude (your account)"
+    if engine == "api":
+        return "Claude (API key)"
+    return PROVIDERS.get(engine, {}).get("name", engine).split(" (")[0]
+
+
+def _provider_cfg(pid, settings):
+    meta = PROVIDERS.get(pid)
+    if not meta:
+        raise EngineError(f"Unknown AI provider '{pid}'.")
+    cfg = (settings.get("providers") or {}).get(pid, {})
+    base = (cfg.get("base_url") or meta["base"]).rstrip("/")
+    if not base:
+        raise EngineError(f"Set the API address for {meta['name']} in Settings → AI.")
+    key = cfg.get("api_key") or ""
+    if meta["key"] and not key:
+        raise EngineError(f"Add your {meta['name'].split(' (')[0]} API key in Settings → AI.")
+    return meta, base, key, cfg
+
+
+def _http_json(url, key=None, body=None, timeout=900):
+    import urllib.error
+    import urllib.request
+    headers = {"Content-Type": "application/json", "User-Agent": "BlockForge"}
+    if key:
+        headers["Authorization"] = "Bearer " + key
+    if "openrouter.ai" in url:
+        headers.update({"HTTP-Referer": "https://github.com/Ryn-labs/BlockForge", "X-Title": "BlockForge"})
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, headers=headers, method="POST" if data else "GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        text = e.read().decode("utf-8", "replace")[:600]
+        try:
+            msg = json.loads(text).get("error", text)
+            msg = msg.get("message", msg) if isinstance(msg, dict) else msg
+        except ValueError:
+            msg = text
+        raise _HTTPError(e.code, str(msg))
+    except urllib.error.URLError as e:
+        raise _HTTPError(0, str(e.reason))
+
+
+class _HTTPError(Exception):
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code, self.msg = code, msg
+
+
+def list_models(pid):
+    settings = store.load_settings()
+    meta, base, key, _ = _provider_cfg(pid, settings)
+    try:
+        data = _http_json(base + "/models", key, timeout=20)
+    except _HTTPError as e:
+        raise EngineError(_friendly(meta, e))
+    items = data.get("data") if isinstance(data, dict) else data
+    ids = sorted({(m.get("id") or m.get("name") or "").replace("models/", "") for m in items or [] if isinstance(m, dict)})
+    return [i for i in ids if i and not re.search(r"embed|whisper|tts|dall-e|moderation|image|audio|rerank|transcri", i, re.I)]
+
+
+def _friendly(meta, e):
+    name = meta["name"].split(" (")[0]
+    if e.code == 0:
+        if meta.get("local"):
+            return (f"Couldn't reach {name}. Open {name}, load a model and start its local server "
+                    f"(LM Studio: Developer tab → Start server). Details: {e.msg}")
+        return f"Couldn't reach {name}: {e.msg}"
+    if e.code in (401, 403):
+        return f"{name} rejected the API key ({e.code}). Check it in Settings → AI."
+    if e.code == 404:
+        return f"{name} doesn't have that model ({e.msg[:200]}). Pick another in the Model menu."
+    if e.code == 402:
+        return f"Your {name} account is out of credit."
+    if e.code == 429:
+        return f"{name} is rate limiting you or you're out of quota: {e.msg[:200]}"
+    return f"{name} error {e.code}: {e.msg[:300]}"
+
+
+def _ask_openai_compat(pid, messages, model, settings, usage, log=print):
+    meta, base, key, cfg = _provider_cfg(pid, settings)
+    model = model or cfg.get("model")
+    if not model:
+        raise EngineError(f"Pick a {meta['name'].split(' (')[0]} model in the Model menu (Settings → AI → Load models).")
+    log(f"Asking {meta['name'].split(' (')[0]} ({model})...")
+    body = {"model": model, "messages": messages}
+    if not meta.get("local"):
+        body["max_completion_tokens" if pid == "openai" else "max_tokens"] = 32000
+    t0 = time.time()
+    try:
+        try:
+            res = _http_json(base + "/chat/completions", key, body)
+        except _HTTPError as e:                      # some models cap output lower: retry with their default
+            if e.code == 400 and re.search(r"max_(completion_)?tokens", e.msg):
+                body.pop("max_tokens", None)
+                body.pop("max_completion_tokens", None)
+                res = _http_json(base + "/chat/completions", key, body)
+            else:
+                raise
+    except _HTTPError as e:
+        raise EngineError(_friendly(meta, e))
+    choice = (res.get("choices") or [{}])[0]
+    msg = choice.get("message") or {}
+    text = msg.get("content") or ""
+    if isinstance(text, list):                       # some APIs return content parts
+        text = "".join(p.get("text", "") for p in text if isinstance(p, dict))
+    usage.add_openai(res.get("usage") or {}, time.time() - t0, local=bool(meta.get("local")))
+    if not text.strip():
+        raise EngineError(f"{meta['name'].split(' (')[0]} returned an empty answer "
+                          f"({choice.get('finish_reason') or 'no reason given'}). Try another model.")
+    if choice.get("finish_reason") == "length" and "```" in text and text.count("```") % 2:
+        log("The answer was cut off at the model's length limit; asking it to finish...")
+    return text
+
+
+# ------------------------------------------------------------------ the generation loop (every AI)
+class _Conversation:
+    """Hides the differences between AIs: first ask, then follow-up fix requests."""
+
+    def __init__(self, engine, model, settings, usage, text, image, image_path, research, log):
+        self.e, self.model, self.settings, self.usage, self.log = engine, model, settings, usage, log
+        self.text, self.image, self.image_path, self.research = text, image, image_path, research
+        self.messages, self.raw, self.last_code = None, None, None
+
+    def first(self):
+        if self.e == "api":
+            content = [{"type": "text", "text": self.text}]
+            if self.image:
+                content.insert(0, {"type": "image", "source": {
+                    "type": "base64", "media_type": self.image[1],
+                    "data": base64.standard_b64encode(self.image[0]).decode()}})
+            self.messages = [{"role": "user", "content": content}]
+            reply, self.raw = _ask_api(self.messages, self.model, self.settings, self.usage, self.research, self.log)
+            return reply
+        if self.e == "claude_code":
+            return _ask_claude_code(self.text, self.model, self.usage, self.image_path, self.research, self.log)
+        user = self.text
+        if self.image:
+            user = [{"type": "text", "text": self.text}, {"type": "image_url", "image_url": {
+                "url": f"data:{self.image[1]};base64," + base64.standard_b64encode(self.image[0]).decode()}}]
+        self.messages = [{"role": "system", "content": prompts.SYSTEM}, {"role": "user", "content": user}]
+        reply = _ask_openai_compat(self.e, self.messages, self.model, self.settings, self.usage, self.log)
+        self.raw = reply
+        return reply
+
+    def follow_up(self, message, code):
+        if self.e == "api":
+            self.messages += [{"role": "assistant", "content": self.raw}, {"role": "user", "content": message}]
+            reply, self.raw = _ask_api(self.messages, self.model, self.settings, self.usage, False, self.log)
+            return reply
+        if self.e == "claude_code":
+            return _ask_claude_code(self.text_without_research() + "\n\nYour previous script:\n```python\n" + code
+                                    + "\n```\n\n" + message, self.model, self.usage, self.image_path, False, self.log)
+        self.messages += [{"role": "assistant", "content": self.raw}, {"role": "user", "content": message}]
+        self.raw = _ask_openai_compat(self.e, self.messages, self.model, self.settings, self.usage, self.log)
+        return self.raw
+
+    def text_without_research(self):
+        return self.text.split("## Research first (required)")[0]
+
+
 def generate(prompt, size="medium", palette="auto", model=None, engine=None, image=None, parent_id=None,
-             research=None, log=print):
+             research=None, redstone=None, log=print):
     """image: (bytes, mime). Returns the saved build's meta."""
     settings = store.load_settings()
     engine = engine or settings.get("engine", "claude_code")
-    model = model or settings.get("model", "claude-opus-5-5")
+    if engine not in CLAUDE_ENGINES and engine not in PROVIDERS:
+        engine = "claude_code"
+    if engine in CLAUDE_ENGINES:
+        model = model if model in MODELS else settings.get("model", "claude-opus-5-5")
+    else:
+        model = model or ((settings.get("providers") or {}).get(engine, {}).get("model"))
+    who = engine_label(engine)
     prev_code = store.get_code(parent_id) if parent_id else None
     if parent_id and not prev_code:
         raise EngineError("That build has no script, so it can't be edited with a prompt (it was imported).")
     if research is None:
         research = settings.get("research", True) and not parent_id
+    if research and engine not in CLAUDE_ENGINES:
+        log(f"Online research needs Claude, so {who} will design this one without it.")
+        research = False
+    if redstone is None:
+        redstone = prompts.wants_redstone(prompt, prev_code)
     sites = [s for s in settings.get("research_sites") or prompts.DEFAULT_SITES if s.strip()]
     palette_text = None
     if str(palette).startswith("custom:"):
-        name = palette.split(":", 1)[1]
-        palette_text = next((p["description"] for p in settings.get("custom_palettes", []) if p.get("name") == name), None)
+        pname = palette.split(":", 1)[1]
+        palette_text = next((p["description"] for p in settings.get("custom_palettes", []) if p.get("name") == pname), None)
     text = prompts.user_message(prompt, size, palette, prev_code, has_image=bool(image),
-                                research_sites=sites if research else None, palette_text=palette_text)
+                                research_sites=sites if research else None, palette_text=palette_text,
+                                redstone=redstone)
     usage = Usage(engine, model)
     started = time.time()
     status, title, saved = "error", None, None
+    if redstone:
+        log("This looks like a redstone build: using the redstone guide and checker.")
     if research:
         log(f"Researching {len(sites)} schematic sites for reference builds...")
 
@@ -354,46 +577,44 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
             f.write(image[0])
 
     try:
-        if engine == "api":
-            content = [{"type": "text", "text": text}]
-            if image:
-                content.insert(0, {"type": "image", "source": {
-                    "type": "base64", "media_type": image[1], "data": base64.standard_b64encode(image[0]).decode()}})
-            messages = [{"role": "user", "content": content}]
-            reply, raw = _ask_api(messages, model, settings, usage, research, log)
-        else:
-            reply = _ask_claude_code(text, model, usage, image_path, research, log)
-        title, code, refs = extract(reply)
+        convo = _Conversation(engine, model, settings, usage, text, image, image_path, research, log)
+        title, code, refs = extract(convo.first())
         if refs:
             log(f"Used {len(refs)} reference build{'s' if len(refs) != 1 else ''} from the web.")
 
-        for attempt in range(MAX_FIX_ATTEMPTS + 1):
-            log("Building the blocks...")
+        def build(code):
+            nonlocal title, refs
+            for attempt in range(MAX_FIX_ATTEMPTS + 1):
+                log("Building the blocks...")
+                try:
+                    return code, *sandbox.run_safe(code)
+                except sandbox.ScriptError as e:
+                    if attempt == MAX_FIX_ATTEMPTS:
+                        raise EngineError("The build script kept failing: " + str(e)[:600])
+                    log(f"Script error, asking {who} to fix it (try {attempt + 1}/{MAX_FIX_ATTEMPTS})...")
+                    t2, code, refs2 = extract(convo.follow_up(prompts.fix_message(str(e)), code))
+                    title = title or t2
+                    refs = refs or refs2
+
+        code, blocks, meta = build(code)
+        problems = meta.get("warnings") or []
+        if redstone and problems:
+            log("Redstone check: " + "; ".join(problems)[:300])
+            log(f"Asking {who} to fix the redstone...")
             try:
-                blocks, meta = sandbox.run_safe(code)
-                break
-            except sandbox.ScriptError as e:
-                if attempt == MAX_FIX_ATTEMPTS:
-                    raise EngineError("The build script kept failing: " + str(e)[:600])
-                log(f"Script error, asking Claude to fix it (try {attempt + 1}/{MAX_FIX_ATTEMPTS})...")
-                if engine == "api":
-                    messages.append({"role": "assistant", "content": raw})
-                    messages.append({"role": "user", "content": prompts.fix_message(str(e))})
-                    reply, raw = _ask_api(messages, model, settings, usage, False, log)
-                else:
-                    fix_text = prompts.user_message(prompt, size, palette, prev_code, has_image=bool(image),
-                                                    palette_text=palette_text)
-                    reply = _ask_claude_code(
-                        fix_text + "\n\nYour previous script:\n```python\n" + code + "\n```\n\n" + prompts.fix_message(str(e)),
-                        model, usage, image_path, False, log)
-                t2, code, refs2 = extract(reply)
-                title = title or t2
-                refs = refs or refs2
+                _, code2, _ = extract(convo.follow_up(prompts.redstone_fix_message(problems), code))
+                code2, blocks2, meta2 = build(code2)
+                if len(meta2.get("warnings") or []) <= len(problems):
+                    code, blocks, meta = code2, blocks2, meta2
+                    problems = meta.get("warnings") or []
+            except EngineError as e:
+                log(f"Kept the first version ({e}).")
+            log("Redstone check passed." if not problems else "Redstone notes: " + "; ".join(problems)[:300])
 
         title = meta.get("name") or title or prompt[:60] or "Build"
         rec = usage.record()
-        log(f"Done: {len(blocks):,} blocks. Claude used {rec['total_tokens']:,} tokens "
-            f"(about ${rec['cost_usd']:.2f}).")
+        cost = f" (about ${rec['cost_usd']:.2f})" if rec["cost_usd"] else ""
+        log(f"Done: {len(blocks):,} blocks. {who} used {rec['total_tokens']:,} tokens{cost}.")
         img_bytes = image[0] if image else None
         if parent_id and not image:
             pm = store.get_meta(parent_id)
@@ -404,7 +625,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
         saved = store.save_build(blocks, title, prompt=prompt, code=code, source=engine, parent=parent_id,
                                  model=model, description=meta.get("description") or "",
                                  image_bytes=img_bytes, image_ext=ext, usage=rec, references=refs,
-                                 researched=bool(research))
+                                 researched=bool(research), redstone=bool(redstone), warnings=problems)
         status = "done"
         return saved
     finally:

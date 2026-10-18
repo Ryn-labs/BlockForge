@@ -84,7 +84,9 @@ def _summary(meta):
             f"Size {meta['size'][0]} x {meta['size'][1]} x {meta['size'][2]} (W x H x L), "
             f"{meta['block_count']:,} blocks.\nTop materials: {mats}\n"
             f"Files:\n  {paths['schem']}\n  {paths['litematic']}\n"
-            f"It is now in the BlockForge gallery ({APP_URL}).")
+            f"It is now in the BlockForge gallery ({APP_URL})."
+            + ("\n\nRedstone checker found problems (fix them with update_build):\n- " + "\n- ".join(meta["warnings"])
+               if meta.get("warnings") else ""))
 
 
 def call(name, args):
@@ -93,7 +95,8 @@ def call(name, args):
                                        "Pass your script to the create_build tool.")
         sites = store.load_settings().get("research_sites") or prompts.DEFAULT_SITES
         brief = prompts.research_brief(sites).split("Your reply must contain")[0]
-        return guide + "\n" + brief + "\nPass the builds you studied to create_build as `references`."
+        return (guide + "\n" + brief + "\nPass the builds you studied to create_build as `references`.\n\n"
+                + "If the request needs working redstone (doors, farms, sorters, contraptions):\n" + prompts.REDSTONE_GUIDE)
     if name in ("create_build", "update_build"):
         parent = args.get("build_id")
         if parent:
@@ -108,7 +111,8 @@ def call(name, args):
                 for r in args.get("references") or [] if isinstance(r, dict) and str(r.get("url", "")).startswith("http")]
         m = store.save_build(blocks, title, prompt=prompt, code=args["code"], source="claude_chat", parent=parent,
                              model="claude-code-chat", description=meta.get("description") or "",
-                             references=refs[:10], researched=bool(refs))
+                             references=refs[:10], researched=bool(refs),
+                             redstone=prompts.wants_redstone(prompt, args["code"]), warnings=meta.get("warnings") or [])
         return _summary(m)
     if name == "list_builds":
         q = (args.get("query") or "").lower()

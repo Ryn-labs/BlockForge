@@ -365,3 +365,11 @@ EXPORTS = [
     "line", "sphere", "ellipsoid", "dome", "cylinder", "circle", "cone", "pyramid", "gable_roof", "hip_roof",
     "mirror", "copy", "tree", "noise", "pick", "bounds", "count", "random", "math",
 ]
+
+# ------------------------------------------------------------------ redstone (see redstone.py)
+from . import redstone as _redstone  # noqa: E402
+
+_redstone.bind(_blocks, block)
+for _n in _redstone.EXPORTS:
+    globals()[_n] = getattr(_redstone, _n)
+EXPORTS += _redstone.EXPORTS
