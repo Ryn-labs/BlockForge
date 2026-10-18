@@ -257,7 +257,8 @@ export class Animator {
     // lip sync: a chattery open/close while talking
     if (this.talking > 0) {
       this.talking -= dt;
-      const m = Math.max(0, Math.sin(t * 17) * 0.6 + Math.sin(t * 9.3) * 0.5);
+      const lv = this.levelFn?.();
+      const m = lv != null ? Math.min(1, lv * 5) : Math.max(0, Math.sin(t * 17) * 0.6 + Math.sin(t * 9.3) * 0.5);
       if (Math.abs(m - F.mouth) > 0.2) { F.mouth = m; F.dirty = true; }
     } else if (F.mouth) { F.mouth = 0; F.dirty = true; }
     // eyes drift a little

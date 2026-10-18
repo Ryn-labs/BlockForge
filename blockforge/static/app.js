@@ -159,6 +159,15 @@ async function loadStatus() {
     document.querySelectorAll('#size-seg button').forEach(x => x.classList.toggle('on', x.dataset.v === size));
     state.size = size;
     gcfg = { ...GUIDE_DEFAULTS, ...(s.settings.guide || {}), look: { ...LOOK_DEFAULTS, ...((s.settings.guide || {}).look || {}) } };
+    if ((gcfg.voice_v || 1) < 2) {            // 1.2.0: switch everyone from the robotic voice to the HD one
+      if (gcfg.voice_style === 'speech' && s.hd_voice) gcfg.voice_style = 'hd';
+      if (gcfg.pitch === 1.15) gcfg.pitch = 1.0;
+      if (gcfg.rate === 1.05) gcfg.rate = 1.0;
+      gcfg.voice_v = 2;
+      if (s.settings.guide && Object.keys(s.settings.guide).length) saveGuide();
+    }
+    if (!s.hd_voice && gcfg.voice_style === 'hd') gcfg.voice_style = 'speech';
+    $('#about-version').textContent = s.version;
     guide.apply(gcfg);
     if (!gcfg.toured && gcfg.enabled !== false) setTimeout(flintTour, 1200);
     if (s.settings.ui && Object.keys(s.settings.ui).length) { ui = { ...UI_DEFAULTS, ...s.settings.ui }; applyUI(); persistUI(); }
@@ -370,9 +379,11 @@ function renderGallery() {
     <div class="g-item ${state.current?.id === b.id ? 'on' : ''}" data-id="${b.id}" title="${esc(b.prompt || b.title)}">
       ${b.source === 'claude_chat' ? '<span class="badge">from chat</span>' : b.source === 'import' ? '<span class="badge">imported</span>' : ''}
       <div class="g-thumb" style="${b.has_thumb ? `background-image:url('/api/builds/${b.id}/file/thumb.jpg?v=${b.thumb_v || 0}')` : ''}">${b.has_thumb ? '' : '▣'}</div>
+      <button class="g-dl" data-dl="${b.id}" title="Download .schem">⬇</button>
       <div class="g-meta"><div class="g-title">${esc(b.title)}</div><div class="g-sub">${b.size.join('×')} · ${b.block_count.toLocaleString()} blocks</div></div>
     </div>`).join('');
   for (const el of g.querySelectorAll('.g-item')) el.onclick = () => openBuild(el.dataset.id);
+  for (const el of g.querySelectorAll('.g-dl')) el.onclick = e => { e.stopPropagation(); downloadBuild(el.dataset.dl, 'schem'); };
 }
 $('#search').oninput = renderGallery;
 
@@ -391,6 +402,7 @@ window.blockforge.openBuild = (...a) => openBuild(...a);
 async function openBuild(id, fresh = false) {
   const [meta, data, code] = await Promise.all([api('builds/' + id), api(`builds/${id}/blocks`), api(`builds/${id}/code`)]);
   state.current = meta;
+  $('#details').scrollTop = 0;              // always start at the top so Download is in view
   $('#empty').hidden = true; $('#toolbar').hidden = false; $('#details').hidden = false;
   document.querySelector('.layout').classList.remove('no-details');
   viewer.load(data);
@@ -408,12 +420,7 @@ async function openBuild(id, fresh = false) {
   $('#parent-link').querySelector('a')?.addEventListener('click', e => { e.preventDefault(); openBuild(parent.id); });
   $('#downloads').innerHTML = Object.entries(FORMAT_INFO).map(([f, [ext, who]]) =>
     `<a href="/api/builds/${id}/export/${f}" download><b>${ext}</b><span>${who}</span></a>`).join('');
-  for (const a of $('#downloads').querySelectorAll('a')) a.onclick = async e => {
-    if (!window.pywebview?.api) return;          // installed app: use a native Save As dialog
-    e.preventDefault();
-    try { const p = await window.pywebview.api.save_export(id, a.href.split('/').pop()); if (p) toast('Saved to ' + p); }
-    catch (err) { toast(String(err), true); }
-  };
+  for (const a of $('#downloads').querySelectorAll('a')) a.onclick = e => { e.preventDefault(); downloadBuild(id, a.href.split('/').pop()); };
   $('#materials').innerHTML = (meta.materials || []).map(([n, c]) => {
     const col = '#' + blockColor(n).toString(16).padStart(6, '0');
     const stacks = c >= 64 ? `${Math.floor(c / 64)}×64${c % 64 ? ' + ' + (c % 64) : ''}` : '';
@@ -573,7 +580,7 @@ async function flintBuild(meta) {
   const v = await guide.say(`Ta-da! “${meta.title}”: ${meta.block_count.toLocaleString()} blocks${refs ? `, inspired by ${refs} real build${refs === 1 ? '' : 's'}` : ''}. What next?`,
     { anim: 'celebrate', animOnce: 2.2, expr: 'excited', interrupt: true,
       choices: [{ label: 'Download .schem', value: 'dl' }, { label: 'Change something', value: 'edit' }, { label: 'Looks great!', value: 'ok' }] });
-  if (v === 'dl') $('#downloads a')?.click();
+  if (v === 'dl') downloadBuild(meta.id, 'schem');
   else if (v === 'edit') { $('#edit-prompt').focus(); guide.say('Tell me what to change in the box on the right, then hit “Apply change”.', { anim: 'point', turn: -0.5 }); }
   else if (v === 'ok') guide.act('dance', 'happy', 2.5);
 }
@@ -599,9 +606,7 @@ async function flintTour() {
 function fillGuideForm() {
   $('#g-enabled').checked = gcfg.enabled !== false;
   $('#g-name').value = gcfg.name; $('#g-chatty').value = gcfg.chatty; $('#g-style').value = gcfg.voice_style;
-  const vs = guide.voice.list(), sel = $('#g-voice');
-  sel.innerHTML = '<option value="auto">Automatic</option>' + vs.map(v => `<option value="${esc(v.voiceURI)}">${esc(v.name)} (${esc(v.lang)})</option>`).join('');
-  sel.value = [...sel.options].some(o => o.value === gcfg.voice) ? gcfg.voice : 'auto';
+  fillVoiceList(gcfg.voice_style);
   $('#g-pitch').value = gcfg.pitch; $('#g-pitch-val').textContent = (+gcfg.pitch).toFixed(2);
   $('#g-rate').value = gcfg.rate; $('#g-rate-val').textContent = (+gcfg.rate).toFixed(2);
   for (const k of Object.keys(LOOK_DEFAULTS)) { const el = $('#g-' + k); if (el) el.value = gcfg.look[k] || LOOK_DEFAULTS[k]; }
@@ -611,9 +616,26 @@ function readGuideForm() {
   const look = {};
   for (const k of Object.keys(LOOK_DEFAULTS)) { const el = $('#g-' + k); look[k] = el ? el.value : LOOK_DEFAULTS[k]; }
   return { ...gcfg, enabled: $('#g-enabled').checked, name: $('#g-name').value.trim() || 'Flint', chatty: $('#g-chatty').value,
-    voice_style: $('#g-style').value, voice: $('#g-voice').value, pitch: +$('#g-pitch').value, rate: +$('#g-rate').value,
+    voice_style: $('#g-style').value,
+    ...($('#g-style').value === 'hd' ? { hd_voice: $('#g-voice').value } : { voice: $('#g-voice').value }), pitch: +$('#g-pitch').value, rate: +$('#g-rate').value,
     in_viewer: $('#g-viewer').checked, look };
 }
+function fillVoiceList(style) {
+  const sel = $('#g-voice');
+  if (style === 'hd') {
+    const hv = state.status?.hd_voices || {};
+    sel.innerHTML = Object.entries(hv).map(([k, l]) => `<option value="${esc(k)}">${esc(l)}</option>`).join('') || '<option value="joe">Joe</option>';
+    sel.value = gcfg.hd_voice in hv ? gcfg.hd_voice : (Object.keys(hv)[0] || 'joe');
+  } else {
+    const vs = guide.voice.list();
+    sel.innerHTML = '<option value="auto">Automatic</option>' + vs.map(v => `<option value="${esc(v.voiceURI)}">${esc(v.name)} (${esc(v.lang)})</option>`).join('');
+    sel.value = [...sel.options].some(o => o.value === gcfg.voice) ? gcfg.voice : 'auto';
+  }
+  sel.disabled = style === 'blips' || style === 'off';
+  $('#g-pitch').disabled = style !== 'speech' && style !== 'blips';
+  $('#g-pitch-note').textContent = style === 'hd' ? '(not used by the HD voice)' : '';
+}
+$('#g-style').addEventListener('change', e => fillVoiceList(e.target.value));
 let savedGuide = null;
 const previewGuide = () => { guide.apply(readGuideForm()); if (guide.hiddenNow) guide.minimize(false); };
 for (const id of ['g-enabled', 'g-name', 'g-chatty', 'g-style', 'g-voice', 'g-viewer', ...Object.keys(LOOK_DEFAULTS).map(k => 'g-' + k)])
@@ -625,9 +647,74 @@ $('#g-tour').onclick = () => { $('#settings').close(); setTimeout(flintTour, 300
 $('#g-reset').onclick = () => { gcfg = { ...GUIDE_DEFAULTS, toured: true }; fillGuideForm(); previewGuide(); };
 $('#settings').addEventListener('close', () => { if (savedGuide) { gcfg = savedGuide; savedGuide = null; guide.apply(gcfg); } });
 
+
+// ---------------------------------------------------------------- downloads (always reachable)
+async function downloadBuild(id, fmt = 'schem') {
+  if (!id) return toast('Open a build first', true);
+  if (window.pywebview?.api) {                // installed app: native Save As dialog
+    try { const p = await window.pywebview.api.save_export(id, fmt); if (p) toast('Saved to ' + p); }
+    catch (err) { toast(String(err), true); }
+    return;
+  }
+  const a = document.createElement('a'); a.href = `/api/builds/${id}/export/${fmt}`; a.download = ''; a.click();
+}
+$('#dl-main').onclick = () => downloadBuild(state.current?.id, 'schem');
+$('#dl-menu').innerHTML = Object.entries(FORMAT_INFO).map(([f, [ext, who]]) => `<button data-f="${f}"><b>${ext}</b><span>${who}</span></button>`).join('');
+$('#dl-more').onclick = e => { e.stopPropagation(); $('#dl-menu').hidden = !$('#dl-menu').hidden; };
+$('#dl-menu').onclick = e => { const b = e.target.closest('button'); if (b) { $('#dl-menu').hidden = true; downloadBuild(state.current?.id, b.dataset.f); } };
+document.addEventListener('click', () => { $('#dl-menu').hidden = true; });
+
+// ---------------------------------------------------------------- updates from GitHub
+let updateInfo = null, updateAnnounced = false;
+async function checkUpdate(force = false, quiet = true) {
+  try { updateInfo = await api('update' + (force ? '?force=1' : '')); }
+  catch (e) { if (!quiet) toast(e.message, true); $('#about-update').textContent = 'Couldn’t check for updates.'; return; }
+  const u = updateInfo;
+  $('#update-btn').hidden = !u.available;
+  $('#update-btn').textContent = `⬆ Update to ${u.latest}`;
+  $('#about-update').textContent = u.available ? `Version ${u.latest} is available.` : `You’re up to date (latest is ${u.latest || u.current}).`;
+  if (!quiet && !u.available) toast('BlockForge is up to date');
+  if (u.available && !updateAnnounced && guide.active && !state.job) {
+    updateAnnounced = true;
+    guide.say(`Psst! There’s a new version of BlockForge (${u.latest}). Want me to update?`,
+      { anim: 'wave', animOnce: 1.4, expr: 'excited', choices: [{ label: 'Update now', value: 'go' }, { label: 'Later', value: 'no' }] })
+      .then(v => { if (v === 'go') openUpdate(); });
+  }
+}
+function openUpdate() {
+  const u = updateInfo; if (!u) return;
+  $('#update-title').textContent = u.available ? `Update to BlockForge ${u.latest}` : 'BlockForge is up to date';
+  $('#update-sub').textContent = u.available
+    ? `You have ${u.current}. BlockForge downloads the new installer from GitHub (${(u.asset.size / 1e6).toFixed(0)} MB), checks it, then closes and reopens itself. Your builds and settings are kept. Windows will ask for permission once.`
+    : `You have ${u.current}.`;
+  $('#update-notes').textContent = u.notes || '';
+  $('#update-log').innerHTML = '';
+  $('#update-go').hidden = !u.available; $('#update-go').disabled = false;
+  if (!u.installed_app && u.available) $('#update-sub').textContent += ' (You’re running from source, so get the update from the release page instead.)';
+  $('#update-dlg').showModal();
+}
+$('#update-btn').onclick = openUpdate;
+$('#update-later').onclick = () => $('#update-dlg').close();
+$('#check-update').onclick = () => checkUpdate(true, false);
+$('#update-go').onclick = async () => {
+  $('#update-go').disabled = true;
+  let job;
+  try { ({ job } = await post('update', {})); } catch (e) { $('#update-log').innerHTML = `<li class="err">${esc(e.message)}</li>`; $('#update-go').disabled = false; return; }
+  const poll = async () => {
+    let j; try { j = await api('jobs/' + job); } catch { $('#update-log').innerHTML += '<li>BlockForge is closing to install the update…</li>'; return; }
+    $('#update-log').innerHTML = j.log.map(l => `<li>${esc(l.msg)}</li>`).join('') + (j.error ? `<li class="err">${esc(j.error)}</li>` : '');
+    if (j.status === 'running') return setTimeout(poll, 700);
+    if (j.status === 'error') { $('#update-go').disabled = false; return; }
+    guide.say('See you on the other side of the update!', { anim: 'wave', expr: 'happy', interrupt: true });
+  };
+  poll();
+};
+
 // ---------------------------------------------------------------- start
 document.querySelector('.layout').classList.add('no-details');
 loadStatus().catch(e => toast('Couldn’t reach BlockForge: ' + e.message, true));
+setTimeout(() => checkUpdate(), 4000);
+setInterval(() => checkUpdate(), 6 * 3600 * 1000);
 await refreshGallery();
 // builds made from a Claude Code chat appear without a reload
 let known = new Set(state.builds.map(b => b.id));

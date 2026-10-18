@@ -18,6 +18,7 @@
   <div class="brand"><img src="icon.svg" alt=""><span>BlockForge</span><em>AI Minecraft build generator</em></div>
   <div class="top-right">
     <button id="engine-pill" class="pill" title="How BlockForge talks to Claude"><span class="dot"></span><span id="engine-text">Checking Claude…</span></button>
+    <button id="update-btn" class="btn update" hidden title="A newer BlockForge is on GitHub">⬆ Update</button>
     <button id="usage-btn" class="btn ghost" title="How much Claude has used">Usage</button>
     <button id="theme-btn" class="icon-btn" title="Light / dark">◐</button>
     <button id="settings-btn" class="btn ghost">Settings</button>
@@ -95,6 +96,11 @@
         <input type="range" id="layer" min="0" max="1" value="1">
         <span id="layer-val" class="mono"></span>
       </div>
+      <div class="dl-quick">
+        <button class="btn primary small" id="dl-main" title="Download this build for WorldEdit">⬇ .schem</button>
+        <button class="btn primary small dl-more" id="dl-more" title="Other formats">▾</button>
+        <div class="dl-menu" id="dl-menu" hidden></div>
+      </div>
       <button class="icon-btn" id="reset-view" title="Reset camera">⟲</button>
       <button class="icon-btn" id="shot" title="Save a screenshot">📷</button>
     </div>
@@ -158,6 +164,9 @@
       <div><b>Anthropic API key</b><span>Pay-as-you-go from console.anthropic.com. The key stays on this PC.</span>
         <input id="api-key" type="password" placeholder="sk-ant-…" autocomplete="off">
       </div></label>
+    <h3>About &amp; updates</h3>
+    <div class="about-row"><span>BlockForge <b id="about-version"></b></span><span id="about-update" class="muted small"></span>
+      <button type="button" class="btn small" id="check-update">Check for updates</button></div>
     <h3>Build from a Claude Code chat</h3>
     <p class="muted small">BlockForge is also linked to Claude Code: in a Claude Code chat opened in a folder with BlockForge’s <code>.mcp.json</code> (like the BlockForge source folder), ask Claude to “make a build in BlockForge” and it shows up in your gallery here.</p>
     </div>
@@ -208,11 +217,11 @@
       <h3>Voice</h3>
       <div class="row2">
         <div class="field"><label for="g-style">Voice type</label>
-          <select id="g-style"><option value="speech">Spoken voice</option><option value="blips">Game blips</option><option value="off">Silent (text only)</option></select></div>
-        <div class="field"><label for="g-voice">Spoken voice</label><select id="g-voice"></select></div>
+          <select id="g-style"><option value="hd">HD voice (natural, offline)</option><option value="speech">Windows voice</option><option value="blips">Game blips</option><option value="off">Silent (text only)</option></select></div>
+        <div class="field"><label for="g-voice">Which voice</label><select id="g-voice"></select></div>
       </div>
       <div class="row2">
-        <div class="field"><label for="g-pitch">Pitch <span id="g-pitch-val" class="muted"></span></label><input type="range" id="g-pitch" min="0.5" max="2" step="0.05"></div>
+        <div class="field"><label for="g-pitch">Pitch <span id="g-pitch-val" class="muted"></span> <span class="muted small" id="g-pitch-note"></span></label><input type="range" id="g-pitch" min="0.5" max="2" step="0.05"></div>
         <div class="field"><label for="g-rate">Speed <span id="g-rate-val" class="muted"></span></label><input type="range" id="g-rate" min="0.6" max="1.6" step="0.05"></div>
       </div>
       <div class="row-btns"><button type="button" class="btn small" id="g-test">▶ Test voice</button><button type="button" class="btn ghost small" id="g-tour">Replay the tour</button></div>
@@ -254,6 +263,16 @@
     <div id="usage-models"></div>
     <h3>Recent schematics</h3>
     <div class="usage-table-wrap"><table class="usage-table" id="usage-table"></table></div>
+  </div>
+</dialog>
+
+<dialog id="update-dlg">
+  <div class="settings-form">
+    <h2 id="update-title">Update available</h2>
+    <p class="muted small" id="update-sub"></p>
+    <div class="update-notes" id="update-notes"></div>
+    <ul id="update-log" class="update-log"></ul>
+    <div class="row-btns end"><button class="btn primary" id="update-go">Update now</button><button class="btn ghost" id="update-later">Later</button></div>
   </div>
 </dialog>
 

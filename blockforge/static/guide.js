@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { createCharacter, Animator, LOOK_DEFAULTS } from './character.js';
 
 export const GUIDE_DEFAULTS = {
-  enabled: true, name: 'Flint', voice: 'auto', voice_style: 'speech', pitch: 1.15, rate: 1.05, volume: 0.9,
+  enabled: true, name: 'Flint', voice: 'auto', voice_style: 'hd', hd_voice: 'joe', pitch: 1.0, rate: 1.0, volume: 0.9,
   chatty: 'normal', in_viewer: true, look: { ...LOOK_DEFAULTS },
 };
 
@@ -28,13 +28,59 @@ class Voice {
       || vs.find(v => /en-(US|GB)/i.test(v.lang)) || vs[0] || null;
   }
 
-  stop() { try { window.speechSynthesis?.cancel(); } catch {} this.blipStop = true; }
+  stop() {
+    this.token = (this.token || 0) + 1;
+    try { window.speechSynthesis?.cancel(); } catch {}
+    this.blipStop = true;
+    if (this.src) { try { this.src.onended = null; this.src.stop(); } catch {} this.src = null; this.analyser = null; }
+  }
+
+  /** How loud the HD voice is right now (0..1), for lip sync. */
+  level() {
+    if (!this.analyser) return null;
+    const a = this.levelBuf || (this.levelBuf = new Uint8Array(this.analyser.fftSize));
+    this.analyser.getByteTimeDomainData(a);
+    let sum = 0;
+    for (let i = 0; i < a.length; i++) { const v = (a[i] - 128) / 128; sum += v * v; }
+    return Math.sqrt(sum / a.length);
+  }
+
+  unlock() {
+    try { this.ctx = this.ctx || new AudioContext(); if (this.ctx.state === 'suspended') this.ctx.resume(); } catch {}
+  }
+
+  /** Natural offline voice made by the BlockForge app (Piper). Falls back to the Windows voice. */
+  async hd(text, cfg, onStart, onEnd) {
+    const token = this.token;
+    try {
+      const r = await fetch(`/api/tts?voice=${encodeURIComponent(cfg.hd_voice || 'joe')}&speed=${cfg.rate}&text=${encodeURIComponent(text)}`);
+      if (!r.ok) throw new Error('tts ' + r.status);
+      const buf = await r.arrayBuffer();
+      this.unlock();
+      const audio = await this.ctx.decodeAudioData(buf);
+      if (token !== this.token) return;                     // a newer line started meanwhile
+      const src = this.ctx.createBufferSource();
+      src.buffer = audio;
+      const an = this.ctx.createAnalyser(); an.fftSize = 512;
+      const g = this.ctx.createGain(); g.gain.value = cfg.volume;
+      src.connect(an); an.connect(g); g.connect(this.ctx.destination);
+      this.src = src; this.analyser = an;
+      src.onended = () => { if (this.src === src) { this.src = null; this.analyser = null; } onEnd?.(); };
+      src.start();
+      onStart?.();
+    } catch (e) {
+      if (token !== this.token) return;
+      this.hdBroken = true;                                 // e.g. voice missing: use the Windows voice instead
+      this.speak(text, { ...cfg, voice_style: 'speech' }, onStart, onEnd);
+    }
+  }
 
   /** Speak text. Returns a promise that resolves when done. onWord fires as words are spoken. */
   speak(text, cfg, onStart, onEnd) {
     this.stop();
     const clean = text.replace(/[*_`#]/g, '').replace(/\s+/g, ' ');
     if (cfg.voice_style === 'off' || !clean.trim()) { onEnd?.(); return; }
+    if (cfg.voice_style === 'hd' && !this.hdBroken) return this.hd(clean, cfg, onStart, onEnd);
     if (cfg.voice_style === 'blips' || !window.speechSynthesis || !this.list().length) return this.blips(clean, cfg, onStart, onEnd);
     const u = new SpeechSynthesisUtterance(clean);
     const v = this.choose(cfg.voice);
@@ -78,6 +124,9 @@ export class Guide {
   constructor(stageEl, opts = {}) {
     this.cfg = { ...GUIDE_DEFAULTS, ...opts };
     this.voice = new Voice();
+    // browsers only allow sound after the first click, so unlock audio then
+    const unlock = () => { this.voice.unlock(); removeEventListener('pointerdown', unlock); };
+    addEventListener('pointerdown', unlock);
     this.queue = [];
     this.current = null;
     this.lastLine = 0;
@@ -140,6 +189,7 @@ export class Guide {
     if (this.ch) this.scene.remove(this.ch.root);
     this.ch = createCharacter(this.cfg.look);
     this.anim = new Animator(this.ch);
+    this.anim.levelFn = () => this.voice.level();
     this.scene.add(this.ch.root);
     this.el.querySelector('.guide-name').textContent = this.cfg.name;
     this.el.querySelector('.guide-mini').textContent = this.cfg.name[0] || 'F';
