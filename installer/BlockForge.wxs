@@ -1,0 +1,42 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <!-- UpgradeCode must never change: it lets newer BlockForge MSIs replace older ones. -->
+  <Package Name="BlockForge" Manufacturer="BlockForge" Version="$(var.Version)"
+           UpgradeCode="770f6ac0-9118-4388-879e-16bb9a6e1084" Scope="perMachine" Compressed="yes">
+    <SummaryInformation Description="BlockForge - AI Minecraft build generator" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of BlockForge is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="AppIcon" SourceFile="..\blockforge\static\icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPCOMMENTS" Value="Describe a build or drop in a picture; Claude designs it." />
+
+    <!-- Never restart the PC, however the installer is started. -->
+    <Property Id="REBOOT" Value="ReallySuppress" />
+    <!-- Close BlockForge and its Claude Code chat-link helper first so no file is left in use
+         (Claude Code starts the helper again the next time a chat uses it). -->
+    <util:CloseApplication Id="CloseApp" Target="BlockForge.exe" CloseMessage="yes" RebootPrompt="no"
+                           TerminateProcess="1" Timeout="5" />
+    <util:CloseApplication Id="CloseHelper" Target="blockforge-cli.exe" RebootPrompt="no"
+                           TerminateProcess="1" Timeout="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="BlockForge" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="BlockForge">
+      <Files Directory="INSTALLFOLDER" Include="dist\BlockForge\**" />
+      <ComponentRef Id="Shortcuts" />
+    </Feature>
+
+    <Component Id="Shortcuts" Directory="INSTALLFOLDER" Guid="bba521e7-33d5-43b2-9d03-a9ca3dc0d390">
+      <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="BlockForge"
+                Description="AI Minecraft build generator" Target="[INSTALLFOLDER]BlockForge.exe"
+                WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
+      <Shortcut Id="DesktopShortcut" Directory="DesktopFolder" Name="BlockForge"
+                Description="AI Minecraft build generator" Target="[INSTALLFOLDER]BlockForge.exe"
+                WorkingDirectory="INSTALLFOLDER" Icon="AppIcon" />
+      <RegistryValue Root="HKLM" Key="Software\BlockForge" Name="InstallDir" Type="string"
+                     Value="[INSTALLFOLDER]" KeyPath="yes" />
+    </Component>
+  </Package>
+</Wix>
