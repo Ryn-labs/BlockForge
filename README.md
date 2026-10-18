@@ -26,13 +26,18 @@ Then you download it in the format you need. There's no paywall and no per-downl
   [PhantomMarket](https://market.phantom-node.com/) and [MineSchematic](https://mineschematic.com/). It studies
   the closest builds' size, palette and details, then designs its own. The Sources tab lists every build it
   looked at, with links. You can edit the site list in Settings.
-- **Meet Flint, your guide.** A blocky story-mode-style builder with a voice, an expressive face and lots of
-  animations (wave, think, search, type, build, celebrate, dance and more). He gives you a tour, talks you
-  through each build as it happens, and builds the schematic in front of you, layer by layer.
+- **Meet Flint, your guide.** A blocky story-mode-style builder with a natural HD voice, an expressive face and
+  lots of animations (wave, think, search, type, build, celebrate, dance and more). His mouth moves with his
+  voice. He gives you a tour, talks you through each build as it happens, and builds the schematic in front of
+  you, layer by layer. The voice is generated offline on your PC, and you can switch to a Windows voice, game
+  blips or silent.
 - **Change it with Claude.** For example, "make the roof dark oak and add a balcony". You get a new version,
   and the original is kept.
 - **Free downloads in every format:** `.schem` (WorldEdit / FAWE), `.litematic` (Litematica), `.nbt` (structure
-  block) and `.mcstructure` (Bedrock, beta).
+  block) and `.mcstructure` (Bedrock, beta). There's always a **⬇ .schem** button under the 3D view, and every
+  build in the gallery has a download button, so you can download any build again whenever you like.
+- **One-click updates.** When a new release is on GitHub, an **Update** button appears (and Flint lets you know).
+  BlockForge downloads the new installer, checks its SHA-256 checksum, installs it and reopens itself.
 - **Claude usage tracking.** See the tokens, web searches, time and estimated cost for each build, plus
   today / 7-day / all-time totals.
 - **Make it yours.** Theme, accent colour, corner style, font, UI size, 3D background, your own block palettes,
@@ -66,6 +71,7 @@ Then you download it in the format you need. There's no paywall and no per-downl
 3. Describe a build and click **Generate build**. A researched build usually takes 2–5 minutes.
 
 Requirements: Windows 10/11 (64-bit) with the Microsoft Edge WebView2 runtime (Windows 11 already has it),
+about 300 MB of disk space,
 and an internet connection to generate builds. Your builds and settings are saved in `%LOCALAPPDATA%\BlockForge`.
 Uninstalling the app keeps them.
 
@@ -120,8 +126,12 @@ installer/        PyInstaller spec + WiX installer source
 
 ```bat
 pip install -r requirements.txt
+python installer\get_voice.py
 python blockforge\launcher.pyw
 ```
+
+`get_voice.py` downloads Flint's HD voice (the Piper engine and the "Joe" voice, about 85 MB) into
+`blockforge/voice/`. It isn't stored in the repo because the files are too big.
 
 To build the installer you also need the [WiX Toolset](https://wixtoolset.org/) v5 and its Util extension:
 
@@ -131,8 +141,9 @@ wix extension add -g WixToolset.Util.wixext/5.0.2
 installer\build_msi.bat
 ```
 
-Bump `VERSION` in `installer/build_msi.bat` for each release. Installing a newer MSI replaces the old version.
-The installer never restarts your PC.
+To make a release: bump `VERSION` in `blockforge/version.py`, run `installer\build_msi.bat`, then publish a GitHub
+release tagged `v<version>` with `BlockForge-<version>.msi` attached. Installed copies will offer the update
+automatically. Installing a newer MSI replaces the old version, and the installer never restarts your PC.
 
 ## Notes
 
@@ -141,3 +152,6 @@ The installer never restarts your PC.
 - The Bedrock `.mcstructure` export is a best effort. Some block states may differ on Bedrock.
 - BlockForge is not an official Minecraft product and is not approved by or associated with Mojang or Microsoft.
 - The 3D viewer uses [three.js](https://threejs.org/) (MIT licence).
+- Flint's HD voice uses [Piper](https://github.com/rhasspy/piper) (MIT), [eSpeak NG](https://github.com/espeak-ng/espeak-ng)
+  (GPL-3.0) and the [en_US "Joe" voice](https://huggingface.co/rhasspy/piper-voices/tree/v1.0.0/en/en_US/joe/medium)
+  (CC0 dataset). See [blockforge/voice/LICENSES.md](blockforge/voice/LICENSES.md).

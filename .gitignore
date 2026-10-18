@@ -1,6 +1,9 @@
 __pycache__/
 *.pyc
 blockforge/data/
+blockforge/voice/piper/
+blockforge/voice/*.onnx
+blockforge/voice/*.onnx.json
 installer/build/
 installer/dist/
 installer/*.msi
