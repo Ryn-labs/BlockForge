@@ -1,0 +1,257 @@
+"""BlockForge local server: serves the app UI and its JSON API on http://127.0.0.1:8765"""
+import base64
+import json
+import mimetypes
+import re
+import os
+import subprocess
+import sys
+import threading
+import time
+import traceback
+import uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import unquote, urlparse
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from blockforge import engine, exporters, prompts, sandbox, store  # noqa: E402
+
+PORT = int(os.environ.get("BLOCKFORGE_PORT", "8765"))
+STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+JOBS = {}
+
+
+def start_job(fn, **kw):
+    jid = uuid.uuid4().hex[:10]
+    job = {"id": jid, "status": "running", "log": [], "build": None, "error": None, "started": time.time()}
+    JOBS[jid] = job
+
+    def log(msg):
+        job["log"].append({"t": round(time.time() - job["started"], 1), "msg": msg})
+
+    def run():
+        try:
+            job["build"] = fn(log=log, **kw)
+            job["status"] = "done"
+        except (engine.EngineError, sandbox.ScriptError) as e:
+            job["error"] = str(e)
+            job["status"] = "error"
+        except Exception as e:                       # noqa: BLE001
+            traceback.print_exc()
+            job["error"] = f"{type(e).__name__}: {e}"
+            job["status"] = "error"
+    threading.Thread(target=run, daemon=True).start()
+    return job
+
+
+def run_script_job(code, title="Script build", parent_id=None, log=print):
+    log("Running your script...")
+    blocks, meta = sandbox.run_safe(code)
+    prompt = store.get_meta(parent_id).get("prompt", "") if parent_id else ""
+    return store.save_build(blocks, meta.get("name") or title, prompt=prompt, code=code, source="script",
+                            parent=parent_id, description=meta.get("description") or "")
+
+
+class H(BaseHTTPRequestHandler):
+    server_version = "BlockForge/1.0"
+
+    def log_message(self, fmt, *a):
+        pass
+
+    # -------------------------------------------------- helpers
+    def send(self, code, body=b"", ctype="application/json", headers=None):
+        if isinstance(body, (dict, list)):
+            body = json.dumps(body).encode()
+        elif isinstance(body, str):
+            body = body.encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        return self.rfile.read(n) if n else b""
+
+    def json_body(self):
+        try:
+            return json.loads(self.body() or b"{}")
+        except ValueError:
+            return {}
+
+    def err(self, code, msg):
+        self.send(code, {"error": msg})
+
+    def _local_only(self):
+        host = (self.headers.get("Host") or "").split(":")[0]
+        origin = self.headers.get("Origin")
+        if host not in ("127.0.0.1", "localhost") or (origin and urlparse(origin).hostname not in ("127.0.0.1", "localhost")):
+            self.err(403, "forbidden")
+            return False
+        return True
+
+    # -------------------------------------------------- routes
+    def do_GET(self):
+        if not self._local_only():
+            return
+        path = unquote(urlparse(self.path).path)
+        parts = [p for p in path.split("/") if p]
+        try:
+            if not parts or parts[0] != "api":
+                return self.static(path)
+            if parts[1:] == ["builds"]:
+                return self.send(200, store.list_builds())
+            if parts[1:] == ["status"]:
+                s = store.load_settings()
+                key = s.get("api_key") or ""
+                return self.send(200, {
+                    "settings": {**s, "api_key": ("•" * 8 + key[-4:]) if key else ""},
+                    "has_api_key": bool(key or os.environ.get("ANTHROPIC_API_KEY")),
+                    "claude_code": engine.claude_status(),
+                    "models": engine.MODELS, "formats": {k: v[0] for k, v in exporters.FORMATS.items()},
+                    "default_sites": prompts.DEFAULT_SITES, "palettes": list(prompts.PALETTES),
+                })
+            if parts[1:] == ["usage"]:
+                return self.send(200, store.usage_summary())
+            if parts[1] == "jobs" and len(parts) == 3:
+                job = JOBS.get(parts[2])
+                return self.send(200, job) if job else self.err(404, "no such job")
+            if parts[1] == "builds" and len(parts) >= 3:
+                bid = parts[2]
+                if len(parts) == 3:
+                    return self.send(200, store.get_meta(bid))
+                if parts[3] == "blocks":
+                    return self.send(200, store.get_blocks_raw(bid))
+                if parts[3] == "code":
+                    return self.send(200, {"code": store.get_code(bid)})
+                if parts[3] == "file" and len(parts) == 5:
+                    p = store.file_path(bid, parts[4])
+                    with open(p, "rb") as f:
+                        return self.send(200, f.read(), mimetypes.guess_type(p)[0] or "application/octet-stream")
+                if parts[3] == "export" and len(parts) == 5:
+                    fmt = parts[4]
+                    if fmt not in exporters.FORMATS:
+                        return self.err(400, "unknown format")
+                    p = store.export_path(bid, fmt)
+                    with open(p, "rb") as f:
+                        return self.send(200, f.read(), "application/octet-stream",
+                                         {"Content-Disposition": f'attachment; filename="{os.path.basename(p)}"'})
+            self.err(404, "not found")
+        except KeyError:
+            self.err(404, "not found")
+        except Exception as e:                       # noqa: BLE001
+            traceback.print_exc()
+            self.err(500, str(e))
+
+    def do_POST(self):
+        if not self._local_only():
+            return
+        parts = [p for p in unquote(urlparse(self.path).path).split("/") if p]
+        try:
+            if parts[:1] != ["api"]:
+                return self.err(404, "not found")
+            route = parts[1:]
+            if route == ["generate"]:
+                b = self.json_body()
+                image = None
+                if b.get("image"):
+                    head, data = b["image"].split(",", 1)
+                    image = (base64.b64decode(data), head.split(";")[0].split(":")[1])
+                if not (b.get("prompt") or "").strip() and not image:
+                    return self.err(400, "Describe a build or attach an image.")
+                job = start_job(engine.generate, prompt=b.get("prompt", ""), size=b.get("size", "medium"),
+                                palette=b.get("palette", "auto"), model=b.get("model"), engine=b.get("engine"),
+                                image=image, parent_id=b.get("parent_id"), research=b.get("research"))
+                return self.send(200, {"job": job["id"]})
+            if route == ["run"]:
+                b = self.json_body()
+                job = start_job(run_script_job, code=b.get("code", ""), title=b.get("title") or "Script build",
+                                parent_id=b.get("parent_id"))
+                return self.send(200, {"job": job["id"]})
+            if route == ["import"]:
+                name = unquote(self.headers.get("X-Filename") or "import.schem")
+                blocks = exporters.import_file(self.body())
+                if not blocks:
+                    return self.err(400, "That file has no blocks in it.")
+                meta = store.save_build(blocks, os.path.splitext(name)[0], source="import")
+                return self.send(200, meta)
+            if route == ["settings"]:
+                b = self.json_body()
+                if "api_key" in b and b["api_key"].startswith("•"):
+                    b.pop("api_key")
+                if "research_sites" in b:
+                    sites = [re.sub(r"^https?://(www\.)?", "", str(s).strip()).strip("/") for s in b["research_sites"] or []]
+                    b["research_sites"] = [s for s in sites if s][:20] or None
+                if "custom_palettes" in b:
+                    b["custom_palettes"] = [{"name": str(p.get("name", ""))[:40], "description": str(p.get("description", ""))[:400]}
+                                            for p in b["custom_palettes"] or [] if str(p.get("name", "")).strip()][:30]
+                for k in ("ui", "guide"):
+                    if k in b and not isinstance(b[k], dict):
+                        b.pop(k)
+                return self.send(200, {"ok": True, "engine": store.save_settings(b)["engine"]})
+            if route == ["login"]:
+                engine.open_claude_login()
+                return self.send(200, {"ok": True})
+            if len(route) == 3 and route[0] == "builds":
+                bid, action = route[1], route[2]
+                if action == "rename":
+                    t = (self.json_body().get("title") or "").strip()[:80]
+                    return self.send(200, store.update_meta(bid, title=t or "Untitled build"))
+                if action == "thumb":
+                    data = self.json_body().get("image", "")
+                    if not data.startswith("data:image/jpeg;base64,"):
+                        return self.err(400, "bad image")
+                    with open(os.path.join(store._dir(bid), "thumb.jpg"), "wb") as f:
+                        f.write(base64.b64decode(data.split(",", 1)[1]))
+                    m = store.update_meta(bid, has_thumb=True, thumb_v=int(time.time()))
+                    return self.send(200, {"ok": True, "thumb_v": m["thumb_v"]})
+                if action == "reveal":
+                    fmt = self.json_body().get("format", "schem")
+                    p = store.export_path(bid, fmt)
+                    subprocess.Popen(["explorer", "/select,", os.path.normpath(p)])
+                    return self.send(200, {"ok": True, "path": p})
+            self.err(404, "not found")
+        except KeyError:
+            self.err(404, "not found")
+        except (ValueError, engine.EngineError) as e:
+            self.err(400, str(e))
+        except Exception as e:                       # noqa: BLE001
+            traceback.print_exc()
+            self.err(500, str(e))
+
+    def do_DELETE(self):
+        if not self._local_only():
+            return
+        parts = [p for p in unquote(urlparse(self.path).path).split("/") if p]
+        if len(parts) == 3 and parts[:2] == ["api", "builds"]:
+            try:
+                store.delete_build(parts[2])
+                return self.send(200, {"ok": True})
+            except (KeyError, OSError):
+                return self.err(404, "not found")
+        self.err(404, "not found")
+
+    def static(self, path):
+        rel = "index.html" if path in ("", "/") else path.lstrip("/")
+        p = os.path.normpath(os.path.join(STATIC, rel))
+        if not p.startswith(STATIC) or not os.path.isfile(p):
+            return self.err(404, "not found")
+        with open(p, "rb") as f:
+            ctype = mimetypes.guess_type(p)[0] or "application/octet-stream"
+            if p.endswith(".js"):
+                ctype = "text/javascript"
+            self.send(200, f.read(), ctype)
+
+
+def main():
+    srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
+    print(f"BlockForge running at http://127.0.0.1:{PORT}")
+    srv.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
