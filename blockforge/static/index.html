@@ -17,7 +17,7 @@
 <header class="top">
   <div class="brand"><img src="icon.svg" alt=""><span>BlockForge</span><em>AI Minecraft build generator</em></div>
   <div class="top-right">
-    <button id="engine-pill" class="pill" title="How BlockForge talks to Claude"><span class="dot"></span><span id="engine-text">Checking Claude…</span></button>
+    <button id="engine-pill" class="pill" title="Which AI builds for you"><span class="dot"></span><span id="engine-text">Checking Claude…</span></button>
     <button id="update-btn" class="btn update" hidden title="A newer BlockForge is on GitHub">⬆ Update</button>
     <button id="usage-btn" class="btn ghost" title="How much Claude has used">Usage</button>
     <button id="theme-btn" class="icon-btn" title="Light / dark">◐</button>
@@ -54,6 +54,11 @@
           </select></div>
         <div class="field"><label for="model">Model</label><select id="model"></select></div>
       </div>
+      <label class="toggle" title="Adds BlockForge's redstone guide and checker so mechanisms actually work">
+        <input type="checkbox" id="redstone">
+        <span class="switch"></span>
+        <span><b>Working redstone</b><small id="redstone-note" class="muted">Turns on by itself for doors, farms, sorters…</small></span>
+      </label>
       <label class="toggle" title="Claude looks at real builds on schematic sites before designing yours">
         <input type="checkbox" id="research" checked>
         <span class="switch"></span>
@@ -149,21 +154,32 @@
   <form method="dialog" class="settings-form">
     <h2>Settings</h2>
     <div class="tabs set-tabs">
-      <button type="button" data-stab="claude" class="on">Claude</button><button type="button" data-stab="research">Research</button>
+      <button type="button" data-stab="claude" class="on">AI</button><button type="button" data-stab="research">Research</button>
       <button type="button" data-stab="look">Appearance</button><button type="button" data-stab="guide">Guide</button><button type="button" data-stab="defaults">Defaults &amp; palettes</button>
     </div>
 
     <div class="stab" id="stab-claude">
-    <h3>How BlockForge talks to Claude</h3>
-    <label class="radio"><input type="radio" name="engine" value="claude_code">
-      <div><b>My Claude account (Claude Code)</b><span>Uses the Claude Code program on this PC and your Claude subscription. No API key needed.</span>
-        <div class="status" id="cc-status">Checking…</div>
-        <div class="row-btns"><button type="button" class="btn small" id="cc-login">Sign in to Claude</button><button type="button" class="btn ghost small" id="cc-refresh">Check again</button></div>
-      </div></label>
-    <label class="radio"><input type="radio" name="engine" value="api">
-      <div><b>Anthropic API key</b><span>Pay-as-you-go from console.anthropic.com. The key stays on this PC.</span>
-        <input id="api-key" type="password" placeholder="sk-ant-…" autocomplete="off">
-      </div></label>
+    <h3>Which AI builds for you</h3>
+    <select id="engine-select" class="engine-select"></select>
+    <div class="radio eng-panel" id="eng-claude_code"><div>
+      <b>My Claude account (Claude Code)</b><span>Uses the Claude Code program on this PC and your Claude subscription. No API key needed. Best quality, and the only option with online research.</span>
+      <div class="status" id="cc-status">Checking…</div>
+      <div class="row-btns"><button type="button" class="btn small" id="cc-login">Sign in to Claude</button><button type="button" class="btn ghost small" id="cc-refresh">Check again</button></div>
+    </div></div>
+    <div class="radio eng-panel" id="eng-api" hidden><div>
+      <b>Claude with an Anthropic API key</b><span>Pay-as-you-go from console.anthropic.com. The key stays on this PC. Online research works with this too.</span>
+      <input id="api-key" type="password" placeholder="sk-ant-…" autocomplete="off">
+    </div></div>
+    <div class="radio eng-panel" id="eng-provider" hidden><div>
+      <b id="p-title"></b><span id="p-desc"></span>
+      <div class="field" id="p-key-row"><label for="p-key">API key <a id="p-keylink" class="link-btn small" target="_blank" rel="noopener">Get a key</a></label>
+        <input id="p-key" type="password" autocomplete="off"></div>
+      <div class="field" id="p-base-row"><label for="p-base">API address</label><input id="p-base" class="search" spellcheck="false"></div>
+      <div class="field"><label for="p-model">Model</label>
+        <div class="row-btns"><input id="p-model" class="search" list="p-models" spellcheck="false" placeholder="Click “Load models” or type a model name"><datalist id="p-models"></datalist>
+        <button type="button" class="btn small" id="p-load">Load models</button></div></div>
+      <div class="status" id="p-status" hidden></div>
+    </div></div>
     <h3>About &amp; updates</h3>
     <div class="about-row"><span>BlockForge <b id="about-version"></b></span><span id="about-update" class="muted small"></span>
       <button type="button" class="btn small" id="check-update">Check for updates</button></div>
@@ -238,7 +254,7 @@
 
     <div class="stab" id="stab-defaults" hidden>
       <div class="row2">
-        <div class="field"><label for="default-model">Default model</label><select id="default-model"></select></div>
+        <div class="field"><label for="default-model">Default Claude model</label><select id="default-model"></select></div>
         <div class="field"><label for="default-size">Default size</label>
           <select id="default-size"><option value="tiny">Tiny</option><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option><option value="huge">Huge</option></select></div>
       </div>

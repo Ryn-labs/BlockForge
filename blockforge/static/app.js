@@ -141,15 +141,10 @@ let firstStatus = true;
 async function loadStatus() {
   const s = await api('status');
   state.status = s;
-  const sel = $('#model'), def = $('#default-model');
-  if (!sel.options.length) {
-    for (const [id, label] of Object.entries(s.models)) {
-      sel.add(new Option(label.split(' (')[0], id));
-      def.add(new Option(label, id));
-    }
-  }
-  sel.value = sel.dataset.touched ? sel.value : s.settings.model;
+  const def = $('#default-model');
+  if (!def.options.length) for (const [id, label] of Object.entries(s.models)) def.add(new Option(label, id));
   def.value = s.settings.model;
+  fillModelMenu(s);
   fillPaletteSelects(s);
   $('#research-sites').textContent = sitesLabel(s);
   if (firstStatus) {
@@ -174,7 +169,12 @@ async function loadStatus() {
   }
   const pill = $('#engine-pill'), txt = $('#engine-text');
   const cc = s.claude_code;
-  if (s.settings.engine === 'api') {
+  const pv = s.providers?.[s.settings.engine];
+  if (pv) {
+    const ready = (pv.key_set || !pv.key) && pv.model;
+    pill.className = 'pill ' + (ready ? 'ok' : 'warn');
+    txt.textContent = ready ? `${pv.name.split(' (')[0]} · ${pv.model}` : `${pv.name.split(' (')[0]}: finish setup`;
+  } else if (s.settings.engine === 'api') {
     pill.className = 'pill ' + (s.has_api_key ? 'ok' : 'warn');
     txt.textContent = s.has_api_key ? 'Claude · API key' : 'API key needed';
   } else {
@@ -186,7 +186,6 @@ async function loadStatus() {
   st.textContent = !cc.found ? 'Claude Code isn’t installed on this PC.'
     : cc.logged_in ? `Signed in${cc.account ? ' as ' + cc.account : ''} (${cc.method || 'Claude account'}).`
     : 'Found Claude Code, but it isn’t signed in yet. Click “Sign in to Claude”, finish in the window that opens, then “Check again”.';
-  for (const r of document.querySelectorAll('input[name=engine]')) r.checked = r.value === s.settings.engine;
   $('#api-key').value = s.settings.api_key || '';
 }
 
@@ -201,6 +200,7 @@ function openSettings(tab = 'claude') {
   }
   savedUI = { ...ui };
   savedGuide = { ...gcfg, look: { ...gcfg.look } };
+  if (s) fillEngineForm(s);
   fillLookForm();
   fillGuideForm();
   showSettingsTab(tab);
@@ -221,14 +221,16 @@ let savedUI = null;
 $('#settings').addEventListener('close', () => { if (savedUI) { ui = savedUI; savedUI = null; applyUI(); } });
 $('#save-settings').onclick = async e => {
   e.preventDefault();
-  const engine = document.querySelector('input[name=engine]:checked')?.value || 'claude_code';
+  const engine = $('#engine-select').value || 'claude_code';
+  rememberProvider();
   const sites = $('#set-sites').value.split(/\n|,/).map(x => x.trim()).filter(Boolean);
   const custom_palettes = [...document.querySelectorAll('.palette-row')].map(r => ({
     name: r.querySelector('.pn').value.trim(), description: r.querySelector('.pd').value.trim() })).filter(p => p.name && p.description);
   const research = $('#set-research').checked;
   await post('settings', { engine, api_key: $('#api-key').value.trim(), model: $('#default-model').value,
     research, research_sites: sites, default_size: $('#default-size').value, default_palette: $('#default-palette').value,
-    custom_palettes, ui, guide: (gcfg = readGuideForm()) });
+    custom_palettes, ui, guide: (gcfg = readGuideForm()), providers: provEdits });
+  provEdits = {};
   $('#research').checked = research;
   savedUI = null; savedGuide = null;
   guide.apply(gcfg);
@@ -320,7 +322,8 @@ async function generate() {
   if (!prompt && !state.image) return toast('Describe a build or add an image first', true);
   if (state.job) return toast('Already building, hang on');
   try {
-    const { job } = await post('generate', { prompt, image: state.image, size: state.size, palette: $('#palette').value, model: $('#model').value, research: $('#research').checked });
+    const { job } = await post('generate', { prompt, image: state.image, size: state.size, palette: $('#palette').value, model: $('#model').value, research: $('#research').checked,
+      redstone: $('#redstone').checked });
     watchJob(job, 'Generating your build…', prompt || 'your picture');
   } catch (e) { toast(e.message, true); }
 }
@@ -402,6 +405,7 @@ window.blockforge.openBuild = (...a) => openBuild(...a);
 async function openBuild(id, fresh = false) {
   const [meta, data, code] = await Promise.all([api('builds/' + id), api(`builds/${id}/blocks`), api(`builds/${id}/code`)]);
   state.current = meta;
+  document.querySelector('#warn-list')?.remove();
   $('#details').scrollTop = 0;              // always start at the top so Download is in view
   $('#empty').hidden = true; $('#toolbar').hidden = false; $('#details').hidden = false;
   document.querySelector('.layout').classList.remove('no-details');
@@ -415,6 +419,13 @@ async function openBuild(id, fresh = false) {
     [srcName, (meta.model || '').replace('claude-', '') || 'source'], [date.split(',')[0], 'created'],
   ].map(([b, s]) => `<div class="stat"><b>${esc(b)}</b><span>${esc(s)}</span></div>`).join('');
   $('#prompt-text').textContent = meta.prompt || meta.description || '';
+  if (meta.redstone) {
+    $('#prompt-text').insertAdjacentHTML('beforeend', '<span class="redstone-badge">REDSTONE</span>');
+    if ((meta.warnings || []).length) $('#prompt-text').insertAdjacentHTML('afterend',
+      `<ul class="warn-list" id="warn-list">${meta.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul>`);
+  }
+  if (meta.description && meta.redstone && meta.description !== meta.prompt)
+    $('#prompt-text').insertAdjacentHTML('beforeend', `<br><br>${esc(meta.description)}`);
   const parent = meta.parent && state.builds.find(b => b.id === meta.parent);
   $('#parent-link').innerHTML = parent ? `Edited from <a href="#" class="link-btn small" data-p="${parent.id}">${esc(parent.title)}</a>` : '';
   $('#parent-link').querySelector('a')?.addEventListener('click', e => { e.preventDefault(); openBuild(parent.id); });
@@ -648,6 +659,108 @@ $('#g-reset').onclick = () => { gcfg = { ...GUIDE_DEFAULTS, toured: true }; fill
 $('#settings').addEventListener('close', () => { if (savedGuide) { gcfg = savedGuide; savedGuide = null; guide.apply(gcfg); } });
 
 
+
+// ---------------------------------------------------------------- choosing the AI (Settings > AI)
+let provEdits = {}, editingProvider = null;
+
+function fillModelMenu(s) {
+  const sel = $('#model'), keep = sel.dataset.touched ? sel.value : null;
+  sel.innerHTML = '';
+  const pv = s.providers?.[s.settings.engine];
+  if (pv) {
+    const list = [...new Set([pv.model, ...(pv.models || [])].filter(Boolean))];
+    if (!list.length) sel.add(new Option('Pick a model in Settings', ''));
+    for (const m of list) sel.add(new Option(m.length > 34 ? m.slice(0, 33) + '…' : m, m));
+    sel.value = keep && list.includes(keep) ? keep : (pv.model || list[0] || '');
+  } else {
+    for (const [id, label] of Object.entries(s.models)) sel.add(new Option(label.split(' (')[0], id));
+    sel.value = keep && s.models[keep] ? keep : s.settings.model;
+  }
+  // research only works with Claude
+  const claude = !pv;
+  $('#research').disabled = !claude;
+  $('#research').closest('.toggle').style.opacity = claude ? '' : '.55';
+  $('#research').closest('.toggle').title = claude ? 'Claude looks at real builds on schematic sites before designing yours'
+    : 'Online research needs Claude. Switch to Claude in Settings → AI to use it.';
+}
+
+function fillEngineForm(s) {
+  const sel = $('#engine-select');
+  sel.innerHTML = '';
+  const g1 = document.createElement('optgroup'); g1.label = 'Claude';
+  g1.appendChild(new Option('Claude: my Claude account (recommended)', 'claude_code'));
+  g1.appendChild(new Option('Claude: Anthropic API key', 'api'));
+  const g2 = document.createElement('optgroup'); g2.label = 'Other AIs';
+  const g3 = document.createElement('optgroup'); g3.label = 'On this PC (free)';
+  for (const [pid, p] of Object.entries(s.providers || {})) (p.local ? g3 : g2).appendChild(new Option(p.name, pid));
+  sel.append(g1, g2, g3);
+  sel.value = s.settings.engine || 'claude_code';
+  showEnginePanel();
+}
+
+function rememberProvider() {
+  if (!editingProvider) return;
+  const e = provEdits[editingProvider] = provEdits[editingProvider] || {};
+  const key = $('#p-key').value.trim();
+  if (key) e.api_key = key;
+  e.base_url = $('#p-base').value.trim();
+  e.model = $('#p-model').value.trim();
+}
+
+function showEnginePanel() {
+  rememberProvider();
+  const v = $('#engine-select').value, s = state.status, p = s.providers?.[v];
+  $('#eng-claude_code').hidden = v !== 'claude_code';
+  $('#eng-api').hidden = v !== 'api';
+  $('#eng-provider').hidden = !p;
+  editingProvider = p ? v : null;
+  if (!p) return;
+  const e = provEdits[v] || {};
+  $('#p-title').textContent = p.name;
+  $('#p-desc').textContent = p.local
+    ? `Runs a model on your own PC through ${p.name.split(' (')[0]}: free and private, but much slower and simpler builds than Claude. Start its local server first.`
+    : `Uses your own ${p.name.split(' (')[0]} account. The key stays on this PC. Online research isn't available with this AI.`;
+  $('#p-key-row').hidden = p.key === false;
+  $('#p-key').value = e.api_key || '';
+  $('#p-key').placeholder = p.key_set ? '•••••••• saved (type to replace)' : (p.key === null ? 'Optional' : 'Paste your API key');
+  $('#p-keylink').hidden = !p.key_url; if (p.key_url) $('#p-keylink').href = p.key_url;
+  $('#p-base-row').hidden = !(p.local || v === 'custom');
+  $('#p-base').value = e.base_url ?? p.base_url ?? p.base ?? '';
+  $('#p-base').placeholder = p.base || 'https://example.com/v1';
+  $('#p-model').value = e.model ?? p.model ?? '';
+  $('#p-models').innerHTML = (p.models || []).map(m => `<option value="${esc(m)}">`).join('');
+  $('#p-status').hidden = true;
+}
+$('#engine-select').onchange = showEnginePanel;
+$('#p-load').onclick = async () => {
+  const pid = editingProvider; if (!pid) return;
+  rememberProvider();
+  const st = $('#p-status');
+  st.hidden = false; st.className = 'status'; st.textContent = 'Loading models…';
+  try {
+    await post('settings', { providers: { [pid]: provEdits[pid] } });   // save the key/address first
+    delete provEdits[pid].api_key;
+    const { models } = await api('models?provider=' + encodeURIComponent(pid));
+    await loadStatus();
+    $('#p-models').innerHTML = models.map(m => `<option value="${esc(m)}">`).join('');
+    if (!$('#p-model').value && models.length) $('#p-model').value = models[0];
+    $('#p-key').value = ''; $('#p-key').placeholder = '•••••••• saved (type to replace)';
+    st.className = 'status ok'; st.textContent = `Found ${models.length} model${models.length === 1 ? '' : 's'}. Pick one above, then Save.`;
+  } catch (err) { st.className = 'status warn'; st.textContent = err.message; }
+};
+
+// ---------------------------------------------------------------- redstone switch: follows the prompt until you flip it
+const REDSTONE_RE = /redstone|piston|observer|repeater|comparator|hopper|dropper|dispenser|lever|pressure plate|tnt|cannon|\bfarm\b|sort(er|ing)|auto(matic|mated)?\b|contraption|circuit|clock|elevator|flying machine|minecart|\brails?\b|hidden door|secret door|piston door|\btrap\b|lamp|logic gate|t flip|storage system|smelter|drawbridge/i;
+let redstoneTouched = false;
+$('#redstone').onchange = () => { redstoneTouched = true; };
+$('#prompt').addEventListener('input', () => {
+  if (redstoneTouched) return;
+  const on = REDSTONE_RE.test($('#prompt').value);
+  if (on !== $('#redstone').checked) {
+    $('#redstone').checked = on;
+    $('#redstone-note').textContent = on ? 'On: this sounds like a redstone build' : 'Turns on by itself for doors, farms, sorters…';
+  }
+});
 // ---------------------------------------------------------------- downloads (always reachable)
 async function downloadBuild(id, fmt = 'schem') {
   if (!id) return toast('Open a build first', true);

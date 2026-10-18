@@ -76,6 +76,10 @@ const FIXED = {
   muddy_mangrove_roots: 0x463b2d, pale_moss_block: 0x6b746a, pale_moss_carpet: 0x6b746a, creaking_heart: 0x4f4642,
   heavy_core: 0x50525a, trial_spawner: 0x2f4552, vault: 0x3a4448, spawner: 0x2a3a48, end_rod: 0xf0e8e0,
   conduit: 0x9a8a6a, dragon_egg: 0x0c0910, player_head: 0x6e4b30, skeleton_skull: 0xc8c8c8, armor_stand: 0x9a7a4a,
+  redstone_wire: 0xb01208, repeater: 0xa9a49e, comparator: 0xb3aca5, observer: 0x5f5f5f, piston: 0x9d8a68,
+  sticky_piston: 0x7fa060, redstone_lamp: 0x8a5a33, hopper: 0x3e3e42, dropper: 0x707070, dispenser: 0x6d6d6d,
+  daylight_detector: 0xc2ad86, lever: 0x6e5a3c, tripwire_hook: 0x8a7b6a, detector_rail: 0x8a7563, activator_rail: 0x8a6a5e,
+  redstone_ore: 0x8a6b6b, note_block: 0x58392a, sculk_sensor: 0x0d5a63, crafter: 0x6e6262,
 };
 const LEAF = { oak: 0x4a7a26, spruce: 0x3d5e3d, birch: 0x6a8b3e, jungle: 0x3f8a1e, acacia: 0x5f8a1e,
   dark_oak: 0x3c6a1e, mangrove: 0x5a8a2a };
@@ -168,6 +172,29 @@ export function shapeOf(state) {
   if (name.includes('glass') && !name.includes('pane')) return { kind: 'glass' };
   if (name === 'ice' || name === 'slime_block' || name === 'honey_block') return { kind: 'glass' };
   if (name === 'barrier' || name === 'structure_void' || name === 'light') return { kind: 'skip' };
+  if (name === 'redstone_wire') {
+    const t = 0.0625, w = 0.19, boxes = [[0.5 - w / 2, 0, 0.5 - w / 2, 0.5 + w / 2, t, 0.5 + w / 2]];
+    if (p.north && p.north !== 'none') boxes.push([0.5 - w / 2, 0, 0, 0.5 + w / 2, t, 0.5]);
+    if (p.south && p.south !== 'none') boxes.push([0.5 - w / 2, 0, 0.5, 0.5 + w / 2, t, 1]);
+    if (p.west && p.west !== 'none') boxes.push([0, 0, 0.5 - w / 2, 0.5, t, 0.5 + w / 2]);
+    if (p.east && p.east !== 'none') boxes.push([0.5, 0, 0.5 - w / 2, 1, t, 0.5 + w / 2]);
+    if (p.north === 'up') boxes.push([0.5 - w / 2, 0, 0, 0.5 + w / 2, 1, t]);
+    if (p.south === 'up') boxes.push([0.5 - w / 2, 0, 1 - t, 0.5 + w / 2, 1, 1]);
+    if (p.west === 'up') boxes.push([0, 0, 0.5 - w / 2, t, 1, 0.5 + w / 2]);
+    if (p.east === 'up') boxes.push([1 - t, 0, 0.5 - w / 2, 1, 1, 0.5 + w / 2]);
+    return { kind: 'boxes', boxes };
+  }
+  if (name === 'repeater' || name === 'comparator') {
+    // base slab plus two little torches lined up along the signal direction
+    const ns = (p.facing === 'north' || p.facing === 'south');
+    const a = ns ? [[.44, .125, .2, .56, .45, .32], [.44, .125, .68, .56, .45, .8]] : [[.2, .125, .44, .32, .45, .56], [.68, .125, .44, .8, .45, .56]];
+    return { kind: 'boxes', boxes: [[0, 0, 0, 1, .125, 1], ...a] };
+  }
+  if (name === 'daylight_detector') return { kind: 'boxes', boxes: [[0, 0, 0, 1, .375, 1]] };
+  if (name === 'lever') return { kind: 'boxes', boxes: [[.3, 0, .25, .7, .2, .75], [.45, .1, .45, .55, .65, .55]] };
+  if (name === 'hopper') return { kind: 'boxes', boxes: [[0, .625, 0, 1, 1, 1], [.25, .25, .25, .75, .625, .75], [.375, 0, .375, .625, .25, .625]] };
+  if (name === 'tripwire_hook') return { kind: 'boxes', boxes: [[.4, .3, .4, .6, .8, .6]] };
+  if (name === 'tripwire') return { kind: 'boxes', boxes: [[0, .05, .47, 1, .08, .53]] };
   if (name.endsWith('_slab')) {
     if (p.type === 'double') return { kind: 'full' };
     return { kind: 'boxes', boxes: [p.type === 'top' ? [0, .5, 0, 1, 1, 1] : [0, 0, 0, 1, .5, 1]] };
