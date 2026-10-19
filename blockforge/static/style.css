@@ -324,3 +324,18 @@ input[type=range] { accent-color: var(--accent); }
 .materials li { cursor: pointer; border-radius: 6px; }
 .materials li:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .materials li.on { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* ---- mods ---- */
+.grow { flex: 1; min-width: 0; }
+.mod-list { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 10px; }
+.mod-list.tall { max-height: 260px; overflow: auto; }
+.mod-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--input); font-size: 13px; }
+.mod-row.on { border-color: var(--accent); }
+.mod-blocks { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; max-height: 130px; overflow: auto; }
+.mod-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; background: var(--input); }
+.mod-chip i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.mod-badge { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.fix-list { margin: 8px 0; font-size: 12.5px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--input); }
+.fix-list summary { cursor: pointer; font-weight: 600; }
+.fix-list ul { margin: 6px 0 2px 16px; padding: 0; }
+#mod-path, #mod-search { padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--input); color: inherit; }

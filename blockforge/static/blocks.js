@@ -85,8 +85,16 @@ const LEAF = { oak: 0x4a7a26, spruce: 0x3d5e3d, birch: 0x6a8b3e, jungle: 0x3f8a1
   dark_oak: 0x3c6a1e, mangrove: 0x5a8a2a };
 
 const cache = new Map();
+// Colours of modded blocks, read from the mods' own textures by the server ({'create:brass_casing': '#b98f4a'})
+const modColors = {};
+export function setModColors(map) { Object.assign(modColors, map || {}); }
+export const isModded = name => name.includes(':') && !name.startsWith('minecraft:');
+const bare = name => name.replace(/^[a-z0-9_.-]+:/, '');            // 'create:brass_slab' -> 'brass_slab' (shapes/colour guesses)
+
 export function blockColor(state) {
-  const name = state.split('[')[0].replace('minecraft:', '');
+  const full = state.split('[')[0].replace('minecraft:', '');
+  if (modColors[full]) return parseInt(modColors[full].slice(1), 16);
+  const name = bare(full);
   if (cache.has(name)) return cache.get(name);
   const c = computeColor(name);
   cache.set(name, c);
@@ -165,7 +173,7 @@ export function parseProps(state) {
 }
 
 export function shapeOf(state) {
-  const name = state.split('[')[0].replace('minecraft:', '');
+  const name = bare(state.split('[')[0].replace('minecraft:', ''));
   const p = parseProps(state);
   if (name === 'water' || name === 'bubble_column') return { kind: 'water' };
   if (name === 'lava') return { kind: 'full' };

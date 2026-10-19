@@ -1,5 +1,5 @@
 import { Viewer } from './viewer.js';
-import { blockColor } from './blocks.js';
+import { blockColor, setModColors, isModded } from './blocks.js';
 import { Guide, GUIDE_DEFAULTS } from './guide.js';
 import { LOOK_DEFAULTS, HAIR_STYLES, HEADWEAR, OUTFITS, ANIMATIONS } from './character.js';
 
@@ -147,6 +147,7 @@ async function loadStatus() {
   fillModelMenu(s);
   fillPaletteSelects(s);
   $('#research-sites').textContent = sitesLabel(s);
+  refreshModsToggle();
   if (firstStatus) {
     firstStatus = false;
     $('#research').checked = s.settings.research !== false;
@@ -197,6 +198,7 @@ async function loadStatus() {
 function openSettings(tab = 'claude') {
   const s = state.status;
   if (s) {
+    initModsTab();
     $('#set-research').checked = s.settings.research !== false;
     $('#set-sites').value = (s.settings.research_sites || s.default_sites).join('\n');
     $('#default-size').value = s.settings.default_size || 'medium';
@@ -233,7 +235,7 @@ $('#save-settings').onclick = async e => {
     name: r.querySelector('.pn').value.trim(), description: r.querySelector('.pd').value.trim() })).filter(p => p.name && p.description);
   const research = $('#set-research').checked;
   if ($('#g-style').value === 'eleven') { try { await saveElevenChoice(); } catch (e) { toast(e.message, true); } }
-  await post('settings', { engine, api_key: $('#api-key').value.trim(), model: $('#default-model').value,
+  await post('settings', { ...modsSettings(), engine, api_key: $('#api-key').value.trim(), model: $('#default-model').value,
     research, research_sites: sites, default_size: $('#default-size').value, default_palette: $('#default-palette').value,
     custom_palettes, ui, guide: stripLive(gcfg = readGuideForm()), providers: provEdits });
   provEdits = {};
@@ -329,7 +331,7 @@ async function generate() {
   if (state.job) return toast('Already building, hang on');
   try {
     const { job } = await post('generate', { prompt, image: state.image, size: state.size, palette: $('#palette').value, model: $('#model').value, research: $('#research').checked,
-      redstone: $('#redstone').checked });
+      redstone: $('#redstone').checked, use_mods: $('#mods-toggle').hidden ? false : $('#use-mods').checked });
     watchJob(job, 'Generating your build…', prompt || 'your picture');
   } catch (e) { toast(e.message, true); }
 }
@@ -412,9 +414,12 @@ async function openBuild(id, fresh = false) {
   const [meta, data, code] = await Promise.all([api('builds/' + id), api(`builds/${id}/blocks`), api(`builds/${id}/code`)]);
   state.current = meta;
   document.querySelector('#warn-list')?.remove();
+  document.querySelector('#fix-list')?.remove();
   $('#details').scrollTop = 0;              // always start at the top so Download is in view
   $('#empty').hidden = true; $('#toolbar').hidden = false; $('#details').hidden = false;
   document.querySelector('.layout').classList.remove('no-details');
+  const modded = data.palette.map(st => st.split('[')[0]).filter(isModded);
+  if (modded.length) { try { setModColors((await post('mods/colors', { names: modded })).colors); } catch { /* grey fallback */ } }
   viewer.load(data);
   const L = $('#layer'); L.max = data.size[1] - 1; L.value = L.max; $('#layer-val').textContent = `${L.max}/${L.max}`;
   $('#title').value = meta.title;
@@ -425,11 +430,12 @@ async function openBuild(id, fresh = false) {
     [srcName, (meta.model || '').replace('claude-', '') || 'source'], [date.split(',')[0], 'created'],
   ].map(([b, s]) => `<div class="stat"><b>${esc(b)}</b><span>${esc(s)}</span></div>`).join('');
   $('#prompt-text').textContent = meta.prompt || meta.description || '';
-  if (meta.redstone) {
-    $('#prompt-text').insertAdjacentHTML('beforeend', '<span class="redstone-badge">REDSTONE</span>');
-    if ((meta.warnings || []).length) $('#prompt-text').insertAdjacentHTML('afterend',
-      `<ul class="warn-list" id="warn-list">${meta.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul>`);
-  }
+  if (meta.redstone) $('#prompt-text').insertAdjacentHTML('beforeend', '<span class="redstone-badge">REDSTONE</span>');
+  if ((meta.warnings || []).length) $('#prompt-text').insertAdjacentHTML('afterend',
+    `<ul class="warn-list" id="warn-list">${meta.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul>`);
+  if ((meta.fixes || []).length) $('#prompt-text').insertAdjacentHTML('afterend',
+    `<details class="fix-list" id="fix-list"><summary>${meta.fixes.length} auto-fix${meta.fixes.length === 1 ? '' : 'es'} so every block can exist in vanilla</summary><ul>${meta.fixes.map(w => `<li>${esc(w)}</li>`).join('')}</ul></details>`);
+  if (meta.modpack) $('#prompt-text').insertAdjacentHTML('beforeend', `<span class="redstone-badge mod-badge">MODS: ${esc(meta.modpack)}</span>`);
   if (meta.description && meta.redstone && meta.description !== meta.prompt)
     $('#prompt-text').insertAdjacentHTML('beforeend', `<br><br>${esc(meta.description)}`);
   const parent = meta.parent && state.builds.find(b => b.id === meta.parent);
@@ -872,7 +878,11 @@ $('#prompt').addEventListener('input', () => {
 });
 
 // ---------------------------------------------------------------- identify blocks (hover label, click to highlight)
-const prettyBlock = n => n.replace(/^minecraft:/, '').split('_').map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(' ');
+const prettyBlock = n => {
+  const [ns, id] = n.includes(':') ? n.split(':') : ['minecraft', n];
+  const t = id.split('_').map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(' ');
+  return ns === 'minecraft' ? t : `${t} (${ns})`;
+};
 const hexOf = rgb => '#' + rgb.map(v => Math.round(Math.pow(Math.max(0, v), 1 / 2.2) * 255).toString(16).padStart(2, '0')).join('');
 let namesOn = true;
 try { namesOn = localStorage.getItem('bf-names') !== 'off'; } catch {}
@@ -1001,3 +1011,135 @@ setInterval(async () => {
   const fromChat = fresh.find(b => b.source === 'claude_chat');
   if (fromChat && !state.job) { toast(`New build from Claude: “${fromChat.title}”`); openBuild(fromChat.id); }
 }, 4000);
+
+
+// ---------------------------------------------------------------- mods (modpack blocks)
+const mods = { packs: [], active: null, useMods: true, target: null, versions: [], open: null, detail: null, busy: false };
+
+async function refreshModsToggle() {
+  try {
+    const m = await api('mods');
+    Object.assign(mods, { packs: m.packs, active: m.active, useMods: m.use_mods, target: m.target_version, versions: m.versions });
+    const pack = m.packs.find(p => p.id === m.active);
+    $('#mods-toggle').hidden = !pack;
+    if (pack) {
+      $('#use-mods').checked = m.use_mods;
+      $('#mods-note').textContent = `${pack.name} · ${pack.mods - pack.mods_off} mods · ${pack.blocks.toLocaleString()} blocks`;
+    }
+  } catch { $('#mods-toggle').hidden = true; }
+}
+$('#use-mods').onchange = () => { post('settings', { use_mods: $('#use-mods').checked }).catch(() => {}); };
+
+function modsSettings() {
+  return { use_mods: $('#set-use-mods').checked, active_pack: mods.active, target_version: $('#set-target').value || mods.target };
+}
+
+async function initModsTab() {
+  await refreshModsToggle();
+  $('#set-use-mods').checked = mods.useMods;
+  const vs = [...new Set([mods.target, ...mods.versions, '1.21.1', '1.20.1', '1.19.2'].filter(Boolean))];
+  $('#set-target').innerHTML = vs.map(v => `<option>${esc(v)}</option>`).join('');
+  $('#set-target').value = mods.target || '1.21.1';
+  renderPacks();
+  api('mods/detect').then(d => {
+    $('#mod-detected').innerHTML = d.instances.length ? d.instances.map((i, n) => `<div class="mod-row">
+      <div><b>${esc(i.name)}</b><span class="muted small"> ${esc(i.launcher)} · ${i.jars} mods${i.mc ? ' · ' + esc(i.mc) : ''}${i.loader ? ' ' + esc(i.loader) : ''}</span></div>
+      <button type="button" class="btn small ${i.added ? 'ghost' : ''}" data-n="${n}">${i.added ? 'Re-read' : 'Add'}</button></div>`).join('')
+      : '<p class="muted small">No launcher instances found. Use the box below to point at a mods folder.</p>';
+    $('#mod-detected').querySelectorAll('button').forEach(b => b.onclick = () => scanPack(d.instances[b.dataset.n].path, d.instances[b.dataset.n].name));
+  }).catch(() => { $('#mod-detected').innerHTML = '<p class="muted small">Couldn’t look for launchers.</p>'; });
+}
+
+function renderPacks() {
+  $('#mod-packs').innerHTML = mods.packs.length ? mods.packs.map(p => `<div class="mod-row ${p.id === mods.active ? 'on' : ''}">
+    <div><b>${esc(p.name)}</b><span class="muted small"> ${p.mods} mods · ${p.blocks.toLocaleString()} blocks${p.mc ? ' · ' + esc(p.mc) : ''}${p.loader ? ' ' + esc(p.loader) : ''}</span></div>
+    <div class="row-btns"><button type="button" class="btn small ghost" data-open="${p.id}">Details</button>
+    <button type="button" class="btn small ${p.id === mods.active ? 'primary' : ''}" data-use="${p.id}">${p.id === mods.active ? 'In use' : 'Use this'}</button></div></div>`).join('')
+    : '<p class="muted small">No modpacks yet.</p>';
+  $('#mod-packs').querySelectorAll('[data-use]').forEach(b => b.onclick = () => { mods.active = b.dataset.use; renderPacks(); });
+  $('#mod-packs').querySelectorAll('[data-open]').forEach(b => b.onclick = () => openPack(b.dataset.open));
+}
+
+async function watchScan(job) {
+  const log = $('#mod-scan-log');
+  log.hidden = false;
+  for (;;) {
+    const j = await api('jobs/' + job).catch(() => null);
+    if (!j) { await new Promise(r => setTimeout(r, 1000)); continue; }
+    log.innerHTML = j.log.slice(-6).map(l => `<li>${esc(l.msg)}</li>`).join('') + (j.error ? `<li class="err">${esc(j.error)}</li>` : '');
+    if (j.status !== 'running') return j;
+    await new Promise(r => setTimeout(r, 700));
+  }
+}
+
+async function scanPack(path, name) {
+  if (mods.busy) return toast('Still reading another pack', true);
+  mods.busy = true;
+  try {
+    const { job } = await post('mods/add', { path, name });
+    const j = await watchScan(job);
+    if (j.status === 'done') {
+      toast(`Read ${j.build.mods} mods, ${j.build.blocks.toLocaleString()} blocks`);
+      const wasActive = mods.active;
+      await refreshModsToggle();
+      if (!wasActive) mods.active = (await api('mods')).active;
+      renderPacks();
+      initModsTab();
+    } else toast(j.error || 'Could not read that folder', true);
+  } catch (e) { toast(e.message, true); }
+  mods.busy = false;
+}
+$('#mod-add').onclick = () => { const p = $('#mod-path').value.trim(); if (p) scanPack(p); else toast('Paste the path to a mods folder first', true); };
+$('#mod-browse').onclick = async () => {
+  const f = window.pywebview?.api?.pick_folder;
+  if (!f) return toast('Paste the folder path into the box instead', true);
+  const p = await f();
+  if (p) { $('#mod-path').value = p; }
+};
+
+async function openPack(id) {
+  mods.open = id;
+  const d = await api('mods/pack/' + id);
+  mods.detail = d;
+  $('#mod-pack-detail').hidden = false;
+  $('#mod-pack-title').textContent = d.name;
+  $('#mod-pack-meta').textContent = `${d.mods} mods · ${d.blocks.toLocaleString()} blocks`;
+  $('#mod-search').value = ''; $('#mod-block-results').innerHTML = '';
+  renderPackMods();
+}
+function renderPackMods() {
+  const d = mods.detail;
+  $('#mod-mods').innerHTML = d.list.map(m => `<label class="mod-row"><span><b>${esc(m.name)}</b><span class="muted small"> ${esc(m.version || '')} · ${m.blocks} blocks</span></span>
+    <input type="checkbox" data-f="${esc(m.file)}" ${m.enabled ? 'checked' : ''} ${m.blocks ? '' : 'disabled'}></label>`).join('');
+  $('#mod-mods').querySelectorAll('input').forEach(c => c.onchange = async () => {
+    const s = await post('mods/toggle', { pack: mods.open, file: c.dataset.f, enabled: c.checked });
+    d.list.find(m => m.file === c.dataset.f).enabled = c.checked;
+    $('#mod-pack-meta').textContent = `${s.mods - s.mods_off}/${s.mods} mods on`;
+  });
+}
+async function setAll(on) {
+  const d = mods.detail;
+  await post('mods/toggle', { pack: mods.open, files: d.list.filter(m => m.blocks).map(m => m.file), enabled: on });
+  d.list.forEach(m => { if (m.blocks) m.enabled = on; });
+  renderPackMods();
+}
+$('#mod-all-on').onclick = () => setAll(true);
+$('#mod-all-off').onclick = () => setAll(false);
+$('#mod-rescan').onclick = async () => { const p = mods.detail; if (p) { const { job } = await post('mods/rescan', { pack: p.id }); await watchScan(job); openPack(p.id); refreshModsToggle(); } };
+$('#mod-remove').onclick = async () => {
+  if (!mods.open || !confirm('Remove this pack from BlockForge? (Your mod files are not touched.)')) return;
+  await post('mods/remove', { pack: mods.open });
+  $('#mod-pack-detail').hidden = true; mods.open = null;
+  await refreshModsToggle(); mods.active = (await api('mods')).active; renderPacks();
+};
+let modSearchTimer = null;
+$('#mod-search').oninput = () => {
+  clearTimeout(modSearchTimer);
+  modSearchTimer = setTimeout(async () => {
+    const q = $('#mod-search').value.trim();
+    if (!q) return ($('#mod-block-results').innerHTML = '');
+    const r = await api(`mods/search?pack=${mods.open}&q=${encodeURIComponent(q)}`);
+    $('#mod-block-results').innerHTML = r.blocks.map(b => `<span class="mod-chip" title="${esc(b.mod)}"><i style="background:${esc(b.color)}"></i>${esc(prettyBlock(b.id))}</span>`).join('')
+      || '<span class="muted small">No blocks match.</span>';
+  }, 250);
+};

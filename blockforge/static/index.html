@@ -64,6 +64,11 @@
         <span class="switch"></span>
         <span><b>Research real builds online</b><small id="research-sites" class="muted"></small></span>
       </label>
+      <label class="toggle" id="mods-toggle" hidden title="Lets the AI use blocks from the modpack you added in Settings → Mods">
+        <input type="checkbox" id="use-mods" checked>
+        <span class="switch"></span>
+        <span><b>Use modpack blocks</b><small id="mods-note" class="muted"></small></span>
+      </label>
       <button id="generate" class="btn primary big">Generate build</button>
       <div class="examples" id="examples"></div>
     </section>
@@ -158,7 +163,7 @@
     <h2>Settings</h2>
     <div class="tabs set-tabs">
       <button type="button" data-stab="claude" class="on">AI</button><button type="button" data-stab="research">Research</button>
-      <button type="button" data-stab="look">Appearance</button><button type="button" data-stab="guide">Guide</button><button type="button" data-stab="defaults">Defaults &amp; palettes</button>
+      <button type="button" data-stab="look">Appearance</button><button type="button" data-stab="guide">Guide</button><button type="button" data-stab="defaults">Defaults &amp; palettes</button><button type="button" data-stab="mods">Mods</button>
     </div>
 
     <div class="stab" id="stab-claude">
@@ -303,6 +308,30 @@
       <p class="muted small">Make your own palettes. They show up in the Palette menu. Describe the blocks you want, e.g. “dark oak and deepslate with copper trim and lots of lanterns”.</p>
       <div id="palette-list" class="palette-list"></div>
       <button type="button" class="btn small" id="add-palette">＋ Add palette</button>
+    </div>
+
+    <div class="stab" id="stab-mods" hidden>
+      <p class="muted small">Add your modpack so the AI can build with its blocks (furniture, biome and decoration mods…). BlockForge reads every mod jar on this PC. Nothing is uploaded.</p>
+      <label class="toggle"><input type="checkbox" id="set-use-mods"><span class="switch"></span>
+        <span><b>Use modpack blocks in new builds</b><small class="muted">Off = plain vanilla blocks only</small></span></label>
+      <h3>Found on this PC</h3>
+      <div id="mod-detected" class="mod-list"><p class="muted small">Looking…</p></div>
+      <h3>Add a mods folder</h3>
+      <div class="row-btns"><input type="text" id="mod-path" class="grow" placeholder="C:\Users\you\curseforge\minecraft\Instances\My Pack\mods" spellcheck="false">
+        <button type="button" class="btn small" id="mod-browse">Browse…</button><button type="button" class="btn small primary" id="mod-add">Read mods</button></div>
+      <ul id="mod-scan-log" class="update-log" hidden></ul>
+      <h3>My modpacks</h3>
+      <div id="mod-packs" class="mod-list"></div>
+      <div id="mod-pack-detail" hidden>
+        <div class="usage-head"><h3 id="mod-pack-title"></h3><span class="muted small" id="mod-pack-meta"></span></div>
+        <div class="row-btns"><input type="search" id="mod-search" class="grow" placeholder="Search blocks (e.g. chair, lamp, couch)…">
+          <button type="button" class="btn ghost small" id="mod-all-on">All on</button><button type="button" class="btn ghost small" id="mod-all-off">All off</button>
+          <button type="button" class="btn ghost small" id="mod-rescan">Re-read</button><button type="button" class="btn ghost small danger" id="mod-remove">Remove</button></div>
+        <div id="mod-block-results" class="mod-blocks"></div>
+        <div id="mod-mods" class="mod-list tall"></div>
+      </div>
+      <div class="field"><label for="set-target">Minecraft version to build for (when no modpack is chosen)</label>
+        <select id="set-target"></select></div>
     </div>
 
     <div class="row-btns end"><button class="btn primary" id="save-settings" value="save">Save</button><button class="btn ghost" value="cancel">Close</button></div>
