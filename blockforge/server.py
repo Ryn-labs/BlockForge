@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import eleven, engine, exporters, prompts, sandbox, store, tts, updater, voices  # noqa: E402
+from blockforge import eleven, engine, exporters, mods, placement, prompts, sandbox, store, tts, updater, voices  # noqa: E402
 from blockforge.version import VERSION  # noqa: E402
 
 PORT = int(os.environ.get("BLOCKFORGE_PORT", "8765"))
@@ -47,10 +47,17 @@ def start_job(fn, **kw):
 
 def run_script_job(code, title="Script build", parent_id=None, log=print):
     log("Running your script...")
-    blocks, meta = sandbox.run_safe(code)
+    pack, version, popts = mods.build_opts()
+    blocks, meta = sandbox.run_safe(code, placement_opts=popts)
+    final = placement.process(blocks, final=True, **popts)
+    fixes = (meta.get("fixes") or []) + final["fixed"]
+    for f in fixes:
+        log("Auto-fixed: " + f)
     prompt = store.get_meta(parent_id).get("prompt", "") if parent_id else ""
     return store.save_build(blocks, meta.get("name") or title, prompt=prompt, code=code, source="script",
-                            parent=parent_id, description=meta.get("description") or "")
+                            parent=parent_id, description=meta.get("description") or "",
+                            warnings=meta.get("redstone_warnings") or [], fixes=fixes,
+                            data_version=mods.data_version(version), modpack=(pack or {}).get("name"))
 
 
 class H(BaseHTTPRequestHandler):
@@ -171,6 +178,30 @@ class H(BaseHTTPRequestHandler):
                     return self.err(502, str(e))
             if parts[1:] == ["usage"]:
                 return self.send(200, store.usage_summary())
+            if parts[1] == "mods":
+                s = store.load_settings()
+                if parts[2:] == []:
+                    return self.send(200, {"packs": mods.list_packs(), "active": s.get("active_pack"),
+                                           "use_mods": s.get("use_mods", True), "target_version": s.get("target_version"),
+                                           "versions": mods.installed_versions()})
+                if parts[2:] == ["detect"]:
+                    known = {os.path.normcase(p.get("path", "")) for p in s.get("modpacks", [])}
+                    found = []
+                    for d in mods.detect_instances():
+                        mdir = d.get("mods_dir") or d.get("path") or ""
+                        found.append({**d, "added": os.path.normcase(mdir) in known})
+                    return self.send(200, {"instances": found})
+                if len(parts) == 4 and parts[2] == "pack":
+                    idx = mods.load_index(parts[3])
+                    if not idx:
+                        return self.err(404, "no such pack")
+                    return self.send(200, {**mods.summary(idx), "list": [
+                        {"file": m["file"], "id": m["id"], "name": m["name"], "version": m.get("version"),
+                         "blocks": len(m["blocks"]), "enabled": m.get("enabled", True)} for m in idx["mods"]]})
+                if parts[2:] == ["search"]:
+                    q = parse_qs(urlparse(self.path).query)
+                    idx = mods.load_index(q.get("pack", [s.get("active_pack") or ""])[0])
+                    return self.send(200, {"blocks": mods.search(idx, q.get("q", [""])[0]) if idx else []})
             if parts[1] == "jobs" and len(parts) == 3:
                 job = JOBS.get(parts[2])
                 return self.send(200, job) if job else self.err(404, "no such job")
@@ -220,7 +251,7 @@ class H(BaseHTTPRequestHandler):
                 job = start_job(engine.generate, prompt=b.get("prompt", ""), size=b.get("size", "medium"),
                                 palette=b.get("palette", "auto"), model=b.get("model"), engine=b.get("engine"),
                                 image=image, parent_id=b.get("parent_id"), research=b.get("research"),
-                                redstone=b.get("redstone"))
+                                redstone=b.get("redstone"), use_mods=b.get("use_mods"))
                 return self.send(200, {"job": job["id"]})
             if route == ["run"]:
                 b = self.json_body()
@@ -238,6 +269,7 @@ class H(BaseHTTPRequestHandler):
                 b = self.json_body()
                 if "api_key" in b and b["api_key"].startswith("•"):
                     b.pop("api_key")
+                b.pop("modpacks", None)                      # only the Mods endpoints manage packs
                 if "research_sites" in b:
                     sites = [re.sub(r"^https?://(www\.)?", "", str(s).strip()).strip("/") for s in b["research_sites"] or []]
                     b["research_sites"] = [s for s in sites if s][:20] or None
@@ -270,6 +302,46 @@ class H(BaseHTTPRequestHandler):
                     if k in b and not isinstance(b[k], dict):
                         b.pop(k)
                 return self.send(200, {"ok": True, "engine": store.save_settings(b)["engine"]})
+            if route[:1] == ["mods"] and len(route) == 2:
+                b = self.json_body()
+                act = route[1]
+                if act == "add":
+                    d = mods.resolve_mods_dir(b.get("path", ""))
+                    name = (b.get("name") or "").strip() or None
+
+                    def do_scan(log=print):
+                        idx = mods.scan(d, name, log)
+                        mods.register_pack(idx)
+                        return mods.summary(idx)
+                    return self.send(200, {"job": start_job(do_scan)["id"]})
+                if act == "rescan":
+                    idx = mods.load_index(b.get("pack", ""))
+                    if not idx:
+                        return self.err(404, "no such pack")
+
+                    def do_rescan(log=print):
+                        new = mods.scan(idx["path"], idx["name"], log)
+                        mods.register_pack(new)
+                        return mods.summary(new)
+                    return self.send(200, {"job": start_job(do_rescan)["id"]})
+                if act == "toggle":
+                    idx = mods.load_index(b.get("pack", ""))
+                    if not idx:
+                        return self.err(404, "no such pack")
+                    files = b.get("files") or [b.get("file")]
+                    for m in idx["mods"]:
+                        if m["file"] in files:
+                            m["enabled"] = bool(b.get("enabled"))
+                    with open(mods.pack_file(idx["id"]), "w", encoding="utf-8") as f:
+                        json.dump(idx, f, separators=(",", ":"))
+                    return self.send(200, mods.summary(idx))
+                if act == "remove":
+                    mods.forget_pack(b.get("pack", ""))
+                    return self.send(200, {"ok": True})
+                if act == "colors":
+                    names = [str(n) for n in (b.get("names") or []) if ":" in str(n)][:3000]
+                    return self.send(200, {"colors": mods.mod_colors(names)})
+                return self.err(404, "not found")
             if route == ["voices", "download"]:
                 vid = self.json_body().get("id", "")
                 if vid not in voices.CATALOG:

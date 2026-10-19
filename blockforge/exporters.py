@@ -75,7 +75,7 @@ def write_schem(path, d, name):
                 data.append(idx)
     root = {
         "Version": (INT, 2),
-        "DataVersion": (INT, DATA_VERSION),
+        "DataVersion": (INT, d.get("data_version") or DATA_VERSION),
         "Metadata": (COMPOUND, {"Name": (STRING, name), "Author": (STRING, "BlockForge + Claude"),
                                 "WEOffsetX": (INT, 0), "WEOffsetY": (INT, 0), "WEOffsetZ": (INT, 0)}),
         "Width": (SHORT, W), "Height": (SHORT, H), "Length": (SHORT, L),
@@ -129,7 +129,7 @@ def write_litematic(path, d, name, desc=""):
     }
     now = int(time.time() * 1000)
     root = {
-        "MinecraftDataVersion": (INT, DATA_VERSION),
+        "MinecraftDataVersion": (INT, d.get("data_version") or DATA_VERSION),
         "Version": (INT, 5),
         "Metadata": (COMPOUND, {
             "Name": (STRING, name), "Author": (STRING, "BlockForge + Claude"),
@@ -149,7 +149,7 @@ def write_nbt_structure(path, d, name):
     for i in range(0, len(f), 4):
         blocks.append({"pos": (LIST, (INT, [f[i], f[i + 1], f[i + 2]])), "state": (INT, f[i + 3])})
     root = {
-        "DataVersion": (INT, DATA_VERSION),
+        "DataVersion": (INT, d.get("data_version") or DATA_VERSION),
         "size": (LIST, (INT, [W, H, L])),
         "palette": (LIST, (COMPOUND, [_pal_entry(st) for st in pal])),
         "blocks": (LIST, (COMPOUND, blocks)),

@@ -56,6 +56,14 @@ class WindowApi:
         shutil.copy(src, dest)
         return dest
 
+    def pick_folder(self):
+        import webview
+        dialog = getattr(getattr(webview, "FileDialog", None), "FOLDER", None) or webview.FOLDER_DIALOG
+        res = self._window.create_file_dialog(dialog, directory=os.path.expanduser("~"))
+        if isinstance(res, (list, tuple)):
+            res = res[0] if res else None
+        return res
+
     def save_image(self, filename, data_url):
         import base64
         dest = self._ask_path(filename, "PNG image")

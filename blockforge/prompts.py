@@ -84,6 +84,19 @@ functools/collections/colorsys may be imported. No files, no network.
 - glass_pane, iron_bars, chain(axis), candles(candles=1-4, lit=true), campfire(lit), beds need part=head/foot.
 - Use only real Minecraft Java 1.21 block ids (e.g. short_grass not grass, dirt_path not grass_path).
 
+## Every block must be able to exist where you put it (vanilla survival rules)
+- Lanterns either hang (hanging=true) from a block, fence, chain or bars directly ABOVE, or stand (hanging=false) on
+  a block BELOW. They can NOT stick to the side of a wall: for a wall light use a wall_torch / soul_wall_torch, or put
+  a fence or chain arm out from the wall and hang the lantern under it.
+- torch / soul_torch need a solid block below; on a wall use wall_torch[facing=<away from the wall>].
+- Ladders, wall signs, wall banners and wall torches need a solid block behind them. Buttons/levers need what they're on.
+- Doors are two blocks (half=lower + half=upper) on a solid floor. Beds are two blocks (foot + head).
+- Flowers, grass, ferns, saplings, bushes need grass_block/dirt/podzol/moss under them; crops need farmland; cactus
+  needs sand; sugar cane needs dirt/sand next to water; lily pads sit on water.
+- Sand, gravel, concrete powder and anvils fall if there is air under them: support them or use solid blocks.
+- Carpets, candles, pressure plates, signs and pots need a block under them. Leaves: always persistent=true.
+BlockForge checks all of this after your script runs; anything that can't exist gets reported back to you.
+
 ## What makes a great build (follow this)
 - Real architecture: a clear silhouette, proportion, depth. Avoid flat boxes: offset walls by 1, add
   framing logs/pillars at corners, window frames and sills, roof overhangs with upside-down stairs,
@@ -177,7 +190,7 @@ def wants_redstone(prompt, previous_code=None):
 
 
 def user_message(prompt, size="medium", palette="auto", previous_code=None, has_image=False,
-                 research_sites=None, palette_text=None, redstone=None):
+                 research_sites=None, palette_text=None, redstone=None, version=None, mods_text=None):
     parts = []
     if redstone is None:
         redstone = wants_redstone(prompt, previous_code)
@@ -194,6 +207,10 @@ def user_message(prompt, size="medium", palette="auto", previous_code=None, has_
     pal = palette_text or PALETTES.get(palette)
     if pal and palette != "auto":
         parts.append("Palette: " + pal)
+    if version:
+        parts.append(f"Target game: Minecraft Java {version}. Only use blocks that exist in that version.")
+    if mods_text:
+        parts.append(mods_text)
     if redstone:
         parts.append(REDSTONE_GUIDE)
     if research_sites:
@@ -207,6 +224,6 @@ def fix_message(error):
 
 
 def redstone_fix_message(problems):
-    return ("The build ran, but BlockForge's redstone checker found problems that would stop it working in game:\n- "
+    return ("The build ran, but BlockForge's checker found blocks that can't exist or wouldn't work in vanilla Minecraft:\n- "
             + "\n- ".join(problems) +
             "\nFix them and reply with the complete corrected script in one ```python block.")

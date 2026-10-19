@@ -1,6 +1,8 @@
 """Local gallery: every build lives in data/builds/<id>/ (meta.json, code.py, blocks.json)."""
 import json
 import os
+import shutil
+import threading
 import re
 import time
 import uuid
@@ -37,27 +39,78 @@ DEFAULT_SETTINGS = {
     "ui": {},                                              # appearance choices made in Settings > Appearance
     "guide": {},
     "eleven": {},                                          # ElevenLabs voice: {"api_key", "voice_id", "voice_name", "model"}
-    "providers": {},                                       # other AIs: {id: {"api_key", "base_url", "model", "models"}}                                           # the guide character (name, voice, colours...)
+    "providers": {},
+    "modpacks": [],                                         # scanned packs: [{"id", "name", "path"}]
+    "active_pack": None, "use_mods": True, "target_version": "1.21.1",                                       # other AIs: {id: {"api_key", "base_url", "model", "models"}}                                           # the guide character (name, voice, colours...)
 }
 USAGE_LOG = os.path.join(DATA, "usage.jsonl")
 
 
+_settings_lock = threading.RLock()
+MERGE_KEYS = ("eleven", "providers")                    # nested settings: updates add to them, never drop other keys
+
+
+def _read_json(path):
+    with open(path, encoding="utf-8") as f:
+        d = json.load(f)
+    if not isinstance(d, dict):
+        raise ValueError("settings must be an object")
+    return d
+
+
+def _read_stored():
+    """What's on disk: the main file, or the backup if the main file is damaged. None if there are no settings yet.
+    Raises if settings exist but none can be read (so we never overwrite them with blanks)."""
+    problem = None
+    for path in (SETTINGS, SETTINGS + ".bak"):
+        if not os.path.isfile(path):
+            continue
+        try:
+            return _read_json(path)
+        except (OSError, ValueError) as e:
+            problem = e
+    if problem:
+        raise OSError(f"settings file is unreadable: {problem}")
+    return None
+
+
 def load_settings():
     s = dict(DEFAULT_SETTINGS)
-    try:
-        with open(SETTINGS, encoding="utf-8") as f:
-            s.update(json.load(f))
-    except (OSError, ValueError):
-        pass
+    with _settings_lock:
+        try:
+            stored = _read_stored()
+        except OSError:
+            stored = None
+    if stored:
+        s.update(stored)
     return s
 
 
 def save_settings(new):
-    s = load_settings()
-    s.update({k: v for k, v in new.items() if k in DEFAULT_SETTINGS})
-    with open(SETTINGS, "w", encoding="utf-8") as f:
-        json.dump(s, f, indent=2)
-    return s
+    with _settings_lock:
+        stored = _read_stored()                            # raises rather than losing keys we can't read
+        s = dict(DEFAULT_SETTINGS)
+        s.update(stored or {})
+        for k, v in new.items():
+            if k not in DEFAULT_SETTINGS:
+                continue
+            if k in MERGE_KEYS and isinstance(v, dict) and isinstance(s.get(k), dict):
+                s[k] = {**s[k], **v}
+            else:
+                s[k] = v
+        data = json.dumps(s, indent=2)
+        tmp = SETTINGS + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        if os.path.isfile(SETTINGS):
+            try:
+                shutil.copyfile(SETTINGS, SETTINGS + ".bak")   # last known-good copy
+            except OSError:
+                pass
+        os.replace(tmp, SETTINGS)                          # atomic: readers see the old file or the new one, never half
+        return s
 
 
 def _dir(bid):
@@ -73,11 +126,13 @@ def slug(text):
 
 def save_build(blocks, title, prompt="", code=None, source="app", parent=None, model=None,
                description="", image_bytes=None, image_ext=None, usage=None, references=None, researched=False,
-               redstone=False, warnings=None):
+               redstone=False, warnings=None, fixes=None, data_version=None, modpack=None):
     bid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     d = _dir(bid)
     os.makedirs(d)
     data = exporters.to_dict(blocks)
+    if data_version:
+        data["data_version"] = data_version
     counts = {}
     for st in blocks.values():
         n = st.split("[", 1)[0].replace("minecraft:", "")
@@ -89,7 +144,7 @@ def save_build(blocks, title, prompt="", code=None, source="app", parent=None, m
         "materials": sorted(counts.items(), key=lambda kv: -kv[1]),
         "has_image": bool(image_bytes),
         "usage": usage, "references": references or [], "researched": researched,
-        "redstone": redstone, "warnings": warnings or [],
+        "redstone": redstone, "warnings": warnings or [], "fixes": fixes or [], "modpack": modpack,
     }
     with open(os.path.join(d, "blocks.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, separators=(",", ":"))
@@ -156,9 +211,28 @@ def file_path(bid, name):
     return p
 
 
+TRASH = os.path.join(DATA, "trash")
+
+
 def delete_build(bid):
-    import shutil
-    shutil.rmtree(_dir(bid))
+    """Moves the build to the trash folder (DATA/trash) so a mistaken delete can be undone by moving it back."""
+    src = _dir(bid)
+    if not os.path.isdir(src):
+        raise KeyError(bid)
+    os.makedirs(TRASH, exist_ok=True)
+    dest = os.path.join(TRASH, os.path.basename(src))
+    if os.path.exists(dest):
+        dest += "-" + uuid.uuid4().hex[:4]
+    shutil.move(src, dest)
+    os.utime(dest, None)                                     # a move keeps the old time; the 30 days start now
+    cutoff = time.time() - 30 * 86400                        # empty out things trashed over 30 days ago
+    for d in os.listdir(TRASH):
+        p = os.path.join(TRASH, d)
+        try:
+            if os.path.isdir(p) and os.path.getmtime(p) < cutoff:
+                shutil.rmtree(p)
+        except OSError:
+            pass
 
 
 def export_path(bid, fmt):

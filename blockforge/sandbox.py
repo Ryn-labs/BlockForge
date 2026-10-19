@@ -42,7 +42,7 @@ def check(code):
             raise ScriptError(f"line {node.lineno}: '{node.id}' is not allowed in build scripts")
 
 
-def run(code, timeout=90):
+def run(code, timeout=90, placement_opts=None):
     """Returns (blocks_dict {(x,y,z): state}, meta). Raises ScriptError with a readable message."""
     check(code)
     proc = subprocess.run(
@@ -62,11 +62,23 @@ def run(code, timeout=90):
     blocks = {(f[i], f[i + 1], f[i + 2]): pal[f[i + 3]] for i in range(0, len(f), 4)}
     if not blocks:
         raise ScriptError("The script ran but placed no blocks.")
-    return blocks, res.get("meta", {})
-
-
-def run_safe(code, timeout=90):
+    meta = res.get("meta") or {}
+    meta["redstone_warnings"] = list(meta.get("warnings") or [])
     try:
-        return run(code, timeout)
+        from . import placement
+        rep = placement.process(blocks, **(placement_opts or {}))
+        meta["fixes"] = rep["fixed"]
+        meta["warnings"] = meta["redstone_warnings"] + rep["problems"]
+    except Exception as e:                               # noqa: BLE001 - never lose a build over the checker
+        meta["fixes"] = []
+        meta.setdefault("warnings", []).append(f"placement check failed: {e}")
+    if not blocks:
+        raise ScriptError("The script ran but placed no blocks.")
+    return blocks, meta
+
+
+def run_safe(code, timeout=90, placement_opts=None):
+    try:
+        return run(code, timeout, placement_opts)
     except subprocess.TimeoutExpired:
         raise ScriptError(f"The script took longer than {timeout}s (too many blocks or an endless loop).")

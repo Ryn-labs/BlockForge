@@ -5,7 +5,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import exporters, prompts, sandbox, store  # noqa: E402
+from blockforge import exporters, mods, placement, prompts, sandbox, store  # noqa: E402
 
 SERVER = {"name": "blockforge", "version": "1.0.0"}
 APP_URL = "http://127.0.0.1:8765"
@@ -85,6 +85,8 @@ def _summary(meta):
             f"{meta['block_count']:,} blocks.\nTop materials: {mats}\n"
             f"Files:\n  {paths['schem']}\n  {paths['litematic']}\n"
             f"It is now in the BlockForge gallery ({APP_URL})."
+            + ("\n\nBlockForge auto-fixed these so every block can exist in vanilla:\n- " + "\n- ".join(meta["fixes"])
+               if meta.get("fixes") else "")
             + ("\n\nRedstone checker found problems (fix them with update_build):\n- " + "\n- ".join(meta["warnings"])
                if meta.get("warnings") else ""))
 
@@ -102,9 +104,12 @@ def call(name, args):
         if parent:
             store.get_meta(parent)
         try:
-            blocks, meta = sandbox.run_safe(args["code"])
+            pack, version, popts = mods.build_opts()
+            blocks, meta = sandbox.run_safe(args["code"], placement_opts=popts)
         except sandbox.ScriptError as e:
             raise ToolError("The build script failed:\n" + str(e))
+        final = placement.process(blocks, final=True, **popts)          # nothing impossible gets saved
+        fixes = (meta.get("fixes") or []) + final["fixed"]
         title = args.get("title") or meta.get("name") or (store.get_meta(parent)["title"] + " v2" if parent else "Build")
         prompt = args.get("prompt") or args.get("change") or ""
         refs = [{k: str(r.get(k, ""))[:300] for k in ("title", "url", "site", "size", "takeaways")}
@@ -112,7 +117,9 @@ def call(name, args):
         m = store.save_build(blocks, title, prompt=prompt, code=args["code"], source="claude_chat", parent=parent,
                              model="claude-code-chat", description=meta.get("description") or "",
                              references=refs[:10], researched=bool(refs),
-                             redstone=prompts.wants_redstone(prompt, args["code"]), warnings=meta.get("warnings") or [])
+                             redstone=prompts.wants_redstone(prompt, args["code"]),
+                             warnings=meta.get("redstone_warnings") or [], fixes=fixes,
+                             data_version=mods.data_version(version), modpack=(pack or {}).get("name"))
         return _summary(m)
     if name == "list_builds":
         q = (args.get("query") or "").lower()

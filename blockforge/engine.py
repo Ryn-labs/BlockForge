@@ -181,7 +181,7 @@ def _describe_tool(name, inp):
 
 
 # ------------------------------------------------------------------ Claude Code program
-def _ask_claude_code(text, model, usage, image_path=None, research=False, log=print):
+def _ask_claude_code(text, model, usage, image_path=None, research=False, log=print, pack=None):
     exe = find_claude()
     if not exe:
         raise EngineError("Claude Code isn't installed. Install it, or add an API key in Settings.")
@@ -192,6 +192,12 @@ def _ask_claude_code(text, model, usage, image_path=None, research=False, log=pr
             text += f"\n\nThe reference image is the file {os.path.basename(image_path)} in the current folder - " \
                     "use the Read tool to look at it first."
         tools = "Read,WebSearch,WebFetch" if research else "Read"
+        if pack:
+            from . import mods
+            mods.write_id_file(pack, work)
+            tools += ",Grep"
+            text += ("\n\nEvery modded block id in the player's pack is listed in modded_blocks.txt in the current folder "
+                     "(one per line: id<TAB>mod name). Use Grep on it to find the exact id before using any modded block.")
         cmd = [exe, "-p", "--output-format", "stream-json", "--verbose", "--model", model,
                "--system-prompt", prompts.SYSTEM, "--tools", tools, "--allowedTools", tools,
                "--no-session-persistence", "--strict-mcp-config"]
@@ -488,7 +494,8 @@ def _ask_openai_compat(pid, messages, model, settings, usage, log=print):
 class _Conversation:
     """Hides the differences between AIs: first ask, then follow-up fix requests."""
 
-    def __init__(self, engine, model, settings, usage, text, image, image_path, research, log):
+    def __init__(self, engine, model, settings, usage, text, image, image_path, research, log, pack=None):
+        self.pack = pack
         self.e, self.model, self.settings, self.usage, self.log = engine, model, settings, usage, log
         self.text, self.image, self.image_path, self.research = text, image, image_path, research
         self.messages, self.raw, self.last_code = None, None, None
@@ -504,7 +511,7 @@ class _Conversation:
             reply, self.raw = _ask_api(self.messages, self.model, self.settings, self.usage, self.research, self.log)
             return reply
         if self.e == "claude_code":
-            return _ask_claude_code(self.text, self.model, self.usage, self.image_path, self.research, self.log)
+            return _ask_claude_code(self.text, self.model, self.usage, self.image_path, self.research, self.log, self.pack)
         user = self.text
         if self.image:
             user = [{"type": "text", "text": self.text}, {"type": "image_url", "image_url": {
@@ -521,7 +528,7 @@ class _Conversation:
             return reply
         if self.e == "claude_code":
             return _ask_claude_code(self.text_without_research() + "\n\nYour previous script:\n```python\n" + code
-                                    + "\n```\n\n" + message, self.model, self.usage, self.image_path, False, self.log)
+                                    + "\n```\n\n" + message, self.model, self.usage, self.image_path, False, self.log, self.pack)
         self.messages += [{"role": "assistant", "content": self.raw}, {"role": "user", "content": message}]
         self.raw = _ask_openai_compat(self.e, self.messages, self.model, self.settings, self.usage, self.log)
         return self.raw
@@ -531,7 +538,7 @@ class _Conversation:
 
 
 def generate(prompt, size="medium", palette="auto", model=None, engine=None, image=None, parent_id=None,
-             research=None, redstone=None, log=print):
+             research=None, redstone=None, use_mods=None, log=print):
     """image: (bytes, mime). Returns the saved build's meta."""
     settings = store.load_settings()
     engine = engine or settings.get("engine", "claude_code")
@@ -557,9 +564,18 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
     if str(palette).startswith("custom:"):
         pname = palette.split(":", 1)[1]
         palette_text = next((p["description"] for p in settings.get("custom_palettes", []) if p.get("name") == pname), None)
+    from . import mods, placement
+    if use_mods is None:
+        use_mods = settings.get("use_mods", True)
+    pack = mods.load_index(settings["active_pack"]) if use_mods and settings.get("active_pack") else None
+    version = (pack or {}).get("mc") or settings.get("target_version") or "1.21.1"
+    popts = {"pack": pack, "version": version}
+    mods_text = mods.prompt_section(pack, prompt) if pack else None
+    if pack:
+        log(f"Using blocks from your modpack: {pack['name']} ({sum(len(m['blocks']) for m in pack['mods'] if m.get('enabled', True)):,} blocks).")
     text = prompts.user_message(prompt, size, palette, prev_code, has_image=bool(image),
                                 research_sites=sites if research else None, palette_text=palette_text,
-                                redstone=redstone)
+                                redstone=redstone, version=version, mods_text=mods_text)
     usage = Usage(engine, model)
     started = time.time()
     status, title, saved = "error", None, None
@@ -577,7 +593,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
             f.write(image[0])
 
     try:
-        convo = _Conversation(engine, model, settings, usage, text, image, image_path, research, log)
+        convo = _Conversation(engine, model, settings, usage, text, image, image_path, research, log, pack)
         title, code, refs = extract(convo.first())
         if refs:
             log(f"Used {len(refs)} reference build{'s' if len(refs) != 1 else ''} from the web.")
@@ -587,7 +603,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
             for attempt in range(MAX_FIX_ATTEMPTS + 1):
                 log("Building the blocks...")
                 try:
-                    return code, *sandbox.run_safe(code)
+                    return code, *sandbox.run_safe(code, placement_opts=popts)
                 except sandbox.ScriptError as e:
                     if attempt == MAX_FIX_ATTEMPTS:
                         raise EngineError("The build script kept failing: " + str(e)[:600])
@@ -598,9 +614,11 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
 
         code, blocks, meta = build(code)
         problems = meta.get("warnings") or []
-        if redstone and problems:
-            log("Redstone check: " + "; ".join(problems)[:300])
-            log(f"Asking {who} to fix the redstone...")
+        for f in meta.get("fixes") or []:
+            log("Auto-fixed: " + f)
+        if problems:
+            log("Build check: " + "; ".join(problems)[:300])
+            log(f"Asking {who} to fix {'the redstone and ' if redstone else ''}blocks that can't exist...")
             try:
                 _, code2, _ = extract(convo.follow_up(prompts.redstone_fix_message(problems), code))
                 code2, blocks2, meta2 = build(code2)
@@ -609,7 +627,12 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                     problems = meta.get("warnings") or []
             except EngineError as e:
                 log(f"Kept the first version ({e}).")
-            log("Redstone check passed." if not problems else "Redstone notes: " + "; ".join(problems)[:300])
+        final = placement.process(blocks, final=True, **popts)          # last resort: nothing impossible is left
+        fixes = list(meta.get("fixes") or []) + final["fixed"]
+        for f in final["fixed"]:
+            log("Auto-fixed: " + f)
+        problems = list(meta.get("redstone_warnings") or [])
+        log("Build check passed: every block can exist where it is." if not problems else "Redstone notes: " + "; ".join(problems)[:300])
 
         title = meta.get("name") or title or prompt[:60] or "Build"
         rec = usage.record()
@@ -625,7 +648,8 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
         saved = store.save_build(blocks, title, prompt=prompt, code=code, source=engine, parent=parent_id,
                                  model=model, description=meta.get("description") or "",
                                  image_bytes=img_bytes, image_ext=ext, usage=rec, references=refs,
-                                 researched=bool(research), redstone=bool(redstone), warnings=problems)
+                                 researched=bool(research), redstone=bool(redstone), warnings=problems, fixes=fixes,
+                                 data_version=mods.data_version(version), modpack=(pack or {}).get("name"))
         status = "done"
         return saved
     finally:
