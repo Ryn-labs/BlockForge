@@ -50,6 +50,8 @@ Then you download it in the format you need. There's no paywall and no per-downl
   **Save my credits** switch keeps ElevenLabs for the big moments and uses the free voice for quick chatter,
   repeated lines are cached so they never cost credits twice, and your remaining credits are shown. If your
   credits run out or the key fails, Flint falls back to his offline voice by himself.
+- **Blocks that can really exist.** Every build is checked against vanilla survival rules: no lanterns stuck to the side of a wall, no torches or plants floating in mid-air, no half doors or beds, no gravity blocks hanging over nothing. BlockForge fixes what it can (a wall lantern gets a small fence bracket to hang from), asks Claude to fix the rest, and lists every auto-fix in the build's details.
+- **Use your modpack.** In **Settings → Mods**, BlockForge finds your CurseForge, Modrinth, Prism, MultiMC, ATLauncher and GDLauncher instances, or you can point it at any mods folder. It reads every mod jar on your PC (furniture, biome and decoration mods...), lists the blocks, lets you switch mods on and off, and lets Claude build with those blocks. Modded blocks show with their real texture colours, and the schematic is saved for your pack's Minecraft version.
 - **Change it with Claude.** For example, "make the roof dark oak and add a balcony". You get a new version,
   and the original is kept.
 - **Free downloads in every format:** `.schem` (WorldEdit / FAWE), `.litematic` (Litematica), `.nbt` (structure
