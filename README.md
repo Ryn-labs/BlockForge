@@ -34,11 +34,22 @@ Then you download it in the format you need. There's no paywall and no per-downl
   [PhantomMarket](https://market.phantom-node.com/) and [MineSchematic](https://mineschematic.com/). It studies
   the closest builds' size, palette and details, then designs its own. The Sources tab lists every build it
   looked at, with links. You can edit the site list in Settings.
-- **Meet Flint, your guide.** A blocky story-mode-style builder with a natural HD voice, an expressive face and
-  lots of animations (wave, think, search, type, build, celebrate, dance and more). His mouth moves with his
-  voice. He gives you a tour, talks you through each build as it happens, and builds the schematic in front of
-  you, layer by layer. The voice is generated offline on your PC, and you can switch to a Windows voice, game
-  blips or silent.
+- **Meet Flint, your guide.** A blocky story-mode-style builder with a cartoon outline, an expressive face
+  (14 expressions), emote bubbles and **about 40 animations**: wave, nod, salute, hammer, mine, read plans,
+  search, bright idea, victory, disco, robot, moonwalk, backflip, flex, laugh, love, scared, sleep and more. He
+  gives you a tour, talks you through each build as it happens, builds the schematic in front of you layer by
+  layer, naps when you leave him alone, and wakes up grumpy if you poke him. Try every animation in
+  **Settings → Guide**.
+- **Make Flint yours.** Choose his hair, hat (hard hat, wizard hat, crown...), outfit, eye colour, goggles,
+  backpack, scarf, cape and every colour, plus his name and how chatty he is.
+- **Pick his voice.** The built-in natural **HD voice** works offline and free. Download more free voices (Bryce,
+  Norman, John, Kristin, Linda, Kathleen, Sam, Alba) with one click, or use a Windows voice, game blips, or
+  silent. Pitch and speed are adjustable, and his mouth follows the sound.
+- **ElevenLabs voices.** Got an [ElevenLabs](https://elevenlabs.io) account? Paste your API key in
+  **Settings → Guide**, load your voices (including cloned ones), pick a model and Flint speaks with it. A
+  **Save my credits** switch keeps ElevenLabs for the big moments and uses the free voice for quick chatter,
+  repeated lines are cached so they never cost credits twice, and your remaining credits are shown. If your
+  credits run out or the key fails, Flint falls back to his offline voice by himself.
 - **Change it with Claude.** For example, "make the roof dark oak and add a balcony". You get a new version,
   and the original is kept.
 - **Free downloads in every format:** `.schem` (WorldEdit / FAWE), `.litematic` (Litematica), `.nbt` (structure
