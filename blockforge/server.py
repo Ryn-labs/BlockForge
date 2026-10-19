@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import engine, exporters, prompts, sandbox, store, tts, updater  # noqa: E402
+from blockforge import eleven, engine, exporters, prompts, sandbox, store, tts, updater, voices  # noqa: E402
 from blockforge.version import VERSION  # noqa: E402
 
 PORT = int(os.environ.get("BLOCKFORGE_PORT", "8765"))
@@ -34,7 +34,7 @@ def start_job(fn, **kw):
         try:
             job["build"] = fn(log=log, **kw)
             job["status"] = "done"
-        except (engine.EngineError, sandbox.ScriptError, updater.UpdateError) as e:
+        except (engine.EngineError, sandbox.ScriptError, updater.UpdateError, RuntimeError, ValueError, OSError) as e:
             job["error"] = str(e)
             job["status"] = "error"
         except Exception as e:                       # noqa: BLE001
@@ -110,12 +110,17 @@ class H(BaseHTTPRequestHandler):
                 s = store.load_settings()
                 key = s.get("api_key") or ""
                 return self.send(200, {
-                    "settings": {**{k: v for k, v in s.items() if k != "providers"}, "api_key": ("•" * 8 + key[-4:]) if key else ""},
+                    "settings": {**{k: v for k, v in s.items() if k not in ("providers", "eleven")}, "api_key": ("•" * 8 + key[-4:]) if key else ""},
                     "has_api_key": bool(key or os.environ.get("ANTHROPIC_API_KEY")),
                     "claude_code": engine.claude_status(),
                     "models": engine.MODELS, "formats": {k: v[0] for k, v in exporters.FORMATS.items()},
                     "default_sites": prompts.DEFAULT_SITES, "palettes": list(prompts.PALETTES),
-                    "version": VERSION, "hd_voice": tts.available(), "hd_voices": tts.voices(),
+                    "version": VERSION, "hd_voice": tts.available(), "hd_voices": voices.installed(),
+                    "voice_catalog": voices.catalog_info(), "eleven_models": eleven.MODELS,
+                    "eleven": {"key_set": bool((s.get("eleven") or {}).get("api_key")),
+                               "voice_id": (s.get("eleven") or {}).get("voice_id", ""),
+                               "voice_name": (s.get("eleven") or {}).get("voice_name", ""),
+                               "model": (s.get("eleven") or {}).get("model") or "eleven_flash_v2_5"},
                     "providers": {pid: {**meta, "key_set": bool(((s.get("providers") or {}).get(pid) or {}).get("api_key")),
                                         **{k: v for k, v in ((s.get("providers") or {}).get(pid) or {}).items() if k != "api_key"}}
                                   for pid, meta in engine.PROVIDERS.items()},
@@ -130,6 +135,24 @@ class H(BaseHTTPRequestHandler):
                 except (ValueError, RuntimeError, subprocess.TimeoutExpired) as e:
                     return self.err(400, str(e))
                 return self.send(200, wav, "audio/wav")
+            if parts[1:] == ["eleven", "voices"]:
+                try:
+                    return self.send(200, {"voices": eleven.list_voices(), "usage": eleven.usage()})
+                except eleven.ElevenError as e:
+                    return self.err(400, str(e))
+            if parts[1:] == ["eleven", "usage"]:
+                try:
+                    return self.send(200, {"usage": eleven.usage()})
+                except eleven.ElevenError as e:
+                    return self.err(400, str(e))
+            if parts[1:] == ["eleven", "tts"]:
+                q = parse_qs(urlparse(self.path).query)
+                try:
+                    mp3 = eleven.speak(q.get("text", [""])[0], q.get("voice", [None])[0], q.get("model", [None])[0],
+                                       q.get("speed", ["1"])[0])
+                except eleven.ElevenError as e:
+                    return self.err(400, str(e))
+                return self.send(200, mp3, "audio/mpeg")
             if parts[1:] == ["models"]:
                 pid = parse_qs(urlparse(self.path).query).get("provider", [""])[0]
                 try:
@@ -221,6 +244,16 @@ class H(BaseHTTPRequestHandler):
                 if "custom_palettes" in b:
                     b["custom_palettes"] = [{"name": str(p.get("name", ""))[:40], "description": str(p.get("description", ""))[:400]}
                                             for p in b["custom_palettes"] or [] if str(p.get("name", "")).strip()][:30]
+                if "eleven" in b and isinstance(b["eleven"], dict):
+                    cur = store.load_settings().get("eleven") or {}
+                    new = {**cur, **{k: str(b["eleven"][k]).strip() for k in ("voice_id", "voice_name", "model")
+                                     if k in b["eleven"]}}
+                    k = b["eleven"].get("api_key")
+                    if k is not None and not str(k).startswith("•"):
+                        new["api_key"] = str(k).strip()
+                    b["eleven"] = new
+                elif "eleven" in b:
+                    b.pop("eleven")
                 if "providers" in b:
                     cur = store.load_settings().get("providers") or {}
                     for pid, cfg in (b["providers"] or {}).items():
@@ -237,6 +270,12 @@ class H(BaseHTTPRequestHandler):
                     if k in b and not isinstance(b[k], dict):
                         b.pop(k)
                 return self.send(200, {"ok": True, "engine": store.save_settings(b)["engine"]})
+            if route == ["voices", "download"]:
+                vid = self.json_body().get("id", "")
+                if vid not in voices.CATALOG:
+                    return self.err(400, "Unknown voice")
+                job = start_job(lambda log=print: {"id": vid, "done": voices.download(vid, log)})
+                return self.send(200, {"job": job["id"]})
             if route == ["update"]:
                 def do_update(log=print):
                     res = updater.install(log)

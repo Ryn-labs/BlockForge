@@ -36,6 +36,7 @@ DEFAULT_SETTINGS = {
     "custom_palettes": [],                                 # [{"name": ..., "description": ...}]
     "ui": {},                                              # appearance choices made in Settings > Appearance
     "guide": {},
+    "eleven": {},                                          # ElevenLabs voice: {"api_key", "voice_id", "voice_name", "model"}
     "providers": {},                                       # other AIs: {id: {"api_key", "base_url", "model", "models"}}                                           # the guide character (name, voice, colours...)
 }
 USAGE_LOG = os.path.join(DATA, "usage.jsonl")

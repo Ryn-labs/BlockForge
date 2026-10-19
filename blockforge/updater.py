@@ -90,8 +90,18 @@ def install(log=print):
     log("Starting the installer. BlockForge will close and reopen when it's done.")
     exe = sys.executable                             # ...\BlockForge.exe in the installed app
     # Wait for this app to exit, install quietly (never restarting the PC), then reopen BlockForge.
-    script = (f'ping -n 4 127.0.0.1 >nul & msiexec /i "{path}" /passive /norestart & '
-              f'start "" "{exe}"')
-    subprocess.Popen(["cmd", "/c", script], creationflags=0x00000200 | 0x08000000,  # own group, no window
-                     close_fds=True, cwd=folder)
+    run_update(path, exe)
     return {"ok": True, "version": info["latest"]}
+
+
+def run_update(msi_path, exe):
+    """Wait for BlockForge to exit, install the MSI quietly (never restarting the PC), then reopen BlockForge.
+    The steps go in a .cmd file: passing them inline lets Python's argument quoting mangle the paths."""
+    script = os.path.join(os.path.dirname(msi_path), "run_update.cmd")
+    with open(script, "w", encoding="utf-8") as f:
+        f.write("@echo off\r\n"
+                "ping -n 4 127.0.0.1 >nul\r\n"
+                f'msiexec /i "{msi_path}" /passive /norestart\r\n'
+                f'start "" "{exe}"\r\n')
+    subprocess.Popen(["cmd", "/c", script], creationflags=0x00000200 | 0x08000000,  # own group, no window
+                     close_fds=True, cwd=os.path.dirname(msi_path))
