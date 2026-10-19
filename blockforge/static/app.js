@@ -441,8 +441,10 @@ async function openBuild(id, fresh = false) {
   $('#materials').innerHTML = (meta.materials || []).map(([n, c]) => {
     const col = '#' + blockColor(n).toString(16).padStart(6, '0');
     const stacks = c >= 64 ? `${Math.floor(c / 64)}×64${c % 64 ? ' + ' + (c % 64) : ''}` : '';
-    return `<li><span class="sw" style="background:${col}"></span><span class="nm">${esc(n.replace(/_/g, ' '))}</span><span class="ct">${c.toLocaleString()}${stacks ? '<br>' + stacks : ''}</span></li>`;
+    return `<li data-block="${esc(n)}" title="Click to highlight every ${esc(prettyBlock(n))} in the build"><span class="sw" style="background:${col}"></span><span class="nm">${esc(prettyBlock(n))}</span><span class="ct">${c.toLocaleString()}${stacks ? '<br>' + stacks : ''}</span></li>`;
   }).join('');
+  for (const li of $('#materials').querySelectorAll('li')) li.onclick = () => focusBlock(viewer.focusName === li.dataset.block ? null : li.dataset.block);
+  focusBlock(null);
   $('#code').value = code.code || '# This build was imported from a file, so it has no script.';
   $('#edit-card').hidden = !code.code;
   const refs = meta.references || [];
@@ -867,6 +869,59 @@ $('#prompt').addEventListener('input', () => {
     $('#redstone').checked = on;
     $('#redstone-note').textContent = on ? 'On: this sounds like a redstone build' : 'Turns on by itself for doors, farms, sorters…';
   }
+});
+
+// ---------------------------------------------------------------- identify blocks (hover label, click to highlight)
+const prettyBlock = n => n.replace(/^minecraft:/, '').split('_').map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(' ');
+const hexOf = rgb => '#' + rgb.map(v => Math.round(Math.pow(Math.max(0, v), 1 / 2.2) * 255).toString(16).padStart(2, '0')).join('');
+let namesOn = true;
+try { namesOn = localStorage.getItem('bf-names') !== 'off'; } catch {}
+$('#names-btn').classList.toggle('on', namesOn);
+viewer.hoverEnabled = namesOn;
+$('#names-btn').onclick = () => {
+  namesOn = !namesOn; viewer.hoverEnabled = namesOn;
+  $('#names-btn').classList.toggle('on', namesOn);
+  try { localStorage.setItem('bf-names', namesOn ? 'on' : 'off'); } catch {}
+  if (!namesOn) $('#block-tip').hidden = true;
+  toast(namesOn ? 'Hover a block to see what it is. Click it to highlight all of them.' : 'Block names off');
+};
+
+function focusBlock(name) {
+  if (viewer.focusName !== (name || null)) viewer.setFocus(name);
+  const chip = $('#focus-chip');
+  chip.hidden = !name;
+  document.querySelectorAll('#materials li').forEach(li => li.classList.toggle('on', li.dataset.block === name));
+  if (!name) return;
+  $('#focus-name').textContent = prettyBlock(name);
+  const c = viewer.counts?.[name] || 0;
+  $('#focus-count').textContent = `(${c.toLocaleString()} block${c === 1 ? '' : 's'}${c >= 64 ? `, ${Math.floor(c / 64)} stack${c >= 128 ? 's' : ''}${c % 64 ? ' + ' + (c % 64) : ''}` : ''})`;
+  $('#focus-sw').style.background = '#' + blockColor(name).toString(16).padStart(6, '0');
+}
+$('#focus-clear').onclick = () => focusBlock(null);
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && viewer.focusName && !document.querySelector('dialog[open]')) focusBlock(null); });
+
+viewer.enablePicking({
+  onHover(info, cx, cy) {
+    const tip = $('#block-tip');
+    if (!info) { tip.hidden = true; return; }
+    const props = Object.entries(info.props).filter(([k]) => !['waterlogged', 'power', 'powered', 'persistent', 'distance'].includes(k));
+    tip.innerHTML = `<div class="bt-head"><span class="sw" style="background:${hexOf(info.color)}"></span><b>${esc(prettyBlock(info.name))}</b></div>
+      <div class="bt-id">minecraft:${esc(info.name)}</div>
+      ${props.length ? `<div class="bt-props">${props.map(([k, v]) => `<span>${esc(k)}: ${esc(v)}</span>`).join('')}</div>` : ''}
+      <div class="bt-foot">At x ${info.x}, y ${info.y}, z ${info.z} · ${info.count.toLocaleString()} in this build<br>${viewer.focusName ? 'Click to show everything again' : 'Click to highlight every one'}</div>`;
+    tip.hidden = false;
+    const st = document.querySelector('.stage').getBoundingClientRect();
+    let x = cx - st.left + 16, y = cy - st.top + 16;
+    const w = tip.offsetWidth, h = tip.offsetHeight;
+    if (x + w > st.width - 8) x = cx - st.left - w - 14;
+    if (y + h > st.height - 8) y = cy - st.top - h - 14;
+    tip.style.left = Math.max(8, x) + 'px'; tip.style.top = Math.max(8, y) + 'px';
+  },
+  onPick(info) {
+    if (!namesOn && !viewer.focusName) return;
+    if (!info) { if (viewer.focusName) focusBlock(null); return; }
+    focusBlock(viewer.focusName === info.name ? null : info.name);
+  },
 });
 // ---------------------------------------------------------------- downloads (always reachable)
 async function downloadBuild(id, fmt = 'schem') {

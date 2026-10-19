@@ -221,11 +221,15 @@ export class Viewer {
     this.data = data;
     const [W, H, L] = data.size;
     this.W = W; this.H = H; this.L = L;
-    const pal = data.palette.map(st => {
+    const pal = data.palette.map((st, i) => {
       const s = shapeOf(st);
-      return { st, s, rgb: srgb(blockColor(st)), full: s.kind === 'full', solidish: s.kind === 'full' || s.kind === 'glass' };
+      return { st, i, name: st.split('[')[0].replace('minecraft:', ''), s, rgb: srgb(blockColor(st)),
+        full: s.kind === 'full', solidish: s.kind === 'full' || s.kind === 'glass' };
     });
     this.pal = pal;
+    this.focusName = null;
+    this.counts = {};
+    for (let i = 3; i < data.blocks.length; i += 4) { const n = pal[data.blocks[i]].name; this.counts[n] = (this.counts[n] || 0) + 1; }
     const grid = new Map();
     const f = data.blocks;
     for (let i = 0; i < f.length; i += 4) grid.set((f[i + 1] * L + f[i + 2]) * W + f[i], f[i + 3]);
@@ -247,8 +251,9 @@ export class Viewer {
   rebuild() {
     for (const c of [...this.group.children]) { c.geometry?.dispose(); this.group.remove(c); }
     if (!this.data) return;
-    const opaque = new MeshBuilder(), glass = new MeshBuilder(), water = new MeshBuilder();
+    const opaque = new MeshBuilder(), glass = new MeshBuilder(), water = new MeshBuilder(), ghostMb = new MeshBuilder();
     const f = this.data.blocks;
+    const fn = this.focusName, inF = q => !fn || q.name === fn;
     const DIRS4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
     for (let i = 0; i < f.length; i += 4) {
       const x = f[i], y = f[i + 1], z = f[i + 2];
@@ -259,14 +264,15 @@ export class Viewer {
       const h = ((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) >>> 0;
       const j = 0.93 + ((h % 1000) / 1000) * 0.12;
       const [r, g, b] = p.rgb;
+      const ghost = !inF(p);
       if (k === 'full' || k === 'glass' || k === 'water') {
-        const mb = k === 'full' ? opaque : k === 'glass' ? glass : water;
+        const mb = ghost ? ghostMb : k === 'full' ? opaque : k === 'glass' ? glass : water;
         const box = k === 'water' ? [0, 0, 0, 1, (this.at(x, y + 1, z)?.s.kind === 'water') ? 1 : .875, 1] : [0, 0, 0, 1, 1, 1];
         for (const face of FACES) {
           const n = this.at(x + face.d[0], y + face.d[1], z + face.d[2]);
           if (n) {
-            if (n.full) continue;
-            if (k !== 'full' && n.s.kind === k) continue;
+            if (n.full && (ghost || inF(n))) continue;      // a highlighted block shows through faded neighbours
+            if (k !== 'full' && n.s.kind === k && inF(n) === !ghost) continue;
           }
           mb.quad(face, x, y, z, box, r * j, g * j, b * j);
         }
@@ -288,7 +294,7 @@ export class Viewer {
           if (dz === -1) boxes.push([arm, ay0, 0, 1 - arm, ay1, a]);
         }
       }
-      const tgt = p.st.includes('pane') || p.st.includes('glass') ? glass : opaque;
+      const tgt = ghost ? ghostMb : p.st.includes('pane') || p.st.includes('glass') ? glass : opaque;
       for (const box of boxes) for (const face of FACES) tgt.quad(face, x, y, z, box, r * j, g * j, b * j);
     }
     const ox = -this.W / 2, oz = -this.L / 2;
@@ -301,6 +307,71 @@ export class Viewer {
     add(opaque, new THREE.MeshLambertMaterial({ vertexColors: true }));
     add(water, new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: .6, depthWrite: false }));
     add(glass, new THREE.MeshLambertMaterial({ vertexColors: true, transparent: true, opacity: .38, depthWrite: false }));
+    if (ghostMb.idx.length) {
+      const m = new THREE.Mesh(ghostMb.geometry(), new THREE.MeshBasicMaterial({ color: 0x9aa3b5, transparent: true, opacity: 0.07, depthWrite: false }));
+      m.position.set(ox, 0, oz); m.userData.ghost = true; m.renderOrder = 2;
+      this.group.add(m);
+    }
+  }
+
+  /** Show only blocks named `name` (e.g. 'stone_bricks'); the rest turn into faint ghosts. null clears. */
+  setFocus(name) {
+    this.focusName = name || null;
+    this.rebuild();
+  }
+
+  // ------------------------------------------------------------ hover / click to identify blocks
+  enablePicking({ onHover, onPick } = {}) {
+    this.onHover = onHover; this.onPick = onPick;
+    const el = this.renderer.domElement, ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+    const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1.04, 1.04, 1.04)),
+      new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 0.95 }));
+    edges.renderOrder = 10; edges.visible = false;
+    this.scene.add(edges);
+    this.pickBox = edges;
+    const pick = e => {
+      if (!this.data || this.building) return null;
+      const r = el.getBoundingClientRect();
+      ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      ray.setFromCamera(ndc, this.camera);
+      const meshes = this.group.children.filter(m => !m.userData.ghost);
+      const hit = ray.intersectObjects(meshes, false)[0];
+      if (!hit) return null;
+      const n = hit.face.normal, lp = hit.point.clone().sub(hit.object.position);
+      for (const sgn of [-1, 1]) {                    // step just inside the face we hit
+        const x = Math.floor(lp.x + sgn * n.x * 0.01), y = Math.floor(lp.y + sgn * n.y * 0.01), z = Math.floor(lp.z + sgn * n.z * 0.01);
+        const v = this.grid.get((y * this.L + z) * this.W + x);
+        if (v !== undefined && y <= this.cutY) {
+          const pe = this.pal[v];
+          if (this.focusName && pe.name !== this.focusName) continue;
+          const props = {};
+          if (pe.st.includes('[')) for (const kv of pe.st.slice(pe.st.indexOf('[') + 1, -1).split(',')) { const [a, b] = kv.split('='); props[a] = b; }
+          return { x, y, z, state: pe.st, name: pe.name, props, count: this.counts[pe.name] || 0, color: pe.rgb };
+        }
+      }
+      return null;
+    };
+    let pending = null, down = null;
+    el.addEventListener('pointermove', e => {
+      if (e.buttons) { edges.visible = false; this.onHover?.(null); return; }   // dragging the camera
+      if (pending) return;
+      pending = requestAnimationFrame(() => {
+        pending = null;
+        const info = this.hoverEnabled === false ? null : pick(e);
+        if (info) {
+          edges.position.set(info.x + 0.5 - this.W / 2, info.y + 0.5, info.z + 0.5 - this.L / 2);
+          edges.visible = true;
+        } else edges.visible = false;
+        this.onHover?.(info, e.clientX, e.clientY);
+      });
+    });
+    el.addEventListener('pointerleave', () => { edges.visible = false; this.onHover?.(null); });
+    el.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; });
+    el.addEventListener('pointerup', e => {
+      if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5 || e.button !== 0) { down = null; return; }
+      down = null;
+      this.onPick?.(pick(e));
+    });
   }
 
   buildGrid() {

@@ -95,6 +95,8 @@
       <ul id="progress-log"></ul>
     </div>
     <div class="build-banner" id="build-banner" hidden><span id="build-banner-text">Building…</span><div class="bar"><i id="build-banner-bar"></i></div><button class="btn ghost small" id="skip-build">Skip</button></div>
+    <div class="block-tip" id="block-tip" hidden></div>
+    <div class="focus-chip" id="focus-chip" hidden><span class="sw" id="focus-sw"></span><span>Showing only <b id="focus-name"></b> <span class="muted" id="focus-count"></span></span><button class="btn ghost small" id="focus-clear" title="Show everything (Esc)">Show all ✕</button></div>
     <div class="toolbar" id="toolbar" hidden>
       <div class="layer">
         <span>Layers</span>
@@ -107,6 +109,7 @@
         <div class="dl-menu" id="dl-menu" hidden></div>
       </div>
       <button class="icon-btn" id="reset-view" title="Reset camera">⟲</button>
+      <button class="icon-btn on" id="names-btn" title="Show block names when you hover (click a block to highlight every one like it)">🏷</button>
       <button class="icon-btn" id="shot" title="Save a screenshot">📷</button>
     </div>
   </section>
