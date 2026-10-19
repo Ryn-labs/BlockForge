@@ -230,25 +230,62 @@
         <div class="field"><label for="g-chatty">How chatty</label>
           <select id="g-chatty"><option value="quiet">Quiet (important stuff only)</option><option value="normal">Normal</option><option value="chatty">Chatty (tips and jokes)</option></select></div>
       </div>
+
       <h3>Voice</h3>
-      <div class="row2">
-        <div class="field"><label for="g-style">Voice type</label>
-          <select id="g-style"><option value="hd">HD voice (natural, offline)</option><option value="speech">Windows voice</option><option value="blips">Game blips</option><option value="off">Silent (text only)</option></select></div>
-        <div class="field"><label for="g-voice">Which voice</label><select id="g-voice"></select></div>
+      <div class="field"><label for="g-style">Voice type</label>
+        <select id="g-style">
+          <option value="eleven">ElevenLabs (most realistic, needs your own key)</option>
+          <option value="hd">HD voice (natural, free, offline)</option>
+          <option value="speech">Windows voice</option>
+          <option value="blips">Game blips</option>
+          <option value="off">Silent (text only)</option>
+        </select></div>
+
+      <div class="vpanel" id="vp-eleven" hidden>
+        <div class="field"><label for="el-key">ElevenLabs API key <a class="link-btn small" href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noopener">Get a key</a></label>
+          <input id="el-key" type="password" autocomplete="off" placeholder="Paste your ElevenLabs key"></div>
+        <div class="row-btns"><button type="button" class="btn small" id="el-load">Load my voices</button><span class="muted small" id="el-credits"></span></div>
+        <div class="row2">
+          <div class="field"><label for="el-voice">Voice</label><select id="el-voice"></select></div>
+          <div class="field"><label for="el-model">Model</label><select id="el-model"></select></div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="g-eleven_save"><span class="switch"></span>
+          <span><b>Save my credits</b><small class="muted">Use ElevenLabs for the big moments (tour, finished builds, questions) and the free HD voice for quick chatter. Repeated lines are cached, so they never cost credits twice.</small></span></label>
+        <div class="status" id="el-status" hidden></div>
       </div>
-      <div class="row2">
-        <div class="field"><label for="g-pitch">Pitch <span id="g-pitch-val" class="muted"></span> <span class="muted small" id="g-pitch-note"></span></label><input type="range" id="g-pitch" min="0.5" max="2" step="0.05"></div>
+
+      <div class="field" id="vp-local"><label for="g-voice" id="g-voice-label">Which voice</label><select id="g-voice"></select></div>
+      <div id="voice-more" hidden>
+        <p class="muted small" style="margin:4px 0 6px">More free HD voices: one click to download (about 60 MB each), then pick them above.</p>
+        <div class="voice-list" id="voice-list"></div>
+      </div>
+      <div class="row2" id="vp-sliders">
+        <div class="field"><label for="g-pitch">Pitch <span id="g-pitch-val" class="muted"></span></label><input type="range" id="g-pitch" min="0.6" max="1.6" step="0.05"></div>
         <div class="field"><label for="g-rate">Speed <span id="g-rate-val" class="muted"></span></label><input type="range" id="g-rate" min="0.6" max="1.6" step="0.05"></div>
       </div>
       <div class="row-btns"><button type="button" class="btn small" id="g-test">▶ Test voice</button><button type="button" class="btn ghost small" id="g-tour">Replay the tour</button></div>
+
       <h3>Look</h3>
+      <div class="row2">
+        <div class="field"><label for="g-hairStyle">Hair</label><select id="g-hairStyle"></select></div>
+        <div class="field"><label for="g-headwear">Hat</label><select id="g-headwear"></select></div>
+      </div>
+      <div class="row2">
+        <div class="field"><label for="g-outfit">Outfit</label><select id="g-outfit"></select></div>
+        <div class="field"><label for="g-eyes">Eye colour</label><input type="color" id="g-eyes"></div>
+      </div>
       <div class="look-grid">
-        <label><input type="color" id="g-hoodie"> Hoodie</label><label><input type="color" id="g-hair"> Hair</label><label><input type="color" id="g-skin"> Skin</label>
-        <label><input type="color" id="g-bandana"> Bandana</label><label><input type="color" id="g-pants"> Trousers</label><label><input type="color" id="g-shoes"> Shoes</label>
+        <label><input type="color" id="g-hoodie"> Top</label><label><input type="color" id="g-pants"> Trousers</label><label><input type="color" id="g-shoes"> Shoes</label>
+        <label><input type="color" id="g-hair"> Hair</label><label><input type="color" id="g-skin"> Skin</label><label><input type="color" id="g-bandana"> Accent</label>
       </div>
-      <div class="field checks">
-        <label><input type="checkbox" id="g-viewer"> Let them build in the 3D view (block-by-block build animation)</label>
+      <div class="field checks gear">
+        <label><input type="checkbox" id="g-goggles"> Goggles</label><label><input type="checkbox" id="g-backpack"> Backpack</label>
+        <label><input type="checkbox" id="g-scarf"> Scarf</label><label><input type="checkbox" id="g-cape"> Cape</label>
+        <label><input type="checkbox" id="g-outline"> Cartoon outline</label>
+        <label><input type="checkbox" id="g-in_viewer"> Builds in the 3D view</label>
       </div>
+      <h3>Try his animations</h3>
+      <div class="anim-gallery" id="anim-gallery"></div>
       <div class="row-btns"><button type="button" class="btn ghost small" id="g-reset">Reset guide</button></div>
     </div>
 

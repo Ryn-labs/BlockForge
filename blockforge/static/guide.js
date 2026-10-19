@@ -1,20 +1,23 @@
 // Flint, the guide: a little 3D character in the corner with a story-mode dialogue box and a voice.
 import * as THREE from 'three';
-import { createCharacter, Animator, LOOK_DEFAULTS } from './character.js';
+import { createCharacter, Animator, LOOK_DEFAULTS, ANIMATIONS } from './character.js';
 
 export const GUIDE_DEFAULTS = {
   enabled: true, name: 'Flint', voice: 'auto', voice_style: 'hd', hd_voice: 'joe', pitch: 1.0, rate: 1.0, volume: 0.9,
-  chatty: 'normal', in_viewer: true, look: { ...LOOK_DEFAULTS },
+  chatty: 'normal', in_viewer: true, eleven_save: true, look: { ...LOOK_DEFAULTS },
 };
 
 const pick = a => a[(Math.random() * a.length) | 0];
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const ONCE_LEN = { sleep: 5, stretch: 2.8, backflip: 1.3, bow: 1.9, spin: 1.4, jump: 0.9, nod: 1.4, shake: 1.2, salute: 1.6,
+  thumbsup: 1.8, surprised: 1.6, idea: 2, facepalm: 2.2, scared: 2.4, victory: 2.6, hammer: 3.2, mine: 3.2, walk: 3, run: 3, sit: 3.5 };
 
 // ---------------------------------------------------------------- voice
 class Voice {
   constructor() {
-    this.ctx = null;
-    this.voices = [];
-    const load = () => { this.voices = (window.speechSynthesis?.getVoices() || []); };
+    this.ctx = null; this.token = 0; this.voices = [];
+    this.elevenBroken = false; this.hdBroken = false;
+    const load = () => { this.voices = window.speechSynthesis?.getVoices() || []; };
     load();
     window.speechSynthesis?.addEventListener?.('voiceschanged', load);
   }
@@ -24,18 +27,18 @@ class Voice {
   choose(pref) {
     const vs = this.list();
     if (pref && pref !== 'auto') { const v = vs.find(v => v.voiceURI === pref || v.name === pref); if (v) return v; }
-    return vs.find(v => /Guy|Ryan|Davis|Andrew|Brian|Christopher|Eric|Mark/i.test(v.name) && /en-(US|GB)/i.test(v.lang))
+    return vs.find(v => /Guy|Ryan|Davis|Andrew|Brian|Christopher|Eric|Mark|George/i.test(v.name) && /en-(US|GB)/i.test(v.lang))
       || vs.find(v => /en-(US|GB)/i.test(v.lang)) || vs[0] || null;
   }
 
   stop() {
-    this.token = (this.token || 0) + 1;
+    this.token++;
     try { window.speechSynthesis?.cancel(); } catch {}
     this.blipStop = true;
     if (this.src) { try { this.src.onended = null; this.src.stop(); } catch {} this.src = null; this.analyser = null; }
   }
 
-  /** How loud the HD voice is right now (0..1), for lip sync. */
+  /** Loudness of what's playing right now (0..1), for lip sync. */
   level() {
     if (!this.analyser) return null;
     const a = this.levelBuf || (this.levelBuf = new Uint8Array(this.analyser.fftSize));
@@ -45,43 +48,59 @@ class Voice {
     return Math.sqrt(sum / a.length);
   }
 
-  unlock() {
-    try { this.ctx = this.ctx || new AudioContext(); if (this.ctx.state === 'suspended') this.ctx.resume(); } catch {}
+  unlock() { try { this.ctx = this.ctx || new AudioContext(); if (this.ctx.state === 'suspended') this.ctx.resume(); } catch {} }
+
+  async play(url, cfg, rate, onStart, onEnd, token) {
+    const r = await fetch(url);
+    if (!r.ok) {
+      let msg = 'voice ' + r.status;
+      try { msg = (await r.json()).error || msg; } catch {}
+      throw new Error(msg);
+    }
+    const buf = await r.arrayBuffer();
+    this.unlock();
+    const audio = await this.ctx.decodeAudioData(buf);
+    if (token !== this.token) return;                      // a newer line started meanwhile
+    const src = this.ctx.createBufferSource();
+    src.buffer = audio; src.playbackRate.value = rate;
+    const an = this.ctx.createAnalyser(); an.fftSize = 512;
+    const g = this.ctx.createGain(); g.gain.value = cfg.volume;
+    src.connect(an); an.connect(g); g.connect(this.ctx.destination);
+    this.src = src; this.analyser = an;
+    src.onended = () => { if (this.src === src) { this.src = null; this.analyser = null; } onEnd?.(); };
+    src.start();
+    onStart?.();
   }
 
-  /** Natural offline voice made by the BlockForge app (Piper). Falls back to the Windows voice. */
-  async hd(text, cfg, onStart, onEnd) {
+  /** Speak text with the voice type in cfg.voice_style. Falls back to the next best voice on any problem. */
+  async speak(text, cfg, onStart, onEnd) {
+    this.stop();
     const token = this.token;
+    const clean = text.replace(/[*_`#]/g, '').replace(/\s+/g, ' ').trim();
+    let style = cfg.voice_style;
+    if (style === 'off' || !clean) { onEnd?.(); return; }
+    if (style === 'eleven' && (this.elevenBroken || !cfg.eleven_ready)) style = 'hd';
+    if (style === 'hd' && (this.hdBroken || !cfg.hd_ready)) style = 'speech';
     try {
-      const r = await fetch(`/api/tts?voice=${encodeURIComponent(cfg.hd_voice || 'joe')}&speed=${cfg.rate}&text=${encodeURIComponent(text)}`);
-      if (!r.ok) throw new Error('tts ' + r.status);
-      const buf = await r.arrayBuffer();
-      this.unlock();
-      const audio = await this.ctx.decodeAudioData(buf);
-      if (token !== this.token) return;                     // a newer line started meanwhile
-      const src = this.ctx.createBufferSource();
-      src.buffer = audio;
-      const an = this.ctx.createAnalyser(); an.fftSize = 512;
-      const g = this.ctx.createGain(); g.gain.value = cfg.volume;
-      src.connect(an); an.connect(g); g.connect(this.ctx.destination);
-      this.src = src; this.analyser = an;
-      src.onended = () => { if (this.src === src) { this.src = null; this.analyser = null; } onEnd?.(); };
-      src.start();
-      onStart?.();
+      if (style === 'eleven') {
+        const q = `/api/eleven/tts?speed=${clamp(cfg.rate, 0.7, 1.2)}&text=${encodeURIComponent(clean)}`;
+        return await this.play(q, cfg, 1, onStart, onEnd, token);
+      }
+      if (style === 'hd') {
+        const pitch = clamp(cfg.pitch || 1, 0.6, 1.6);                  // pitch = playback speed, compensated in the request
+        const q = `/api/tts?voice=${encodeURIComponent(cfg.hd_voice || 'joe')}&speed=${clamp(cfg.rate / pitch, 0.5, 1.6).toFixed(2)}&text=${encodeURIComponent(clean)}`;
+        return await this.play(q, cfg, pitch, onStart, onEnd, token);
+      }
     } catch (e) {
       if (token !== this.token) return;
-      this.hdBroken = true;                                 // e.g. voice missing: use the Windows voice instead
-      this.speak(text, { ...cfg, voice_style: 'speech' }, onStart, onEnd);
+      const msg = String(e.message || e);
+      if (style === 'eleven') {
+        if (!/busy|too many/i.test(msg)) this.elevenBroken = true;
+        window.dispatchEvent(new CustomEvent('guide-voice-error', { detail: msg }));
+      } else this.hdBroken = true;
+      return this.speak(text, { ...cfg, voice_style: style === 'eleven' ? 'hd' : 'speech' }, onStart, onEnd);
     }
-  }
-
-  /** Speak text. Returns a promise that resolves when done. onWord fires as words are spoken. */
-  speak(text, cfg, onStart, onEnd) {
-    this.stop();
-    const clean = text.replace(/[*_`#]/g, '').replace(/\s+/g, ' ');
-    if (cfg.voice_style === 'off' || !clean.trim()) { onEnd?.(); return; }
-    if (cfg.voice_style === 'hd' && !this.hdBroken) return this.hd(clean, cfg, onStart, onEnd);
-    if (cfg.voice_style === 'blips' || !window.speechSynthesis || !this.list().length) return this.blips(clean, cfg, onStart, onEnd);
+    if (style === 'blips' || !window.speechSynthesis || !this.list().length) return this.blips(clean, cfg, onStart, onEnd);
     const u = new SpeechSynthesisUtterance(clean);
     const v = this.choose(cfg.voice);
     if (v) u.voice = v;
@@ -91,15 +110,15 @@ class Voice {
     speechSynthesis.speak(u);
   }
 
-  /** Story-game style "blip" voice made with WebAudio (works with no TTS voices installed). */
+  /** Story-game style "blip" voice made with WebAudio (works with no voices installed). */
   blips(text, cfg, onStart, onEnd) {
-    try { this.ctx = this.ctx || new AudioContext(); } catch { onEnd?.(); return; }
+    try { this.unlock(); } catch { onEnd?.(); return; }
     const ctx = this.ctx;
     this.blipStop = false;
     onStart?.();
     const chars = [...text];
     let i = 0;
-    const base = 180 * cfg.pitch;
+    const base = 180 * (cfg.pitch || 1);
     const tick = () => {
       if (this.blipStop || i >= chars.length) { onEnd?.(); return; }
       const c = chars[i++];
@@ -124,12 +143,12 @@ export class Guide {
   constructor(stageEl, opts = {}) {
     this.cfg = { ...GUIDE_DEFAULTS, ...opts };
     this.voice = new Voice();
-    // browsers only allow sound after the first click, so unlock audio then
-    const unlock = () => { this.voice.unlock(); removeEventListener('pointerdown', unlock); };
-    addEventListener('pointerdown', unlock);
     this.queue = [];
     this.current = null;
-    this.lastLine = 0;
+    this.lastLine = Date.now();
+    this.asleep = false;
+    const unlock = () => { this.voice.unlock(); removeEventListener('pointerdown', unlock); };
+    addEventListener('pointerdown', unlock);
     this.el = document.createElement('div');
     this.el.className = 'guide';
     this.el.innerHTML = `
@@ -160,12 +179,11 @@ export class Guide {
     this.renderer.setSize(190, 240, false);
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(30, 190 / 240, 0.1, 50);
-    this.camera.position.set(0.9, 1.75, 5.4);
-    this.camera.lookAt(0, 1.15, 0);
+    this.camera.position.set(0.8, 1.6, 5.7);
+    this.camera.lookAt(0, 1.3, 0);
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x667080, 1.7));
     const key = new THREE.DirectionalLight(0xfff2dd, 1.6); key.position.set(2, 3, 4); this.scene.add(key);
-    const rim = new THREE.DirectionalLight(0x9fd0ff, 0.8); rim.position.set(-3, 2, -2); this.scene.add(rim);
-    // a grass block to stand on
+    const rim = new THREE.DirectionalLight(0x9fd0ff, 0.9); rim.position.set(-3, 2, -2); this.scene.add(rim);
     const top = new THREE.MeshLambertMaterial({ color: 0x6a9b3e }), side = new THREE.MeshLambertMaterial({ color: 0x866043 });
     const ground = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.5, 1.5), [side, side, top, side, side, side]);
     ground.position.y = -0.25;
@@ -186,11 +204,13 @@ export class Guide {
 
   apply(cfg) {
     this.cfg = { ...GUIDE_DEFAULTS, ...cfg, look: { ...LOOK_DEFAULTS, ...(cfg.look || {}) } };
+    this.voice.elevenBroken = false; this.voice.hdBroken = false;
     if (this.ch) this.scene.remove(this.ch.root);
     this.ch = createCharacter(this.cfg.look);
     this.anim = new Animator(this.ch);
     this.anim.levelFn = () => this.voice.level();
     this.scene.add(this.ch.root);
+    if (this.asleep) this.anim.play('sleep');
     this.el.querySelector('.guide-name').textContent = this.cfg.name;
     this.el.querySelector('.guide-mini').textContent = this.cfg.name[0] || 'F';
     this.el.hidden = !this.cfg.enabled;
@@ -206,17 +226,31 @@ export class Guide {
 
   get active() { return this.cfg.enabled && !this.hiddenNow; }
 
-  /** Queue a line. opts: anim, expr, choices [{label, value}], hold (ms), important, turn */
+  wake() {
+    if (!this.asleep) return;
+    this.asleep = false; this.restAnim = 'idle';
+    this.anim.emote('❗', 1.2);
+  }
+
+  /** Queue a line. opts: anim, expr, choices [{label, value}], hold (ms), important, interrupt, turn */
   say(text, opts = {}) {
     if (!this.active) return Promise.resolve(null);
     if (opts.chatter && this.cfg.chatty === 'quiet') return Promise.resolve(null);
+    this.wake();
     return new Promise(res => {
-      const line = { text, ...opts, res };
+      const line = { text, ...opts, res, big: !!(opts.choices || opts.important || opts.big) };
       if (opts.interrupt) { this.queue = []; if (this.current) this.finish(null); }
       if (this.queue.length > 3 && !opts.important) this.queue.splice(1, this.queue.length - 3);
       this.queue.push(line);
       if (!this.current) this.next();
     });
+  }
+
+  /** Which voice this line uses. ElevenLabs credits are saved for the big moments when eleven_save is on. */
+  lineCfg(line) {
+    const c = this.cfg;
+    if (c.voice_style === 'eleven' && c.eleven_save && !line.big && !line.test) return { ...c, voice_style: 'hd' };
+    return c;
   }
 
   next() {
@@ -232,12 +266,10 @@ export class Guide {
     clearTimeout(this.hideT);
     this.lastLine = Date.now();
     this.box.hidden = false; this.box.classList.remove('fade');
-    this.anim.express(line.expr || 'happy');
-    this.anim.play(line.anim || 'talk', line.animOnce ? { once: true, duration: line.animOnce, then: 'talk' } : {});
+    this.anim.play(line.anim || 'talk', { ...(line.animOnce ? { once: true, duration: line.animOnce, then: 'talk' } : {}), expr: line.expr || 'happy' });
     this.turn = line.turn ?? 0.25;
     this.choicesEl.innerHTML = '';
     this.el.querySelector('.guide-next').hidden = !!line.choices;
-    // typewriter
     clearInterval(this.typeT);
     const full = line.text;
     let i = 0;
@@ -248,16 +280,16 @@ export class Guide {
       this.textEl.textContent = full.slice(0, i);
       if (i >= full.length) { clearInterval(this.typeT); this.typing = false; this.showChoices(line); }
     }, 22);
-    // voice + lip sync
     this.anim.talking = full.length * 0.055;
-    this.voice.speak(full, this.cfg, () => { this.anim.talking = Infinity; }, () => {
+    const cfg = this.lineCfg(line);
+    this.voice.speak(full, cfg, () => { this.anim.talking = Infinity; }, () => {
       this.anim.talking = 0;
       if (this.current === line && !line.choices) {
         clearTimeout(this.advT);
         this.advT = setTimeout(() => { if (this.current === line) this.finish(null); }, line.hold ?? 1400);
       }
     });
-    if (this.cfg.voice_style === 'off') {
+    if (cfg.voice_style === 'off') {
       clearTimeout(this.advT);
       if (!line.choices) this.advT = setTimeout(() => { if (this.current === line) this.finish(null); }, (line.hold ?? 1200) + full.length * 45);
     }
@@ -286,7 +318,7 @@ export class Guide {
 
   advance() {
     if (!this.current) return;
-    if (this.typing) {               // first click finishes the typewriter
+    if (this.typing) {
       clearInterval(this.typeT); this.typing = false;
       this.textEl.textContent = this.current.text; this.showChoices(this.current);
       return;
@@ -299,32 +331,60 @@ export class Guide {
   /** Play an animation without talking. */
   act(anim, expr, seconds = 2) {
     if (!this.active) return;
-    if (expr) this.anim.express(expr);
-    this.anim.play(anim, { once: true, duration: seconds, then: this.restAnim || 'idle' });
+    this.wake();
+    this.lastLine = Date.now();
+    this.anim.play(anim, { once: true, duration: seconds, then: this.restAnim || 'idle', ...(expr ? { expr } : {}) });
   }
 
-  setRest(anim) { this.restAnim = anim; if (!this.current) this.anim.play(anim); }
+  /** For the animation gallery in Settings. */
+  preview(anim) {
+    if (!this.active) { this.minimize(false); }
+    this.asleep = false; this.restAnim = 'idle';
+    this.queue = []; if (this.current) this.finish(null);
+    this.box.hidden = true;
+    this.lastLine = Date.now();
+    this.anim.play(anim, { once: true, duration: ONCE_LEN[anim] || 2.8, then: 'idle' });
+  }
+
+  setRest(anim) { if (this.asleep && anim === 'idle') return; this.restAnim = anim; if (!this.current) this.anim.play(anim); }
 
   poke() {
+    this.lastLine = Date.now();
+    if (this.asleep) { this.say('Huh? I wasn’t sleeping! I was just resting my eyes.', { anim: 'surprised', expr: 'surprised', interrupt: true }); return; }
     const lines = [
       ['Hey! That tickles.', 'surprised', 'jump'], ['Need a hand? I’ve got two blocky ones.', 'happy', 'wave'],
-      ['Fun fact: I once built a dirt house. Never again.', 'wink', 'shrug'], ['Watch this!', 'excited', 'dance'],
+      ['Fun fact: I once built a dirt house. Never again.', 'wink', 'shrug'], ['Watch this!', 'excited', 'backflip'],
       ['Hmm... what should we build next?', 'think', 'think'], ['Type an idea on the left and I’ll get to work.', 'happy', 'point'],
-      ['Ahh, the smell of fresh planks.', 'happy', 'idle'], ['Did you know you can drop in a picture? I can build from that too.', 'excited', 'talk'],
+      ['Ahh, the smell of fresh planks.', 'happy', 'stretch'], ['Did you know you can drop in a picture? I can build from that too.', 'excited', 'talk'],
+      ['Look at these muscles. Strong enough to carry a whole stack of stone.', 'smug', 'flex'], ['Boogie time!', 'wink', 'disco'],
+      ['Beep boop. I am totally a robot.', 'neutral', 'robot'], ['You’re doing great! Keep it up.', 'happy', 'thumbsup'],
+      ['Ugh, I stepped on a Lego. Wrong game.', 'angry', 'angry'], ['Aww, thanks for stopping by!', 'love', 'love'],
+      ['Reporting for duty!', 'determined', 'salute'], ['Hee hee, that was a good one.', 'laugh', 'laugh'],
     ];
     const [t, e, a] = pick(lines);
     this.say(t, { expr: e, anim: a, interrupt: true });
   }
 
   idleTick() {
-    if (!this.active || this.current || this.busy || Date.now() - this.lastLine < 45000) return;
-    if (this.cfg.chatty !== 'chatty' && Math.random() < 0.6) { this.act(pick(['dance', 'shrug', 'think', 'wave', 'jump']), pick(['happy', 'wink', 'think']), 2.5); return; }
+    if (!this.active || this.current || this.busy) return;
+    const idle = Date.now() - this.lastLine;
+    if (idle > 150000 && !this.asleep && this.cfg.chatty !== 'quiet') {
+      this.asleep = true; this.restAnim = 'sleep'; this.anim.play('sleep'); return;
+    }
+    if (this.asleep || idle < 45000) return;
+    if (this.cfg.chatty !== 'chatty' && Math.random() < 0.6) {
+      this.act(pick(['dance', 'shrug', 'think', 'wave', 'jump', 'stretch', 'flex', 'robot', 'disco', 'sit', 'clap', 'spin']), null, 3);
+      return;
+    }
     this.say(pick([
       'Tip: Layers slider lets you peek inside a build, floor by floor.',
       'Tip: The Materials tab tells you how many stacks you’ll need.',
       'Tip: “Change it with Claude” remixes a build without starting over.',
       'Tip: Turn on research and I’ll study real schematics first.',
       'Tip: You can make your own palettes in Settings.',
+      'Tip: Need a door or a farm? Ask for redstone and I’ll wire it up.',
     ]), { expr: 'happy', anim: 'talk', chatter: true });
   }
 }
+
+export { ANIMATIONS };

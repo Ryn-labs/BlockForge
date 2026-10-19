@@ -1,7 +1,7 @@
 import { Viewer } from './viewer.js';
 import { blockColor } from './blocks.js';
 import { Guide, GUIDE_DEFAULTS } from './guide.js';
-import { LOOK_DEFAULTS } from './character.js';
+import { LOOK_DEFAULTS, HAIR_STYLES, HEADWEAR, OUTFITS, ANIMATIONS } from './character.js';
 
 const $ = s => document.querySelector(s);
 const api = async (path, opts = {}) => {
@@ -31,7 +31,7 @@ const FORMAT_INFO = {
 const state = { size: 'medium', image: null, builds: [], current: null, job: null, status: null };
 const viewer = new Viewer($('#viewer'));
 const guide = new Guide(document.querySelector('.stage'));
-window.blockforge = { viewer, guide };   // handy for poking at things from the dev console
+window.blockforge = { viewer, guide, get loadStatus() { return loadStatus; } };   // handy for poking at things from the dev console
 
 // ---------------------------------------------------------------- appearance (Settings > Appearance)
 const ACCENTS = ['#62c44a', '#3fb3e8', '#9b6cf0', '#f0a030', '#e5534b', '#e85fa8', '#2fc4a8', '#d8c24a'];
@@ -161,8 +161,13 @@ async function loadStatus() {
       gcfg.voice_v = 2;
       if (s.settings.guide && Object.keys(s.settings.guide).length) saveGuide();
     }
+    if ((gcfg.voice_v || 1) < 3) {            // 1.4.0: pitch now works for the HD voice, so old (unused) values would sound odd
+      gcfg.pitch = 1.0; gcfg.voice_v = 3;
+      if (s.settings.guide && Object.keys(s.settings.guide).length) saveGuide();
+    }
     if (!s.hd_voice && gcfg.voice_style === 'hd') gcfg.voice_style = 'speech';
     $('#about-version').textContent = s.version;
+    liveFlags(gcfg);
     guide.apply(gcfg);
     if (!gcfg.toured && gcfg.enabled !== false) setTimeout(flintTour, 1200);
     if (s.settings.ui && Object.keys(s.settings.ui).length) { ui = { ...UI_DEFAULTS, ...s.settings.ui }; applyUI(); persistUI(); }
@@ -227,9 +232,10 @@ $('#save-settings').onclick = async e => {
   const custom_palettes = [...document.querySelectorAll('.palette-row')].map(r => ({
     name: r.querySelector('.pn').value.trim(), description: r.querySelector('.pd').value.trim() })).filter(p => p.name && p.description);
   const research = $('#set-research').checked;
+  if ($('#g-style').value === 'eleven') { try { await saveElevenChoice(); } catch (e) { toast(e.message, true); } }
   await post('settings', { engine, api_key: $('#api-key').value.trim(), model: $('#default-model').value,
     research, research_sites: sites, default_size: $('#default-size').value, default_palette: $('#default-palette').value,
-    custom_palettes, ui, guide: (gcfg = readGuideForm()), providers: provEdits });
+    custom_palettes, ui, guide: stripLive(gcfg = readGuideForm()), providers: provEdits });
   provEdits = {};
   $('#research').checked = research;
   savedUI = null; savedGuide = null;
@@ -508,7 +514,7 @@ $('#code').onkeydown = e => {
 // ---------------------------------------------------------------- Flint (the guide)
 let gcfg = { ...GUIDE_DEFAULTS };
 const flintCfg = () => gcfg;
-const saveGuide = () => post('settings', { guide: gcfg }).catch(() => {});
+const saveGuide = () => post('settings', { guide: stripLive(gcfg) }).catch(() => {});
 const pickOne = a => a[(Math.random() * a.length) | 0];
 let waitTimer = null, lastNarrate = 0, researching = false, reads = 0;
 
@@ -614,48 +620,149 @@ async function flintTour() {
 }
 
 // Settings > Guide
+const LOOK_SELECTS = { hairStyle: HAIR_STYLES, headwear: HEADWEAR, outfit: OUTFITS };
+for (const [k, opts] of Object.entries(LOOK_SELECTS)) $('#g-' + k).innerHTML = Object.entries(opts).map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+{
+  const g = $('#anim-gallery'); let grp = '';
+  for (const [id, label, group] of ANIMATIONS) {
+    if (group !== grp) { grp = group; g.insertAdjacentHTML('beforeend', `<div class="grp">${group}</div>`); }
+    const b = document.createElement('button'); b.type = 'button'; b.textContent = label;
+    b.onclick = () => guide.preview(id);
+    g.appendChild(b);
+  }
+}
+const stripLive = c => { const { hd_ready, eleven_ready, ...rest } = c; return rest; };
+function liveFlags(c) { c.hd_ready = !!state.status?.hd_voice; c.eleven_ready = !!(state.status?.eleven?.key_set && state.status?.eleven?.voice_id); return c; }
+
 function fillGuideForm() {
   $('#g-enabled').checked = gcfg.enabled !== false;
-  $('#g-name').value = gcfg.name; $('#g-chatty').value = gcfg.chatty; $('#g-style').value = gcfg.voice_style;
-  fillVoiceList(gcfg.voice_style);
+  $('#g-name').value = gcfg.name; $('#g-chatty').value = gcfg.chatty;
+  $('#g-style').value = gcfg.voice_style;
   $('#g-pitch').value = gcfg.pitch; $('#g-pitch-val').textContent = (+gcfg.pitch).toFixed(2);
   $('#g-rate').value = gcfg.rate; $('#g-rate-val').textContent = (+gcfg.rate).toFixed(2);
-  for (const k of Object.keys(LOOK_DEFAULTS)) { const el = $('#g-' + k); if (el) el.value = gcfg.look[k] || LOOK_DEFAULTS[k]; }
-  $('#g-viewer').checked = gcfg.in_viewer !== false;
+  $('#g-eleven_save').checked = gcfg.eleven_save !== false;
+  for (const k of Object.keys(LOOK_DEFAULTS)) {
+    const el = $('#g-' + k); if (!el) continue;
+    const v = gcfg.look[k] ?? LOOK_DEFAULTS[k];
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+  }
+  $('#g-in_viewer').checked = gcfg.in_viewer !== false;
+  fillVoiceList(gcfg.voice_style);
+  fillElevenForm();
 }
 function readGuideForm() {
   const look = {};
-  for (const k of Object.keys(LOOK_DEFAULTS)) { const el = $('#g-' + k); look[k] = el ? el.value : LOOK_DEFAULTS[k]; }
-  return { ...gcfg, enabled: $('#g-enabled').checked, name: $('#g-name').value.trim() || 'Flint', chatty: $('#g-chatty').value,
-    voice_style: $('#g-style').value,
-    ...($('#g-style').value === 'hd' ? { hd_voice: $('#g-voice').value } : { voice: $('#g-voice').value }), pitch: +$('#g-pitch').value, rate: +$('#g-rate').value,
-    in_viewer: $('#g-viewer').checked, look };
+  for (const k of Object.keys(LOOK_DEFAULTS)) {
+    const el = $('#g-' + k);
+    look[k] = !el ? LOOK_DEFAULTS[k] : el.type === 'checkbox' ? el.checked : el.value;
+  }
+  const style = $('#g-style').value;
+  return liveFlags({ ...gcfg, enabled: $('#g-enabled').checked, name: $('#g-name').value.trim() || 'Flint', chatty: $('#g-chatty').value,
+    voice_style: style, ...(style === 'hd' ? { hd_voice: $('#g-voice').value } : style === 'speech' ? { voice: $('#g-voice').value } : {}),
+    pitch: +$('#g-pitch').value, rate: +$('#g-rate').value, eleven_save: $('#g-eleven_save').checked,
+    in_viewer: $('#g-in_viewer').checked, look });
 }
+
 function fillVoiceList(style) {
-  const sel = $('#g-voice');
+  const sel = $('#g-voice'), s = state.status || {};
+  $('#vp-eleven').hidden = style !== 'eleven';
+  $('#vp-local').hidden = !(style === 'hd' || style === 'speech');
+  $('#voice-more').hidden = style !== 'hd';
   if (style === 'hd') {
-    const hv = state.status?.hd_voices || {};
+    const hv = s.hd_voices || {};
     sel.innerHTML = Object.entries(hv).map(([k, l]) => `<option value="${esc(k)}">${esc(l)}</option>`).join('') || '<option value="joe">Joe</option>';
     sel.value = gcfg.hd_voice in hv ? gcfg.hd_voice : (Object.keys(hv)[0] || 'joe');
-  } else {
+    renderVoiceCatalog();
+  } else if (style === 'speech') {
     const vs = guide.voice.list();
     sel.innerHTML = '<option value="auto">Automatic</option>' + vs.map(v => `<option value="${esc(v.voiceURI)}">${esc(v.name)} (${esc(v.lang)})</option>`).join('');
     sel.value = [...sel.options].some(o => o.value === gcfg.voice) ? gcfg.voice : 'auto';
   }
-  sel.disabled = style === 'blips' || style === 'off';
-  $('#g-pitch').disabled = style !== 'speech' && style !== 'blips';
-  $('#g-pitch-note').textContent = style === 'hd' ? '(not used by the HD voice)' : '';
+  $('#vp-sliders').hidden = style === 'off';
+  $('#g-pitch').disabled = style === 'eleven';
+  $('#g-pitch').closest('.field').style.opacity = style === 'eleven' ? '.45' : '';
 }
-$('#g-style').addEventListener('change', e => fillVoiceList(e.target.value));
+function renderVoiceCatalog() {
+  const cat = state.status?.voice_catalog || [];
+  $('#voice-list').innerHTML = cat.filter(v => !v.bundled).map(v => `
+    <div class="voice-row"><div>${esc(v.label)}<small>${esc(v.license)} · ~${v.size_mb} MB</small></div>
+    ${v.installed ? `<button type="button" class="btn small" data-use="${v.id}">Use</button>` : `<button type="button" class="btn small primary" data-get="${v.id}">Download</button>`}</div>`).join('');
+  $('#voice-list').querySelectorAll('[data-use]').forEach(b => b.onclick = () => { $('#g-voice').value = b.dataset.use; previewGuide(); guide.say('Hi! This is my new voice. What do you think?', { anim: 'wave', animOnce: 1.2, expr: 'happy', interrupt: true, test: true }); });
+  $('#voice-list').querySelectorAll('[data-get]').forEach(b => b.onclick = async () => {
+    const id = b.dataset.get; b.disabled = true; b.textContent = 'Downloading…';
+    try {
+      const { job } = await post('voices/download', { id });
+      const poll = async () => {
+        const j = await api('jobs/' + job);
+        if (j.status === 'running') { const last = j.log.at(-1)?.msg || ''; b.textContent = /%/.test(last) ? last.replace('Downloading... ', '') : 'Downloading…'; return setTimeout(poll, 700); }
+        if (j.status === 'error') { toast(j.error || 'Download failed', true); b.disabled = false; b.textContent = 'Download'; return; }
+        await loadStatus(); fillVoiceList('hd'); $('#g-voice').value = id; toast('Voice installed');
+      };
+      poll();
+    } catch (e) { toast(e.message, true); b.disabled = false; b.textContent = 'Download'; }
+  });
+}
+
+// ElevenLabs
+let elVoices = null;
+function fillElevenForm() {
+  const e = state.status?.eleven || {}, m = state.status?.eleven_models || {};
+  $('#el-model').innerHTML = Object.entries(m).map(([k, l]) => `<option value="${k}">${esc(l)}</option>`).join('');
+  $('#el-model').value = e.model || 'eleven_flash_v2_5';
+  $('#el-key').value = ''; $('#el-key').placeholder = e.key_set ? '•••••••• saved (type to replace)' : 'Paste your ElevenLabs key';
+  const list = elVoices || (e.voice_id ? [{ id: e.voice_id, name: e.voice_name || e.voice_id, category: 'saved', info: '' }] : []);
+  fillElevenVoices(list, e.voice_id);
+}
+function fillElevenVoices(list, current) {
+  const sel = $('#el-voice');
+  if (!list.length) { sel.innerHTML = '<option value="">Click “Load my voices”</option>'; return; }
+  const groups = {};
+  for (const v of list) (groups[v.category] = groups[v.category] || []).push(v);
+  sel.innerHTML = Object.entries(groups).map(([c, vs]) => `<optgroup label="${esc(c === 'premade' ? 'ElevenLabs voices' : c === 'cloned' ? 'My cloned voices' : c)}">${vs.map(v => `<option value="${esc(v.id)}">${esc(v.name)}${v.info ? ' · ' + esc(v.info) : ''}</option>`).join('')}</optgroup>`).join('');
+  if (current) sel.value = current;
+}
+function showCredits(u) {
+  $('#el-credits').textContent = u && u.limit ? `${(u.limit - u.used).toLocaleString()} of ${u.limit.toLocaleString()} credits left` : '';
+}
+$('#el-load').onclick = async () => {
+  const st = $('#el-status'); st.hidden = false; st.className = 'status'; st.textContent = 'Loading your voices…';
+  try {
+    const key = $('#el-key').value.trim();
+    if (key) { await post('settings', { eleven: { api_key: key } }); $('#el-key').value = ''; }
+    const r = await api('eleven/voices');
+    elVoices = r.voices; showCredits(r.usage);
+    await loadStatus();
+    fillElevenVoices(elVoices, state.status.eleven.voice_id || elVoices[0]?.id);
+    $('#el-key').placeholder = '•••••••• saved (type to replace)';
+    st.className = 'status ok'; st.textContent = `Found ${elVoices.length} voice${elVoices.length === 1 ? '' : 's'}. Pick one, then press Test voice.`;
+  } catch (e) { st.className = 'status warn'; st.textContent = e.message; }
+};
+async function saveElevenChoice() {
+  const sel = $('#el-voice'); const opt = sel.selectedOptions[0];
+  const key = $('#el-key').value.trim();
+  const body = { model: $('#el-model').value };
+  if (sel.value) { body.voice_id = sel.value; body.voice_name = (opt?.textContent || '').split(' · ')[0]; }
+  if (key) body.api_key = key;
+  await post('settings', { eleven: body });
+  $('#el-key').value = '';
+  await loadStatus();
+}
+window.addEventListener('guide-voice-error', e => { toast(String(e.detail).slice(0, 220), true); });
+
 let savedGuide = null;
-const previewGuide = () => { guide.apply(readGuideForm()); if (guide.hiddenNow) guide.minimize(false); };
-for (const id of ['g-enabled', 'g-name', 'g-chatty', 'g-style', 'g-voice', 'g-viewer', ...Object.keys(LOOK_DEFAULTS).map(k => 'g-' + k)])
-  $('#' + id).addEventListener('input', previewGuide);
+const previewGuide = () => { gcfg = readGuideForm(); guide.apply(gcfg); if (guide.hiddenNow) guide.minimize(false); };
+for (const id of ['g-enabled', 'g-name', 'g-chatty', 'g-voice', 'g-in_viewer', 'g-eleven_save', ...Object.keys(LOOK_DEFAULTS).map(k => 'g-' + k)])
+  $('#' + id)?.addEventListener('input', previewGuide);
+$('#g-style').addEventListener('change', e => { fillVoiceList(e.target.value); previewGuide(); });
 $('#g-pitch').oninput = e => { $('#g-pitch-val').textContent = (+e.target.value).toFixed(2); previewGuide(); };
 $('#g-rate').oninput = e => { $('#g-rate-val').textContent = (+e.target.value).toFixed(2); previewGuide(); };
-$('#g-test').onclick = () => { previewGuide(); guide.say(`Hi, I’m ${guide.cfg.name}! This is what I sound like. Let’s build something cool.`, { anim: 'wave', animOnce: 1.5, expr: 'happy', interrupt: true }); };
+$('#g-test').onclick = async () => {
+  try { if ($('#g-style').value === 'eleven') await saveElevenChoice(); } catch (e) { toast(e.message, true); return; }
+  previewGuide();
+  guide.say(`Hi, I’m ${guide.cfg.name}! This is what I sound like. Let’s build something cool.`, { anim: 'wave', animOnce: 1.5, expr: 'happy', interrupt: true, test: true });
+};
 $('#g-tour').onclick = () => { $('#settings').close(); setTimeout(flintTour, 300); };
-$('#g-reset').onclick = () => { gcfg = { ...GUIDE_DEFAULTS, toured: true }; fillGuideForm(); previewGuide(); };
+$('#g-reset').onclick = () => { gcfg = liveFlags({ ...GUIDE_DEFAULTS, toured: true, look: { ...LOOK_DEFAULTS } }); fillGuideForm(); previewGuide(); };
 $('#settings').addEventListener('close', () => { if (savedGuide) { gcfg = savedGuide; savedGuide = null; guide.apply(gcfg); } });
 
 
