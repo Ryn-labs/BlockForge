@@ -23,7 +23,7 @@ a = Analysis(
     hiddenimports=[
         "blockforge.server", "blockforge.mcp_server", "blockforge._runner", "blockforge.buildkit",
         "blockforge.engine", "blockforge.exporters", "blockforge.prompts", "blockforge.sandbox", "blockforge.store",
-        "blockforge.nbt", "blockforge.tts", "blockforge.updater", "blockforge.version", "blockforge.voices", "blockforge.eleven", "blockforge.redstone", "colorsys", "itertools", "functools", "collections", "anthropic",
+        "blockforge.nbt", "blockforge.tts", "blockforge.updater", "blockforge.version", "blockforge.voices", "blockforge.eleven", "blockforge.redstone", "blockforge.mods", "blockforge.placement", "colorsys", "itertools", "functools", "collections", "anthropic",
         "webview", "webview.platforms.edgechromium", "webview.platforms.winforms",
     ],
     excludes=["tkinter", "matplotlib", "numpy", "PIL", "pytest"],
