@@ -61,6 +61,9 @@ Then you download it in the format you need. There's no paywall and no per-downl
   today / 7-day / all-time totals.
 - **Make it yours.** Theme, accent colour, corner style, font, UI size, 3D background, your own block palettes,
   and Flint's name, voice and outfit.
+- **See what every block is.** Hover any block in the 3D view to see its real name (Stone Bricks, Spruce Planks...),
+  its settings, its position and how many the build uses. Click it, or a row in the Materials list, to show only
+  that block type, with everything else faded, so you can see exactly where it goes.
 - **Also included:** a layers slider to see inside, a material list in stacks, editable build scripts, a gallery,
   and import of existing `.schem` / `.litematic` / `.nbt` files.
 
