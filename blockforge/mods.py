@@ -98,6 +98,20 @@ def vanilla_ids(version):
 # ================================================================== PNG average colour (no imaging library needed)
 def png_average(data):
     """Average RGB of a PNG (alpha-weighted), or None for formats we can't read."""
+    px = png_pixels(data)
+    if not px:
+        return None
+    r = g = b = n = 0
+    for pr, pg, pb, a in px:
+        if a > 40:
+            r += pr * a; g += pg * a; b += pb * a; n += a
+    if not n:
+        return None
+    return (r // n, g // n, b // n)
+
+
+def png_pixels(data, max_rows=64):
+    """[(r, g, b, a)] of a PNG's first rows, or None for formats we can't read."""
     if data[:8] != b"\x89PNG\r\n\x1a\n":
         return None
     pos, idat, plte, trns = 8, [], None, None
@@ -126,7 +140,7 @@ def png_average(data):
     stride = (w * ch * depth + 7) // 8
     rows, prev = [], bytearray(stride)
     p = 0
-    for _ in range(min(h, 64)):                         # animated strips are tall: the first frames are enough
+    for _ in range(min(h, max_rows)):                   # animated strips are tall: the first frames are enough
         f = raw[p]
         line = bytearray(raw[p + 1:p + 1 + stride])
         p += 1 + stride
@@ -148,7 +162,7 @@ def png_average(data):
                 line[i] = (line[i] + pr) & 255
         rows.append(line)
         prev = line
-    r = g = b = n = 0
+    out = []
     for line in rows:
         for x in range(w):
             if ctype == 3:
@@ -168,11 +182,8 @@ def png_average(data):
                 pr, pg, pb = line[x * 3:x * 3 + 3]; a = 255
             else:
                 pr, pg, pb, a = line[x * 4:x * 4 + 4]
-            if a > 40:
-                r += pr * a; g += pg * a; b += pb * a; n += a
-    if not n:
-        return None
-    return (r // n, g // n, b // n)
+            out.append((pr, pg, pb, a))
+    return out
 
 
 # ================================================================== mod metadata

@@ -41,7 +41,8 @@ DEFAULT_SETTINGS = {
     "eleven": {},                                          # ElevenLabs voice: {"api_key", "voice_id", "voice_name", "model"}
     "providers": {},
     "modpacks": [],                                         # scanned packs: [{"id", "name", "path"}]
-    "active_pack": None, "use_mods": True, "target_version": "1.21.1",                                       # other AIs: {id: {"api_key", "base_url", "model", "models"}}                                           # the guide character (name, voice, colours...)
+    "active_pack": None, "use_mods": True, "target_version": "1.21.1",
+    "learn_examples": True, "learn_log": True,              # local learning loop (Settings -> Learning)                                       # other AIs: {id: {"api_key", "base_url", "model", "models"}}                                           # the guide character (name, voice, colours...)
 }
 USAGE_LOG = os.path.join(DATA, "usage.jsonl")
 

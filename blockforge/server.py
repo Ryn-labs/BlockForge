@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import eleven, engine, exporters, mods, placement, prompts, sandbox, store, tts, updater, voices  # noqa: E402
+from blockforge import eleven, engine, exporters, learn, mods, pixelart, placement, prompts, sandbox, store, tts, updater, voices  # noqa: E402
 from blockforge.version import VERSION  # noqa: E402
 
 PORT = int(os.environ.get("BLOCKFORGE_PORT", "8765"))
@@ -54,10 +54,14 @@ def run_script_job(code, title="Script build", parent_id=None, log=print):
     for f in fixes:
         log("Auto-fixed: " + f)
     prompt = store.get_meta(parent_id).get("prompt", "") if parent_id else ""
-    return store.save_build(blocks, meta.get("name") or title, prompt=prompt, code=code, source="script",
-                            parent=parent_id, description=meta.get("description") or "",
-                            warnings=meta.get("redstone_warnings") or [], fixes=fixes,
-                            data_version=mods.data_version(version), modpack=(pack or {}).get("name"))
+    saved = store.save_build(blocks, meta.get("name") or title, prompt=prompt, code=code, source="script",
+                             parent=parent_id, description=meta.get("description") or "",
+                             warnings=meta.get("redstone_warnings") or [], fixes=fixes,
+                             data_version=mods.data_version(version), modpack=(pack or {}).get("name"))
+    if parent_id:
+        learn.log_correction(parent_id, saved["id"])           # keeps "AI version -> your fix" for learning
+        saved = store.get_meta(saved["id"])
+    return saved
 
 
 class H(BaseHTTPRequestHandler):
@@ -122,7 +126,7 @@ class H(BaseHTTPRequestHandler):
                     "claude_code": engine.claude_status(),
                     "models": engine.MODELS, "formats": {k: v[0] for k, v in exporters.FORMATS.items()},
                     "default_sites": prompts.DEFAULT_SITES, "palettes": list(prompts.PALETTES),
-                    "version": VERSION, "hd_voice": tts.available(), "hd_voices": voices.installed(),
+                    "version": VERSION, "pixel_palettes": pixelart.palette_info(), "hd_voice": tts.available(), "hd_voices": voices.installed(),
                     "voice_catalog": voices.catalog_info(), "eleven_models": eleven.MODELS,
                     "eleven": {"key_set": bool((s.get("eleven") or {}).get("api_key")),
                                "voice_id": (s.get("eleven") or {}).get("voice_id", ""),
@@ -178,6 +182,10 @@ class H(BaseHTTPRequestHandler):
                     return self.err(502, str(e))
             if parts[1:] == ["usage"]:
                 return self.send(200, store.usage_summary())
+            if parts[1:] == ["learning"]:
+                s = store.load_settings()
+                return self.send(200, {**learn.stats(), "examples": s.get("learn_examples", True), "log": s.get("learn_log", True),
+                                       "tags": learn.RATING_TAGS})
             if parts[1] == "mods":
                 s = store.load_settings()
                 if parts[2:] == []:
@@ -302,6 +310,22 @@ class H(BaseHTTPRequestHandler):
                     if k in b and not isinstance(b[k], dict):
                         b.pop(k)
                 return self.send(200, {"ok": True, "engine": store.save_settings(b)["engine"]})
+            if route == ["pixelart"]:
+                b = self.json_body()
+                try:
+                    w, h = int(b.get("w", 0)), int(b.get("h", 0))
+                    rgba = base64.b64decode(b.get("rgba", ""))
+                except (TypeError, ValueError):
+                    return self.err(400, "bad picture data")
+                blocks = pixelart.convert(w, h, rgba, b.get("palette", "concrete"), bool(b.get("dither", False)),
+                                          "floor" if b.get("orient") == "floor" else "wall", int(b.get("max_colors") or 0), int(b.get("scale") or 1))
+                title = (str(b.get("title") or "Pixel art").strip() or "Pixel art")[:60]
+                meta = store.save_build(blocks, title, prompt="Pixel art from a picture (" + str(b.get("palette", "concrete")) + ")",
+                                        source="pixelart")
+                return self.send(200, meta)
+            if route == ["learning", "clear"]:
+                learn.clear()
+                return self.send(200, {"ok": True})
             if route[:1] == ["mods"] and len(route) == 2:
                 b = self.json_body()
                 act = route[1]
@@ -339,8 +363,18 @@ class H(BaseHTTPRequestHandler):
                     mods.forget_pack(b.get("pack", ""))
                     return self.send(200, {"ok": True})
                 if act == "colors":
-                    names = [str(n) for n in (b.get("names") or []) if ":" in str(n)][:3000]
-                    return self.send(200, {"colors": mods.mod_colors(names)})
+                    names = [str(n) for n in (b.get("names") or [])][:3000]
+                    colors = mods.mod_colors([n for n in names if ":" in n and not n.startswith("minecraft:")])
+                    vanilla = {n.replace("minecraft:", "") for n in names if ":" not in n or n.startswith("minecraft:")}
+                    if vanilla:                                  # real texture colours, so pixel art previews true to the game
+                        from blockforge import texpalette
+                        v = texpalette.best_version()
+                        data = texpalette.load(v) if v else None
+                        for n, rgb, _ in (data or {}).get("wall", []):
+                            k = n.replace("minecraft:", "")
+                            if k in vanilla:
+                                colors[k] = "#%02x%02x%02x" % tuple(rgb)
+                    return self.send(200, {"colors": colors})
                 return self.err(404, "not found")
             if route == ["voices", "download"]:
                 vid = self.json_body().get("id", "")
@@ -363,6 +397,9 @@ class H(BaseHTTPRequestHandler):
                 if action == "rename":
                     t = (self.json_body().get("title") or "").strip()[:80]
                     return self.send(200, store.update_meta(bid, title=t or "Untitled build"))
+                if action == "rate":
+                    b = self.json_body()
+                    return self.send(200, learn.rate(bid, b.get("rating"), b.get("tags"), b.get("note", "")))
                 if action == "thumb":
                     data = self.json_body().get("image", "")
                     if not data.startswith("data:image/jpeg;base64,"):

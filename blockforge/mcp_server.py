@@ -5,7 +5,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import exporters, mods, placement, prompts, sandbox, store  # noqa: E402
+from blockforge import exporters, learn, mods, placement, prompts, sandbox, store  # noqa: E402
 
 SERVER = {"name": "blockforge", "version": "1.0.0"}
 APP_URL = "http://127.0.0.1:8765"
@@ -120,6 +120,7 @@ def call(name, args):
                              redstone=prompts.wants_redstone(prompt, args["code"]),
                              warnings=meta.get("redstone_warnings") or [], fixes=fixes,
                              data_version=mods.data_version(version), modpack=(pack or {}).get("name"))
+        learn.log_generation(m, fixes, meta.get("redstone_warnings") or [])
         return _summary(m)
     if name == "list_builds":
         q = (args.get("query") or "").lower()

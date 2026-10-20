@@ -331,6 +331,65 @@ def _check_ids(c, final, version):
             c.problems.append(f"These modded blocks can't be used ({why}): {', '.join(mod_blocks[:6])}. Use vanilla blocks or ones from the pack.")
 
 
+_BOOL = {"waterlogged", "hanging", "powered", "open", "lit", "persistent", "snowy", "locked", "triggered", "inverted", "enabled",
+         "extended", "attached", "bottom", "conditional", "disarmed", "drag", "eye", "has_book", "occupied", "in_wall", "unstable",
+         "signal_fire", "short", "berries", "cracked", "crafting", "ominous", "tip", "slot_0_occupied"}
+_INT = {"age": (0, 25), "level": (0, 15), "rotation": (0, 15), "power": (0, 15), "delay": (1, 4), "bites": (0, 6),
+        "layers": (1, 8), "distance": (0, 7), "moisture": (0, 7), "charges": (0, 4), "candles": (1, 4), "eggs": (1, 4),
+        "hatch": (0, 2), "pickles": (1, 4), "stage": (0, 1), "honey_level": (0, 5), "note": (0, 24), "flower_amount": (1, 4),
+        "segment_amount": (1, 4), "dusted": (0, 3)}
+_ENUM = {"facing": {"north", "south", "east", "west", "up", "down"}, "half": {"top", "bottom", "upper", "lower"},
+         "axis": {"x", "y", "z"}, "part": {"head", "foot"}, "face": {"floor", "wall", "ceiling"}, "hinge": {"left", "right"},
+         "type": {"top", "bottom", "double", "single", "left", "right", "normal", "sticky"},
+         "attachment": {"floor", "ceiling", "single_wall", "double_wall"}, "vertical_direction": {"up", "down"}}
+_SIDES = {"north", "south", "east", "west"}
+_SIDE_VALS = {"true", "false", "none", "low", "tall", "side", "up"}
+_HORIZ_ONLY = re.compile(r"(_stairs$|_door$|_trapdoor$|_wall_sign$|_wall_hanging_sign$|_wall_banner$|_wall_torch$|^ladder$|_fence_gate$|"
+                         r"_glazed_terracotta$|^(furnace|blast_furnace|smoker|chest|trapped_chest|ender_chest|lectern|loom|stonecutter|"
+                         r"carved_pumpkin|jack_o_lantern|repeater|comparator|campfire|soul_campfire|anvil|chipped_anvil|damaged_anvil)$|_bed$)")
+
+
+def _check_states(c):
+    """Block settings that don't exist (facing=left, half=middle, age=99) make the game drop or mangle the block."""
+    for p, st in list(c.b.items()):
+        if "[" not in st:
+            continue
+        n = _name(st)
+        base = st.split("[", 1)[0]
+        pr = _props(st)
+        new, changed = {}, False
+        for k, v in pr.items():
+            keep = v
+            if k in _BOOL:
+                if v not in ("true", "false"):
+                    keep = None
+            elif k in _INT:
+                lo, hi = _INT[k]
+                try:
+                    keep = str(min(hi, max(lo, int(v))))
+                except ValueError:
+                    keep = None
+            elif k in _SIDES:
+                if v not in _SIDE_VALS:
+                    keep = None
+            elif k in _ENUM and v not in _ENUM[k]:
+                keep = None
+                if k == "half" and n:
+                    if n.endswith("_door") or n in DOUBLE:
+                        keep = "lower"
+                    elif n.endswith(("_stairs", "_trapdoor")):
+                        keep = "bottom"
+            if k == "facing" and keep in ("up", "down") and n and _HORIZ_ONLY.search(n):
+                keep = "north"
+            if keep != v:
+                changed = True
+            if keep is not None:
+                new[k] = keep
+        if changed:
+            c.b[p] = base + ("[" + ",".join(f"{k}={v}" for k, v in new.items()) + "]" if new else "")
+            c.fix("states", "Fixed block settings that don't exist (a wrong facing, half or other value)")
+
+
 def process(blocks, final=False, version=None, pack="auto"):
     """Fix and check `blocks` ({(x,y,z): state}) in place. Returns {'fixed': [...], 'problems': [...]}.
     pack: a modpack index, None for vanilla only, or "auto" for the pack selected in Settings."""
@@ -343,6 +402,10 @@ def process(blocks, final=False, version=None, pack="auto"):
     try:
         _check_ids(c, final, version)
     except Exception:                                      # noqa: BLE001 - never lose a build over the checker
+        pass
+    try:
+        _check_states(c)
+    except Exception:                                      # noqa: BLE001
         pass
     for p in sorted(blocks, key=lambda q: (q[1], q[0], q[2])):          # bottom-up so supports are settled first
         st = blocks.get(p)

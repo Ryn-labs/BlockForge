@@ -564,7 +564,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
     if str(palette).startswith("custom:"):
         pname = palette.split(":", 1)[1]
         palette_text = next((p["description"] for p in settings.get("custom_palettes", []) if p.get("name") == pname), None)
-    from . import mods, placement
+    from . import learn, mods, placement
     if use_mods is None:
         use_mods = settings.get("use_mods", True)
     pack = mods.load_index(settings["active_pack"]) if use_mods and settings.get("active_pack") else None
@@ -575,7 +575,8 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
         log(f"Using blocks from your modpack: {pack['name']} ({sum(len(m['blocks']) for m in pack['mods'] if m.get('enabled', True)):,} blocks).")
     text = prompts.user_message(prompt, size, palette, prev_code, has_image=bool(image),
                                 research_sites=sites if research else None, palette_text=palette_text,
-                                redstone=redstone, version=version, mods_text=mods_text)
+                                redstone=redstone, version=version, mods_text=mods_text,
+                                learned_text=learn.prompt_section(prompt))
     usage = Usage(engine, model)
     started = time.time()
     status, title, saved = "error", None, None
@@ -651,6 +652,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                                  researched=bool(research), redstone=bool(redstone), warnings=problems, fixes=fixes,
                                  data_version=mods.data_version(version), modpack=(pack or {}).get("name"))
         status = "done"
+        learn.log_generation(saved, fixes, list(meta.get("redstone_warnings") or []))
         return saved
     finally:
         rec = usage.record()

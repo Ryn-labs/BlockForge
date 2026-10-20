@@ -190,7 +190,7 @@ def wants_redstone(prompt, previous_code=None):
 
 
 def user_message(prompt, size="medium", palette="auto", previous_code=None, has_image=False,
-                 research_sites=None, palette_text=None, redstone=None, version=None, mods_text=None):
+                 research_sites=None, palette_text=None, redstone=None, version=None, mods_text=None, learned_text=None):
     parts = []
     if redstone is None:
         redstone = wants_redstone(prompt, previous_code)
@@ -211,6 +211,8 @@ def user_message(prompt, size="medium", palette="auto", previous_code=None, has_
         parts.append(f"Target game: Minecraft Java {version}. Only use blocks that exist in that version.")
     if mods_text:
         parts.append(mods_text)
+    if learned_text:
+        parts.append(learned_text)
     if redstone:
         parts.append(REDSTONE_GUIDE)
     if research_sites:
