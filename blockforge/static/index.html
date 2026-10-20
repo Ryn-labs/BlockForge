@@ -36,6 +36,7 @@
         <div class="prompt-tools">
           <label class="link-btn" title="Turn a picture into a 3D build">＋ Image<input id="image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden></label>
           <span class="hint">or drop / paste an image</span>
+          <button type="button" class="link-btn" id="pixel-open" hidden title="Turn this picture into flat pixel art. No AI, instant and free.">▦ Make pixel art</button>
         </div>
       </div>
       <div class="field">
@@ -128,6 +129,14 @@
       <div id="parent-link" class="muted small"></div>
     </section>
 
+    <section class="card" id="rate-card">
+      <h3>How did this turn out?</h3>
+      <div class="row-btns"><button type="button" class="btn small" id="rate-up" title="Good build">👍 Good</button>
+        <button type="button" class="btn small" id="rate-down" title="Something's wrong">👎 Not good</button></div>
+      <div id="rate-tags" class="chips" hidden></div>
+      <p class="muted small">Stays on this PC. Good builds (and ones you fix by hand) become examples for the AI next time.</p>
+    </section>
+
     <section class="card">
       <h3>Download</h3>
       <div class="downloads" id="downloads"></div>
@@ -163,7 +172,7 @@
     <h2>Settings</h2>
     <div class="tabs set-tabs">
       <button type="button" data-stab="claude" class="on">AI</button><button type="button" data-stab="research">Research</button>
-      <button type="button" data-stab="look">Appearance</button><button type="button" data-stab="guide">Guide</button><button type="button" data-stab="defaults">Defaults &amp; palettes</button><button type="button" data-stab="mods">Mods</button>
+      <button type="button" data-stab="look">Appearance</button><button type="button" data-stab="guide">Guide</button><button type="button" data-stab="defaults">Defaults &amp; palettes</button><button type="button" data-stab="mods">Mods</button><button type="button" data-stab="learning">Learning</button>
     </div>
 
     <div class="stab" id="stab-claude">
@@ -310,6 +319,17 @@
       <button type="button" class="btn small" id="add-palette">＋ Add palette</button>
     </div>
 
+    <div class="stab" id="stab-learning" hidden>
+      <p class="muted small">BlockForge learns from your own builds, all on this PC. Nothing is uploaded.</p>
+      <label class="toggle"><input type="checkbox" id="set-learn-examples"><span class="switch"></span>
+        <span><b>Use my best builds as examples</b><small class="muted">Builds you thumbs-up, or fix by hand, are shown to the AI when you ask for something similar. It also gets told which mistakes keep needing fixes.</small></span></label>
+      <label class="toggle"><input type="checkbox" id="set-learn-log"><span class="switch"></span>
+        <span><b>Keep a record of fixes, ratings and my edits</b><small class="muted">Used for the examples above and the numbers below.</small></span></label>
+      <h3>So far</h3>
+      <div id="learn-stats" class="mod-list"></div>
+      <div class="row-btns"><button type="button" class="btn ghost small danger" id="learn-clear">Clear what it has learned</button></div>
+    </div>
+
     <div class="stab" id="stab-mods" hidden>
       <p class="muted small">Add your modpack so the AI can build with its blocks (furniture, biome and decoration mods…). BlockForge reads every mod jar on this PC. Nothing is uploaded.</p>
       <label class="toggle"><input type="checkbox" id="set-use-mods"><span class="switch"></span>
@@ -336,6 +356,28 @@
 
     <div class="row-btns end"><button class="btn primary" id="save-settings" value="save">Save</button><button class="btn ghost" value="cancel">Close</button></div>
   </form>
+</dialog>
+
+<!-- ============ pixel art ============ -->
+<dialog id="pixel-dlg">
+  <div class="settings-form">
+    <h2>Make pixel art</h2>
+    <p class="muted small">Turns your picture into a flat mosaic of blocks. No AI, so it's instant and free.</p>
+    <canvas id="pixel-canvas" class="pixel-canvas"></canvas>
+    <p class="muted small" id="pixel-size"></p>
+    <div class="field"><label for="pixel-width">Width <span id="pixel-width-val" class="muted"></span></label>
+      <input type="range" id="pixel-width" min="16" max="128" step="4" value="48"></div>
+    <div class="row2">
+      <div class="field"><label for="pixel-palette">Blocks</label><select id="pixel-palette"></select></div>
+      <div class="field"><label for="pixel-orient">Lay it</label>
+        <select id="pixel-orient"><option value="wall">Standing up like a wall</option><option value="floor">Flat on the ground</option></select></div>
+    </div>
+    <div class="field"><label for="pixel-max">Different blocks to use</label>
+      <select id="pixel-max"><option value="0">As many as it needs</option><option value="2">2</option><option value="4">4</option><option value="8">8</option><option value="16">16</option><option value="32">32</option></select></div>
+    <label class="toggle"><input type="checkbox" id="pixel-dither"><span class="switch"></span>
+      <span><b>Blend blocks for shading</b><small class="muted">For photos and gradients: mixes the two closest blocks in a pattern. Looks best with “Every full block”. Leave it off for logos and flat colours.</small></span></label>
+    <div class="row-btns end"><button class="btn primary" id="pixel-make" type="button">Make it</button><button class="btn ghost" id="pixel-cancel" type="button">Cancel</button></div>
+  </div>
 </dialog>
 
 <!-- ============ usage ============ -->

@@ -199,6 +199,7 @@ function openSettings(tab = 'claude') {
   const s = state.status;
   if (s) {
     initModsTab();
+    initLearningTab();
     $('#set-research').checked = s.settings.research !== false;
     $('#set-sites').value = (s.settings.research_sites || s.default_sites).join('\n');
     $('#default-size').value = s.settings.default_size || 'medium';
@@ -235,7 +236,7 @@ $('#save-settings').onclick = async e => {
     name: r.querySelector('.pn').value.trim(), description: r.querySelector('.pd').value.trim() })).filter(p => p.name && p.description);
   const research = $('#set-research').checked;
   if ($('#g-style').value === 'eleven') { try { await saveElevenChoice(); } catch (e) { toast(e.message, true); } }
-  await post('settings', { ...modsSettings(), engine, api_key: $('#api-key').value.trim(), model: $('#default-model').value,
+  await post('settings', { ...modsSettings(), ...learnSettings(), engine, api_key: $('#api-key').value.trim(), model: $('#default-model').value,
     research, research_sites: sites, default_size: $('#default-size').value, default_palette: $('#default-palette').value,
     custom_palettes, ui, guide: stripLive(gcfg = readGuideForm()), providers: provEdits });
   provEdits = {};
@@ -313,11 +314,11 @@ function setImage(file) {
   if (!file || !file.type.startsWith('image/')) return;
   if (file.size > 8 * 1024 * 1024) return toast('That image is over 8 MB', true);
   const rd = new FileReader();
-  rd.onload = () => { state.image = rd.result; $('#image-preview').src = rd.result; $('#image-chip').hidden = false; };
+  rd.onload = () => { state.image = rd.result; $('#image-preview').src = rd.result; $('#image-chip').hidden = false; $('#pixel-open').hidden = false; };
   rd.readAsDataURL(file);
 }
 $('#image-input').onchange = e => setImage(e.target.files[0]);
-$('#image-clear').onclick = () => { state.image = null; $('#image-chip').hidden = true; $('#image-input').value = ''; };
+$('#image-clear').onclick = () => { state.image = null; $('#image-chip').hidden = true; $('#pixel-open').hidden = true; $('#image-input').value = ''; };
 const dz = $('#drop-zone');
 dz.ondragover = e => { e.preventDefault(); dz.classList.add('drag'); };
 dz.ondragleave = () => dz.classList.remove('drag');
@@ -418,8 +419,8 @@ async function openBuild(id, fresh = false) {
   $('#details').scrollTop = 0;              // always start at the top so Download is in view
   $('#empty').hidden = true; $('#toolbar').hidden = false; $('#details').hidden = false;
   document.querySelector('.layout').classList.remove('no-details');
-  const modded = data.palette.map(st => st.split('[')[0]).filter(isModded);
-  if (modded.length) { try { setModColors((await post('mods/colors', { names: modded })).colors); } catch { /* grey fallback */ } }
+  const want = data.palette.map(st => st.split('[')[0]).filter(n => isModded(n) || meta.source === 'pixelart');
+  if (want.length) { try { setModColors((await post('mods/colors', { names: want })).colors); } catch { /* built-in colours */ } }
   viewer.load(data);
   const L = $('#layer'); L.max = data.size[1] - 1; L.value = L.max; $('#layer-val').textContent = `${L.max}/${L.max}`;
   $('#title').value = meta.title;
@@ -430,6 +431,7 @@ async function openBuild(id, fresh = false) {
     [srcName, (meta.model || '').replace('claude-', '') || 'source'], [date.split(',')[0], 'created'],
   ].map(([b, s]) => `<div class="stat"><b>${esc(b)}</b><span>${esc(s)}</span></div>`).join('');
   $('#prompt-text').textContent = meta.prompt || meta.description || '';
+  renderRate(meta);
   if (meta.redstone) $('#prompt-text').insertAdjacentHTML('beforeend', '<span class="redstone-badge">REDSTONE</span>');
   if ((meta.warnings || []).length) $('#prompt-text').insertAdjacentHTML('afterend',
     `<ul class="warn-list" id="warn-list">${meta.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul>`);
@@ -1142,4 +1144,106 @@ $('#mod-search').oninput = () => {
     $('#mod-block-results').innerHTML = r.blocks.map(b => `<span class="mod-chip" title="${esc(b.mod)}"><i style="background:${esc(b.color)}"></i>${esc(prettyBlock(b.id))}</span>`).join('')
       || '<span class="muted small">No blocks match.</span>';
   }, 250);
+};
+
+
+// ---------------------------------------------------------------- rating ("how did this turn out?")
+const RATING_TAGS = ['wrong style', 'broken structure', 'too small', 'ugly roof', 'floating or missing blocks', 'not what I asked'];
+function renderRate(meta) {
+  $('#rate-card').hidden = meta.source === 'import';
+  $('#rate-up').classList.toggle('on', meta.rating === 'up');
+  $('#rate-down').classList.toggle('on', meta.rating === 'down');
+  const tags = $('#rate-tags');
+  tags.hidden = meta.rating !== 'down';
+  tags.innerHTML = RATING_TAGS.map(t => `<button type="button" class="chip ${(meta.rating_tags || []).includes(t) ? 'on' : ''}" data-t="${esc(t)}">${esc(t)}</button>`).join('');
+  tags.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+    const cur = new Set(state.current.rating_tags || []);
+    cur.has(c.dataset.t) ? cur.delete(c.dataset.t) : cur.add(c.dataset.t);
+    sendRating('down', [...cur]);
+  });
+}
+async function sendRating(rating, tags = []) {
+  if (!state.current) return;
+  try {
+    state.current = await post(`builds/${state.current.id}/rate`, { rating, tags });
+    renderRate(state.current);
+    if (rating === 'up') toast('Thanks! BlockForge will use this one as an example.');
+  } catch (e) { toast(e.message, true); }
+}
+$('#rate-up').onclick = () => sendRating(state.current?.rating === 'up' ? null : 'up');
+$('#rate-down').onclick = () => sendRating(state.current?.rating === 'down' ? null : 'down', []);
+
+// ---------------------------------------------------------------- Settings -> Learning
+function learnSettings() {
+  return { learn_examples: $('#set-learn-examples').checked, learn_log: $('#set-learn-log').checked };
+}
+async function initLearningTab() {
+  try {
+    const l = await api('learning');
+    $('#set-learn-examples').checked = l.examples; $('#set-learn-log').checked = l.log;
+    const row = (a, b) => `<div class="mod-row"><span>${esc(a)}</span><b>${esc(b)}</b></div>`;
+    $('#learn-stats').innerHTML = [
+      row('Builds checked', l.checked), row('Thumbs up / down', `${l.up} / ${l.down}`), row('Hand fixes saved', l.corrections),
+      ...l.top_fixes.map(([t, n]) => row('Often fixed: ' + t, '×' + n)),
+      ...l.down_tags.map(([t, n]) => row('Complaint: ' + t, '×' + n)),
+    ].join('');
+  } catch { $('#learn-stats').innerHTML = '<p class="muted small">Couldn’t load.</p>'; }
+}
+$('#learn-clear').onclick = async () => {
+  if (!confirm('Clear all ratings, fix records and saved hand-edits? Your builds are not touched.')) return;
+  await post('learning/clear', {});
+  initLearningTab();
+  toast('Cleared');
+};
+
+// ---------------------------------------------------------------- pixel art (no AI)
+let pixelImg = null;
+function pixelDims() {
+  let w = +$('#pixel-width').value, h = Math.max(1, Math.round(w * pixelImg.naturalHeight / pixelImg.naturalWidth));
+  if (h > 128) { w = Math.max(1, Math.round(w * 128 / h)); h = 128; }
+  return [w, h];
+}
+const PIXEL_SCALE = 3;                      // each block is decided from 3x3 samples, so edges stay crisp
+let pixelBig = null;
+function pixelDraw() {
+  const [w, h] = pixelDims(), S = PIXEL_SCALE;
+  pixelBig = document.createElement('canvas');
+  pixelBig.width = w * S; pixelBig.height = h * S;
+  const bx = pixelBig.getContext('2d', { willReadFrequently: true });
+  bx.imageSmoothingEnabled = true; bx.imageSmoothingQuality = 'high';
+  bx.drawImage(pixelImg, 0, 0, w * S, h * S);
+  const cv = $('#pixel-canvas');
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+  ctx.imageSmoothingEnabled = false;          // preview picks one sample per block, like the real thing
+  ctx.drawImage(pixelBig, 0, 0, w, h);
+  $('#pixel-width-val').textContent = w;
+  $('#pixel-size').textContent = `${w} × ${h} blocks (${(w * h).toLocaleString()} total)`;
+}
+$('#pixel-open').onclick = () => {
+  if (!state.image) return;
+  const sel = $('#pixel-palette');
+  if (!sel.options.length) for (const [id, label] of Object.entries(state.status?.pixel_palettes || { concrete: 'Concrete' })) sel.add(new Option(label, id));
+  pixelImg = new Image();
+  pixelImg.onload = () => { pixelDraw(); $('#pixel-dlg').showModal(); };
+  pixelImg.src = state.image;
+};
+$('#pixel-width').oninput = pixelDraw;
+$('#pixel-cancel').onclick = () => $('#pixel-dlg').close();
+$('#pixel-make').onclick = async () => {
+  const [w, h] = pixelDims();
+  const data = pixelBig.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w * PIXEL_SCALE, h * PIXEL_SCALE).data;
+  let bin = '';
+  for (let i = 0; i < data.length; i += 8192) bin += String.fromCharCode.apply(null, data.subarray(i, i + 8192));
+  $('#pixel-make').disabled = true;
+  try {
+    const meta = await post('pixelart', { w, h, rgba: btoa(bin), palette: $('#pixel-palette').value, orient: $('#pixel-orient').value,
+      dither: $('#pixel-dither').checked, max_colors: +$('#pixel-max').value, scale: PIXEL_SCALE, title: ($('#prompt').value.trim().slice(0, 40)) || 'Pixel art' });
+    $('#pixel-dlg').close();
+    await refreshGallery();
+    await openBuild(meta.id, true);
+    toast('Pixel art made');
+  } catch (e) { toast(e.message, true); }
+  $('#pixel-make').disabled = false;
 };
