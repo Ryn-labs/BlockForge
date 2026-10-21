@@ -36,8 +36,10 @@ def state_str(name, props):
 
 
 # ------------------------------------------------------------------ build <-> plain data
-def to_dict(blocks):
-    """blocks: {(x,y,z): state} with any coords -> compact dict normalised to 0..size-1."""
+def to_dict(blocks, tiles=None):
+    """blocks: {(x,y,z): state} with any coords -> compact dict normalised to 0..size-1.
+    tiles: {(x,y,z): {"id", "items": [{"slot", "id", "count", "name"?}], "name"?}} container contents (kept only where
+    that container still is)."""
     if not blocks:
         return {"size": [1, 1, 1], "palette": [], "blocks": []}
     xs = [p[0] for p in blocks]
@@ -50,7 +52,40 @@ def to_dict(blocks):
     for (x, y, z), st in sorted(blocks.items(), key=lambda kv: (kv[0][1], kv[0][2], kv[0][0])):
         i = pal.setdefault(st, len(pal))
         flat += [x - mx, y - my, z - mz, i]
-    return {"size": size, "palette": list(pal), "blocks": flat}
+    out = {"size": size, "palette": list(pal), "blocks": flat}
+    if tiles:
+        out["tiles"] = [[x - mx, y - my, z - mz, t] for (x, y, z), t in sorted(tiles.items())
+                        if blocks.get((x, y, z), "").split("[", 1)[0] == t.get("id")]
+    return out
+
+
+ITEM_COMPONENTS_DV = 3837       # 1.20.5: items use "count" + components instead of "Count" + tag
+
+
+def _text(s):
+    import json
+    return json.dumps({"text": str(s)})
+
+
+def _item_nbt(it, dv):
+    e = {"Slot": (BYTE, int(it.get("slot", 0))), "id": (STRING, it["id"])}
+    if dv >= ITEM_COMPONENTS_DV:
+        e["count"] = (INT, int(it.get("count", 1)))
+        if it.get("name"):
+            e["components"] = (COMPOUND, {"minecraft:custom_name": (STRING, _text(it["name"]))})
+    else:
+        e["Count"] = (BYTE, int(it.get("count", 1)))
+        if it.get("name"):
+            e["tag"] = (COMPOUND, {"display": (COMPOUND, {"Name": (STRING, _text(it["name"]))})})
+    return e
+
+
+def tile_nbt(t, dv):
+    """Block-entity NBT fields (without position) for a container."""
+    e = {"id": (STRING, t["id"]), "Items": (LIST, (COMPOUND, [_item_nbt(i, dv) for i in t.get("items") or []]))}
+    if t.get("name"):
+        e["CustomName"] = (STRING, _text(t["name"]))
+    return e
 
 
 def from_dict(d):
@@ -83,7 +118,10 @@ def write_schem(path, d, name):
         "PaletteMax": (INT, len(palette)),
         "Palette": (COMPOUND, {k: (INT, v) for k, v in palette.items()}),
         "BlockData": (BYTE_ARRAY, data),
-        "BlockEntities": (LIST, (COMPOUND, [])),
+        "BlockEntities": (LIST, (COMPOUND, [
+            {"Pos": (INT_ARRAY, [x, y, z]), "Id": (STRING, t["id"]),
+             **{k: v for k, v in tile_nbt(t, d.get("data_version") or DATA_VERSION).items() if k != "id"}}
+            for x, y, z, t in d.get("tiles") or []])),
         "Entities": (LIST, (COMPOUND, [])),
     }
     nbt.write(path, "Schematic", root)
@@ -125,7 +163,10 @@ def write_litematic(path, d, name, desc=""):
         "Position": pos(0, 0, 0), "Size": pos(W, H, L),
         "BlockStatePalette": (LIST, (COMPOUND, [_pal_entry(st) for st in sorted(pal, key=pal.get)])),
         "BlockStates": (LONG_ARRAY, arr),
-        "Entities": empty, "TileEntities": empty, "PendingBlockTicks": empty, "PendingFluidTicks": empty,
+        "Entities": empty, "PendingBlockTicks": empty, "PendingFluidTicks": empty,
+        "TileEntities": (LIST, (COMPOUND, [
+            {"x": (INT, x), "y": (INT, y), "z": (INT, z), **tile_nbt(t, d.get("data_version") or DATA_VERSION)}
+            for x, y, z, t in d.get("tiles") or []])),
     }
     now = int(time.time() * 1000)
     root = {
@@ -145,9 +186,15 @@ def write_nbt_structure(path, d, name):
     W, H, L = d["size"]
     pal = d["palette"]
     f = d["blocks"]
+    dv = d.get("data_version") or DATA_VERSION
+    tiles = {(x, y, z): t for x, y, z, t in d.get("tiles") or []}
     blocks = []
     for i in range(0, len(f), 4):
-        blocks.append({"pos": (LIST, (INT, [f[i], f[i + 1], f[i + 2]])), "state": (INT, f[i + 3])})
+        e = {"pos": (LIST, (INT, [f[i], f[i + 1], f[i + 2]])), "state": (INT, f[i + 3])}
+        t = tiles.get((f[i], f[i + 1], f[i + 2]))
+        if t:
+            e["nbt"] = (COMPOUND, tile_nbt(t, dv))
+        blocks.append(e)
     root = {
         "DataVersion": (INT, d.get("data_version") or DATA_VERSION),
         "size": (LIST, (INT, [W, H, L])),

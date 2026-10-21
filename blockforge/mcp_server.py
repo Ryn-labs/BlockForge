@@ -109,6 +109,7 @@ def call(name, args):
         except sandbox.ScriptError as e:
             raise ToolError("The build script failed:\n" + str(e))
         final = placement.process(blocks, final=True, **popts)          # nothing impossible gets saved
+        sandbox.restore_modules(blocks, meta)
         fixes = (meta.get("fixes") or []) + final["fixed"]
         title = args.get("title") or meta.get("name") or (store.get_meta(parent)["title"] + " v2" if parent else "Build")
         prompt = args.get("prompt") or args.get("change") or ""
@@ -119,7 +120,8 @@ def call(name, args):
                              references=refs[:10], researched=bool(refs),
                              redstone=prompts.wants_redstone(prompt, args["code"]),
                              warnings=meta.get("redstone_warnings") or [], fixes=fixes,
-                             data_version=mods.data_version(version), modpack=(pack or {}).get("name"))
+                             data_version=mods.data_version(version), modpack=(pack or {}).get("name"),
+                             tiles=sandbox.tiles_of(meta), modules=meta.get("modules"))
         learn.log_generation(m, fixes, meta.get("redstone_warnings") or [])
         return _summary(m)
     if name == "list_builds":

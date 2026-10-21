@@ -629,6 +629,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
             except EngineError as e:
                 log(f"Kept the first version ({e}).")
         final = placement.process(blocks, final=True, **popts)          # last resort: nothing impossible is left
+        sandbox.restore_modules(blocks, meta)
         fixes = list(meta.get("fixes") or []) + final["fixed"]
         for f in final["fixed"]:
             log("Auto-fixed: " + f)
@@ -650,7 +651,8 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                                  model=model, description=meta.get("description") or "",
                                  image_bytes=img_bytes, image_ext=ext, usage=rec, references=refs,
                                  researched=bool(research), redstone=bool(redstone), warnings=problems, fixes=fixes,
-                                 data_version=mods.data_version(version), modpack=(pack or {}).get("name"))
+                                 data_version=mods.data_version(version), modpack=(pack or {}).get("name"),
+                                 tiles=sandbox.tiles_of(meta), modules=meta.get("modules"))
         status = "done"
         learn.log_generation(saved, fixes, list(meta.get("redstone_warnings") or []))
         return saved

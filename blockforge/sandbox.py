@@ -67,6 +67,7 @@ def run(code, timeout=90, placement_opts=None):
     try:
         from . import placement
         rep = placement.process(blocks, **(placement_opts or {}))
+        restore_modules(blocks, meta)
         meta["fixes"] = rep["fixed"]
         meta["warnings"] = meta["redstone_warnings"] + rep["problems"]
     except Exception as e:                               # noqa: BLE001 - never lose a build over the checker
@@ -75,6 +76,19 @@ def run(code, timeout=90, placement_opts=None):
     if not blocks:
         raise ScriptError("The script ran but placed no blocks.")
     return blocks, meta
+
+
+def restore_modules(blocks, meta):
+    """Proven machines must stay exactly as designed, whatever the auto-fixers did."""
+    for x, y, z, s in meta.get("module_cells") or []:
+        cur = blocks.get((x, y, z))
+        if s.startswith("minecraft:redstone_wire") and cur and cur.startswith("minecraft:redstone_wire"):
+            continue
+        blocks[(x, y, z)] = s
+
+
+def tiles_of(meta):
+    return {(x, y, z): t for x, y, z, t in meta.get("tiles") or []}
 
 
 def run_safe(code, timeout=90, placement_opts=None):

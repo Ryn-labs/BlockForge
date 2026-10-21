@@ -70,6 +70,14 @@ Redstone helpers (they set the tricky block states for you; directions are north
 - pressure_plate(x,y,z, kind='stone')   piston(x,y,z, push, sticky=False)   observer(x,y,z, watch)
 - hopper(x,y,z, into='down'|side)   dropper/dispenser(x,y,z, out)   lamp(x,y,z)
 - rail(x,y,z, kind='rail'|'powered'|'detector'|'activator', shape=None)   shapes are worked out automatically
+Proven machines: tested block for block in real Minecraft. ALWAYS use these instead of wiring your own version:
+- item_sorter(x, y, z, items, facing='south', block='stone_bricks', input_chest=True, overflow_chest=True)
+    Automatic storage / item sorter. items = one item id per chest, e.g. ['cobblestone', 'iron_ingot', 'oak_log'].
+    (x,y,z) = back-bottom corner of the first slice. facing = the side the chests face (the front). It is
+    len(items) (+1 overflow chest) wide along the hopper line, 6 deep and 5 tall; the filter hoppers come pre-filled.
+    Returns {'input', 'overflow', 'chests', 'size'}. Never place, replace or wire anything inside it, and keep the
+    block above each chest clear. Build the room, walls, floor and decoration AROUND it (a script that builds over it
+    is rejected). Items that don't stack (tools, armour, potions...) can't be sorted.
 Plain Python (loops, functions, lists, dicts, math) is encouraged. Only math/random/itertools/
 functools/collections/colorsys may be imported. No files, no network.
 
@@ -175,16 +183,19 @@ with exact coordinates. Then build it with the redstone helpers. Rules that make
 - Leave 1 block of air or a non-conductive block (glass, slabs) between separate lines so signals don't cross.
 - Keep the mechanism compact, hide wiring under floors or behind walls if the build has a look to it, and make
   the player-facing input obvious (a lever or button on the outside, with a sign if helpful).
-- Classic patterns to reuse: 2x2 piston door (4 sticky pistons + pulse from both sides), observer clock,
-  hopper-clock / comparator clock, item sorter (hopper line + comparators + torches with 1 stack of filter items),
-  zero-tick-free sugar cane / kelp / bamboo farms with observers, minecart station with powered + detector rails.
-- Design for Java Edition behaviour (quasi-connectivity, update order). Note any manual setup the player must do
-  (e.g. "put 41 filter items in each sorter hopper") in name(..., description=...).
+- Storage / item sorters / "auto sorting" chests: ALWAYS call item_sorter(). Never build a sorter from hoppers,
+  comparators and torches yourself, because a hand-made one will not work. Pick sensible items for the player's
+  request, and put the sorter where the player can reach the input chest (stairs or a walkway up to it).
+- Other classic patterns: 2x2 piston door (4 sticky pistons + pulse from both sides), observer clock,
+  hopper-clock / comparator clock, zero-tick-free sugar cane / kelp / bamboo farms with observers, minecart
+  station with powered + detector rails.
+- Design for Java Edition behaviour (quasi-connectivity, update order). Note any manual setup the player must do in
+  name(..., description=...). item_sorter needs none, because its filters are pre-filled.
 """
 
 
 def wants_redstone(prompt, previous_code=None):
-    if previous_code and re.search(r"\b(dust|repeater|comparator|piston|observer|hopper|lever)\(", previous_code):
+    if previous_code and re.search(r"\b(dust|repeater|comparator|piston|observer|hopper|lever|item_sorter)\(", previous_code):
         return True
     return bool(REDSTONE_WORDS.search(prompt or ""))
 

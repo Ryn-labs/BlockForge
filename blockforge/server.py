@@ -50,6 +50,7 @@ def run_script_job(code, title="Script build", parent_id=None, log=print):
     pack, version, popts = mods.build_opts()
     blocks, meta = sandbox.run_safe(code, placement_opts=popts)
     final = placement.process(blocks, final=True, **popts)
+    sandbox.restore_modules(blocks, meta)
     fixes = (meta.get("fixes") or []) + final["fixed"]
     for f in fixes:
         log("Auto-fixed: " + f)
@@ -57,7 +58,8 @@ def run_script_job(code, title="Script build", parent_id=None, log=print):
     saved = store.save_build(blocks, meta.get("name") or title, prompt=prompt, code=code, source="script",
                              parent=parent_id, description=meta.get("description") or "",
                              warnings=meta.get("redstone_warnings") or [], fixes=fixes,
-                             data_version=mods.data_version(version), modpack=(pack or {}).get("name"))
+                             data_version=mods.data_version(version), modpack=(pack or {}).get("name"),
+                             tiles=sandbox.tiles_of(meta), modules=meta.get("modules"))
     if parent_id:
         learn.log_correction(parent_id, saved["id"])           # keeps "AI version -> your fix" for learning
         saved = store.get_meta(saved["id"])

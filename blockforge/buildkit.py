@@ -8,6 +8,8 @@ MAX_BLOCKS = 3_000_000
 MAX_SPAN = 400
 
 _blocks = {}
+_tiles = {}           # (x, y, z) -> container contents, e.g. {"id": "minecraft:hopper", "items": [...], "name": "..."}
+_modules = []         # proven machines placed by modules.py (locked: the runner rejects scripts that build over them)
 _meta = {"name": None, "description": None}
 random = _random.Random(1337)
 
@@ -373,3 +375,11 @@ _redstone.bind(_blocks, block)
 for _n in _redstone.EXPORTS:
     globals()[_n] = getattr(_redstone, _n)
 EXPORTS += _redstone.EXPORTS
+
+# ------------------------------------------------------------------ proven machines (see modules.py)
+from . import modules as _modules_lib  # noqa: E402
+
+_modules_lib.bind(_blocks, _tiles, _modules, block, BuildError)
+for _n in _modules_lib.EXPORTS:
+    globals()[_n] = getattr(_modules_lib, _n)
+EXPORTS += _modules_lib.EXPORTS

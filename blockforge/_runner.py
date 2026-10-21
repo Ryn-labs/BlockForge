@@ -42,11 +42,18 @@ def main():
         line = next((f.lineno for f in reversed(tb) if f.filename == "build.py"), None)
         err = f"{type(e).__name__}: {e}" + (f" (line {line})" if line else "")
     blocks = buildkit._blocks
+    if not err and buildkit._modules:
+        broken = buildkit._modules_lib.check_intact(blocks)
+        if broken:
+            err = ("Your script built over a proven redstone machine, so it would not work in game: " + "; ".join(broken[:5]) +
+                   ". Never place, replace or wire blocks inside a machine made by item_sorter() etc. Move your own blocks "
+                   "outside its footprint.")
     if not err and blocks:
         try:
             buildkit._meta["warnings"] = buildkit._redstone.finalize(blocks)
         except Exception as e:                       # noqa: BLE001 - never lose a build over the checker
             buildkit._meta["warnings"] = [f"redstone check failed: {e}"]
+        buildkit._modules_lib.restore(blocks, buildkit._modules)
     if not err and blocks:
         xs, ys, zs = zip(*blocks)
         span = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs)) + 1
@@ -56,6 +63,15 @@ def main():
     if not err:
         for (x, y, z), st in blocks.items():
             flat += [x, y, z, pal.setdefault(st, len(pal))]
+    if not err:
+        tiles = []
+        for p, t in buildkit._tiles.items():
+            st = blocks.get(p)
+            if st and st.split("[", 1)[0] == t.get("id"):        # keep contents only while the container is still there
+                tiles.append([p[0], p[1], p[2], t])
+        buildkit._meta["tiles"] = tiles
+        buildkit._meta["module_cells"] = [[p[0], p[1], p[2], s] for m in buildkit._modules for p, s in m["cells"].items()]
+        buildkit._meta["modules"] = [m["name"] for m in buildkit._modules]
     real_out.write(json.dumps({"error": err, "palette": list(pal), "blocks": flat, "meta": buildkit._meta}))
 
 
