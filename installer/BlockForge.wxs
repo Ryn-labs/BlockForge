@@ -3,7 +3,9 @@
   <Package Name="BlockForge" Manufacturer="BlockForge" Version="$(var.Version)"
            UpgradeCode="770f6ac0-9118-4388-879e-16bb9a6e1084" Scope="perMachine" Compressed="yes">
     <SummaryInformation Description="BlockForge - AI Minecraft build generator" />
-    <MajorUpgrade DowngradeErrorMessage="A newer version of BlockForge is already installed." />
+    <!-- AllowSameVersionUpgrades: reinstalling the same version replaces it (otherwise copies stack up and old program
+         files are kept because their version numbers match). -->
+    <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of BlockForge is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <Icon Id="AppIcon" SourceFile="..\blockforge\static\icon.ico" />
