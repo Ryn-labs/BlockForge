@@ -21,6 +21,7 @@ MODELS = {
     "claude-haiku-5-5": "Quick - Claude Haiku 5.5 (fastest)",
 }
 MAX_FIX_ATTEMPTS = 2
+MAX_TEST_FIXES = 3          # times the AI may redesign a machine that failed its in-game test
 
 
 class EngineError(Exception):
@@ -550,8 +551,17 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
         model = model or ((settings.get("providers") or {}).get(engine, {}).get("model"))
     who = engine_label(engine)
     prev_code = store.get_code(parent_id) if parent_id else None
-    if parent_id and not prev_code:
-        raise EngineError("That build has no script, so it can't be edited with a prompt (it was imported).")
+    base_id, base = store.edit_base(parent_id) if parent_id else (None, None)
+    user_image = image
+    base_text = None
+    if base:
+        from . import describe
+        thumb = os.path.join(store._dir(parent_id), "thumb.jpg")
+        if not image and os.path.isfile(thumb):
+            with open(thumb, "rb") as f:
+                image = (f.read(), "image/jpeg")            # show the AI what the build looks like now
+        base_text = describe.base_brief(base[0], has_picture=bool(image) and not user_image)
+        log(f"Editing on top of the existing build ({len(base[0]):,} blocks): only the changes get written.")
     if research is None:
         research = settings.get("research", True) and not parent_id
     if research and engine not in CLAUDE_ENGINES:
@@ -573,10 +583,10 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
     mods_text = mods.prompt_section(pack, prompt) if pack else None
     if pack:
         log(f"Using blocks from your modpack: {pack['name']} ({sum(len(m['blocks']) for m in pack['mods'] if m.get('enabled', True)):,} blocks).")
-    text = prompts.user_message(prompt, size, palette, prev_code, has_image=bool(image),
+    text = prompts.user_message(prompt, size, palette, prev_code, has_image=bool(user_image),
                                 research_sites=sites if research else None, palette_text=palette_text,
                                 redstone=redstone, version=version, mods_text=mods_text,
-                                learned_text=learn.prompt_section(prompt))
+                                learned_text=learn.prompt_section(prompt), base_text=base_text)
     usage = Usage(engine, model)
     started = time.time()
     status, title, saved = "error", None, None
@@ -604,7 +614,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
             for attempt in range(MAX_FIX_ATTEMPTS + 1):
                 log("Building the blocks...")
                 try:
-                    return code, *sandbox.run_safe(code, placement_opts=popts)
+                    return code, *sandbox.run_safe(code, placement_opts=popts, base=base)
                 except sandbox.ScriptError as e:
                     if attempt == MAX_FIX_ATTEMPTS:
                         raise EngineError("The build script kept failing: " + str(e)[:600])
@@ -628,19 +638,71 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                     problems = meta.get("warnings") or []
             except EngineError as e:
                 log(f"Kept the first version ({e}).")
-        final = placement.process(blocks, final=True, **popts)          # last resort: nothing impossible is left
+        final = placement.process(blocks, final=True, **popts, only=sandbox.scope(meta))   # last resort: nothing impossible is left
         sandbox.restore_modules(blocks, meta)
+        if base:
+            sandbox.protect_base(blocks, meta, base[0])
         fixes = list(meta.get("fixes") or []) + final["fixed"]
         for f in final["fixed"]:
             log("Auto-fixed: " + f)
         problems = list(meta.get("redstone_warnings") or [])
         log("Build check passed: every block can exist where it is." if not problems else "Redstone notes: " + "; ".join(problems)[:300])
 
+        # ---- prove machines in the hidden test server before the player sees them
+        from . import testlab
+        tested = None
+        lab_on = testlab.status()["enabled"]
+        if (redstone or meta.get("tests")) and not lab_on:
+            log("Test lab is off, so this machine was not tested in game (Settings -> Test lab).")
+        if lab_on and (redstone or meta.get("tests")):
+            tries = asked_for_test = 0
+            while True:
+                steps = meta.get("tests") or []
+                if not any(s["do"].startswith("expect") for s in steps):
+                    if asked_for_test:
+                        log("No in-game test was written, so this machine is untested.")
+                        break
+                    asked_for_test = 1
+                    log(f"Asking {who} for an in-game test that proves the machine works...")
+                    new = None
+                else:
+                    try:
+                        res = testlab.run_test(blocks, sandbox.tiles_of(meta), meta.get("entities"), steps, log)
+                    except (testlab.LabError, OSError) as e:
+                        log(f"Test lab couldn't run the test: {e}")
+                        break
+                    for line in res["report"].splitlines()[:14]:
+                        log(line.strip())
+                    tested = {"passed": res["passed"], "version": res.get("version"),
+                              "results": [r["text"] for r in res["results"] if r["ok"] is not None][:20],
+                              "attempts": tries + 1}
+                    if res["passed"] or tries >= MAX_TEST_FIXES:
+                        if not res["passed"]:
+                            log("The machine still fails its test after several redesigns. It is saved, but marked as NOT working.")
+                        break
+                    tries += 1
+                    log(f"The test failed. Asking {who} to fix the design (try {tries}/{MAX_TEST_FIXES})...")
+                    new = res["report"]
+                try:
+                    msg = prompts.test_fix_message(new) if new else prompts.test_missing_message()
+                    _, code2, _ = extract(convo.follow_up(msg, code))
+                    code2, blocks2, meta2 = build(code2)
+                    f2 = placement.process(blocks2, final=True, **popts, only=sandbox.scope(meta2))
+                    sandbox.restore_modules(blocks2, meta2)
+                    if base:
+                        sandbox.protect_base(blocks2, meta2, base[0])
+                    code, blocks, meta = code2, blocks2, meta2
+                    fixes = list(meta.get("fixes") or []) + f2["fixed"]
+                    problems = list(meta.get("redstone_warnings") or [])
+                except EngineError as e:
+                    log(f"Kept the earlier version ({e}).")
+                    break
+
         title = meta.get("name") or title or prompt[:60] or "Build"
         rec = usage.record()
         cost = f" (about ${rec['cost_usd']:.2f})" if rec["cost_usd"] else ""
         log(f"Done: {len(blocks):,} blocks. {who} used {rec['total_tokens']:,} tokens{cost}.")
-        img_bytes = image[0] if image else None
+        img_bytes = user_image[0] if user_image else None
         if parent_id and not image:
             pm = store.get_meta(parent_id)
             if pm.get("image"):
@@ -652,7 +714,8 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                                  image_bytes=img_bytes, image_ext=ext, usage=rec, references=refs,
                                  researched=bool(research), redstone=bool(redstone), warnings=problems, fixes=fixes,
                                  data_version=mods.data_version(version), modpack=(pack or {}).get("name"),
-                                 tiles=sandbox.tiles_of(meta), modules=meta.get("modules"))
+                                 tiles=sandbox.tiles_of(meta), modules=meta.get("modules"), base=base_id,
+                                 entities=meta.get("entities"), tested=tested)
         status = "done"
         learn.log_generation(saved, fixes, list(meta.get("redstone_warnings") or []))
         return saved

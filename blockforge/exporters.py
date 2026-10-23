@@ -3,7 +3,7 @@
 import time
 
 from . import nbt
-from .nbt import BYTE, SHORT, INT, LONG, STRING, LIST, COMPOUND, INT_ARRAY, LONG_ARRAY, BYTE_ARRAY
+from .nbt import BYTE, SHORT, INT, LONG, FLOAT, DOUBLE, STRING, LIST, COMPOUND, INT_ARRAY, LONG_ARRAY, BYTE_ARRAY
 
 DATA_VERSION = 3955          # Java 1.21.1 (newer versions load it fine)
 AIR = "minecraft:air"
@@ -36,7 +36,7 @@ def state_str(name, props):
 
 
 # ------------------------------------------------------------------ build <-> plain data
-def to_dict(blocks, tiles=None):
+def to_dict(blocks, tiles=None, entities=None):
     """blocks: {(x,y,z): state} with any coords -> compact dict normalised to 0..size-1.
     tiles: {(x,y,z): {"id", "items": [{"slot", "id", "count", "name"?}], "name"?}} container contents (kept only where
     that container still is)."""
@@ -53,6 +53,8 @@ def to_dict(blocks, tiles=None):
         i = pal.setdefault(st, len(pal))
         flat += [x - mx, y - my, z - mz, i]
     out = {"size": size, "palette": list(pal), "blocks": flat}
+    if entities:
+        out["entities"] = [[x - mx, y - my, z - mz, e] for x, y, z, e in entities]
     if tiles:
         out["tiles"] = [[x - mx, y - my, z - mz, t] for (x, y, z), t in sorted(tiles.items())
                         if blocks.get((x, y, z), "").split("[", 1)[0] == t.get("id")]
@@ -86,6 +88,30 @@ def tile_nbt(t, dv):
     if t.get("name"):
         e["CustomName"] = (STRING, _text(t["name"]))
     return e
+
+
+def entity_nbt(e, dv, pos=None):
+    """Mob NBT from BlockForge's neutral form ({"id", "PersistenceRequired", "CustomName", "VillagerData"...})."""
+    out = {"id": (STRING, e["id"])}
+    for k, v in e.items():
+        if k == "id":
+            continue
+        if k == "CustomName":
+            out[k] = (STRING, _text(v))
+        elif k == "VillagerData":
+            out[k] = (COMPOUND, {"profession": (STRING, v["profession"]), "level": (INT, int(v.get("level", 1))),
+                                 "type": (STRING, v.get("type", "minecraft:plains"))})
+        elif isinstance(v, bool):
+            out[k] = (BYTE, 1 if v else 0)
+        elif isinstance(v, int):
+            out[k] = (INT, v)
+        elif isinstance(v, str):
+            out[k] = (STRING, v)
+    if pos is not None:
+        out["Pos"] = (LIST, (DOUBLE, [float(c) for c in pos]))
+        out["Rotation"] = (LIST, (FLOAT, [0.0, 0.0]))
+        out["Motion"] = (LIST, (DOUBLE, [0.0, 0.0, 0.0]))
+    return out
 
 
 def from_dict(d):
@@ -122,7 +148,9 @@ def write_schem(path, d, name):
             {"Pos": (INT_ARRAY, [x, y, z]), "Id": (STRING, t["id"]),
              **{k: v for k, v in tile_nbt(t, d.get("data_version") or DATA_VERSION).items() if k != "id"}}
             for x, y, z, t in d.get("tiles") or []])),
-        "Entities": (LIST, (COMPOUND, [])),
+        "Entities": (LIST, (COMPOUND, [
+            {"Id": (STRING, e["id"]), **{k: v for k, v in entity_nbt(e, d.get("data_version") or DATA_VERSION, (x, y, z)).items() if k != "id"}}
+            for x, y, z, e in d.get("entities") or []])),
     }
     nbt.write(path, "Schematic", root)
 
@@ -163,7 +191,9 @@ def write_litematic(path, d, name, desc=""):
         "Position": pos(0, 0, 0), "Size": pos(W, H, L),
         "BlockStatePalette": (LIST, (COMPOUND, [_pal_entry(st) for st in sorted(pal, key=pal.get)])),
         "BlockStates": (LONG_ARRAY, arr),
-        "Entities": empty, "PendingBlockTicks": empty, "PendingFluidTicks": empty,
+        "Entities": (LIST, (COMPOUND, [entity_nbt(e, d.get("data_version") or DATA_VERSION, (x, y, z))
+                                       for x, y, z, e in d.get("entities") or []])),
+        "PendingBlockTicks": empty, "PendingFluidTicks": empty,
         "TileEntities": (LIST, (COMPOUND, [
             {"x": (INT, x), "y": (INT, y), "z": (INT, z), **tile_nbt(t, d.get("data_version") or DATA_VERSION)}
             for x, y, z, t in d.get("tiles") or []])),
@@ -200,7 +230,11 @@ def write_nbt_structure(path, d, name):
         "size": (LIST, (INT, [W, H, L])),
         "palette": (LIST, (COMPOUND, [_pal_entry(st) for st in pal])),
         "blocks": (LIST, (COMPOUND, blocks)),
-        "entities": (LIST, (COMPOUND, [])),
+        "entities": (LIST, (COMPOUND, [
+            {"pos": (LIST, (DOUBLE, [float(x), float(y), float(z)])),
+             "blockPos": (LIST, (INT, [int(x), int(y), int(z)])),
+             "nbt": (COMPOUND, entity_nbt(e, dv, (x, y, z)))}
+            for x, y, z, e in d.get("entities") or []])),
     }
     nbt.write(path, "", root)
 

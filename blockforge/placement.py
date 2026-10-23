@@ -63,6 +63,11 @@ class Ctx:
         fences = Counter(_name(s) for s in blocks.values() if _is_fence(_name(s)))
         self.fence = fences.most_common(1)[0][0] if fences else "oak_fence"
 
+    only = None                                            # positions to check (None = the whole build)
+
+    def scoped(self):
+        return [(p, st) for p, st in self.b.items() if self.only is None or p in self.only]
+
     def get(self, p, d=None):
         return self.b.get(p if d is None else _add(p, d))
 
@@ -280,7 +285,7 @@ def _soil_problem(c, p, n, final, double=False):
 
 def _check_ids(c, final, version):
     """Block ids that don't exist in this game version or in the player's modpack."""
-    names = Counter(s.split("[", 1)[0] for s in c.b.values())
+    names = Counter(st.split("[", 1)[0] for _, st in c.scoped())
     vanilla = modlib.vanilla_ids(version) if version else None
     pack = c.pack
     pack_blocks = modlib.enabled_blocks(pack) if pack else set()
@@ -304,7 +309,7 @@ def _check_ids(c, final, version):
         return
     swaps = {k: v[1] for k, v in bad.items() if v[0] == "rename"}
     if swaps:
-        for p, st in list(c.b.items()):
+        for p, st in c.scoped():
             base = st.split("[", 1)[0]
             if base in swaps:
                 c.b[p] = swaps[base] + (st[len(base):])
@@ -314,7 +319,7 @@ def _check_ids(c, final, version):
     mod_blocks = [k for k in left if bad[k][0] == "mod"]
     if unknown_vanilla:
         if final:
-            for p, st in list(c.b.items()):
+            for p, st in c.scoped():
                 if st.split("[", 1)[0] in unknown_vanilla:
                     del c.b[p]
             c.fix("removed", "Removed blocks that don't exist in Minecraft " + str(version) + ": " + ", ".join(unknown_vanilla[:4]))
@@ -323,7 +328,7 @@ def _check_ids(c, final, version):
     if mod_blocks:
         why = "they aren't in your selected modpack" if pack else "no modpack is selected"
         if final:
-            for p, st in list(c.b.items()):
+            for p, st in c.scoped():
                 if st.split("[", 1)[0] in mod_blocks:
                     c.b[p] = "minecraft:stone_bricks"
             c.fix("removed", f"Replaced modded blocks with stone bricks because {why}: " + ", ".join(mod_blocks[:4]))
@@ -351,7 +356,7 @@ _HORIZ_ONLY = re.compile(r"(_stairs$|_door$|_trapdoor$|_wall_sign$|_wall_hanging
 
 def _check_states(c):
     """Block settings that don't exist (facing=left, half=middle, age=99) make the game drop or mangle the block."""
-    for p, st in list(c.b.items()):
+    for p, st in c.scoped():
         if "[" not in st:
             continue
         n = _name(st)
@@ -390,15 +395,24 @@ def _check_states(c):
             c.fix("states", "Fixed block settings that don't exist (a wrong facing, half or other value)")
 
 
-def process(blocks, final=False, version=None, pack="auto"):
+def fix_states(blocks):
+    """Only correct block settings that don't exist (used after quick edits like swaps)."""
+    c = Ctx(blocks)
+    _check_states(c)
+    return [f"{t} (×{n})" if n > 1 else t for t, n in c.fixes.items()]
+
+
+def process(blocks, final=False, version=None, pack="auto", only=None):
     """Fix and check `blocks` ({(x,y,z): state}) in place. Returns {'fixed': [...], 'problems': [...]}.
-    pack: a modpack index, None for vanilla only, or "auto" for the pack selected in Settings."""
+    pack: a modpack index, None for vanilla only, or "auto" for the pack selected in Settings.
+    only: a set of positions to check (editing an existing build: only what the AI changed, and next to it)."""
     if pack == "auto":
         pack = modlib.active_pack()
     if version is None:
         version = (pack or {}).get("mc") or store.load_settings().get("target_version") or "1.21.1"
     c = Ctx(blocks)
     c.pack = pack
+    c.only = only
     try:
         _check_ids(c, final, version)
     except Exception:                                      # noqa: BLE001 - never lose a build over the checker
@@ -407,7 +421,8 @@ def process(blocks, final=False, version=None, pack="auto"):
         _check_states(c)
     except Exception:                                      # noqa: BLE001
         pass
-    for p in sorted(blocks, key=lambda q: (q[1], q[0], q[2])):          # bottom-up so supports are settled first
+    for p in sorted(blocks if only is None else [q for q in blocks if q in only],
+                    key=lambda q: (q[1], q[0], q[2])):          # bottom-up so supports are settled first
         st = blocks.get(p)
         if st is None:
             continue

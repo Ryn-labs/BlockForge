@@ -5,7 +5,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import exporters, learn, mods, placement, prompts, sandbox, store  # noqa: E402
+from blockforge import exporters, learn, mods, placement, prompts, sandbox, store, testlab  # noqa: E402
 
 SERVER = {"name": "blockforge", "version": "1.0.0"}
 APP_URL = "http://127.0.0.1:8765"
@@ -105,12 +105,27 @@ def call(name, args):
             store.get_meta(parent)
         try:
             pack, version, popts = mods.build_opts()
-            blocks, meta = sandbox.run_safe(args["code"], placement_opts=popts)
+            base_id, base = store.edit_base(parent) if parent else (None, None)
+            blocks, meta = sandbox.run_safe(args["code"], placement_opts=popts, base=base)
         except sandbox.ScriptError as e:
             raise ToolError("The build script failed:\n" + str(e))
-        final = placement.process(blocks, final=True, **popts)          # nothing impossible gets saved
+        final = placement.process(blocks, final=True, **popts, only=sandbox.scope(meta))   # nothing impossible gets saved
         sandbox.restore_modules(blocks, meta)
+        if base:
+            sandbox.protect_base(blocks, meta, base[0])
         fixes = (meta.get("fixes") or []) + final["fixed"]
+        tested, lab_report = None, ""
+        if meta.get("tests") and testlab.status()["enabled"]:
+            try:
+                res = testlab.run_test(blocks, sandbox.tiles_of(meta), meta.get("entities"), meta["tests"], lambda m: None)
+                tested = {"passed": res["passed"], "version": res.get("version"),
+                          "results": [r["text"] for r in res["results"] if r["ok"] is not None][:20], "attempts": 1}
+                lab_report = "\n\nIn-game test (BlockForge test lab):\n" + res["report"] + (
+                    "" if res["passed"] else "\nFix the design and call update_build until the test passes.")
+            except (testlab.LabError, OSError) as e:
+                lab_report = f"\n\nThe test lab couldn't run the test: {e}"
+        elif prompts.wants_redstone(args.get("prompt") or "", args["code"]) and not meta.get("tests"):
+            lab_report = "\n\nThis build has redstone but no test_* steps, so it was not proven to work in game."
         title = args.get("title") or meta.get("name") or (store.get_meta(parent)["title"] + " v2" if parent else "Build")
         prompt = args.get("prompt") or args.get("change") or ""
         refs = [{k: str(r.get(k, ""))[:300] for k in ("title", "url", "site", "size", "takeaways")}
@@ -121,9 +136,10 @@ def call(name, args):
                              redstone=prompts.wants_redstone(prompt, args["code"]),
                              warnings=meta.get("redstone_warnings") or [], fixes=fixes,
                              data_version=mods.data_version(version), modpack=(pack or {}).get("name"),
-                             tiles=sandbox.tiles_of(meta), modules=meta.get("modules"))
+                             tiles=sandbox.tiles_of(meta), modules=meta.get("modules"), base=base_id,
+                             entities=meta.get("entities"), tested=tested)
         learn.log_generation(m, fixes, meta.get("redstone_warnings") or [])
-        return _summary(m)
+        return _summary(m) + lab_report
     if name == "list_builds":
         q = (args.get("query") or "").lower()
         items = [b for b in store.list_builds() if not q or q in (b["title"] + " " + b.get("prompt", "")).lower()]
@@ -136,9 +152,15 @@ def call(name, args):
         m = store.get_meta(args["build_id"])
         code = store.get_code(args["build_id"])
         mats = ", ".join(f"{n} x{c}" for n, c in m.get("materials", [])[:30])
-        return (f"{m['title']} (id {m['id']})\nPrompt: {m.get('prompt') or '-'}\n"
-                f"Size {m['size']}, {m['block_count']:,} blocks\nMaterials: {mats}\n\n"
-                + ("Script:\n```python\n" + code + "\n```" if code else "(imported file - no script)"))
+        head = (f"{m['title']} (id {m['id']})\nPrompt: {m.get('prompt') or '-'}\n"
+                f"Size {m['size']}, {m['block_count']:,} blocks\nMaterials: {mats}\n\n")
+        base_id, base = store.edit_base(args["build_id"])
+        if base:
+            from blockforge import describe
+            return (head + describe.base_brief(base[0], has_picture=False) +
+                    "\n\nTo change it, call update_build with build_id and a script of ONLY the changes"
+                    + (f". Current script of changes:\n```python\n{code}\n```" if code else "."))
+        return head + "Script:\n```python\n" + (code or "") + "\n```"
     if name == "export_build":
         fmt = args["format"]
         if fmt not in exporters.FORMATS:

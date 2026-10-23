@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import eleven, engine, exporters, learn, mods, pixelart, placement, prompts, sandbox, store, tts, updater, voices  # noqa: E402
+from blockforge import eleven, engine, exporters, learn, mods, pixelart, placement, prompts, testlab, sandbox, store, tts, updater, voices  # noqa: E402
 from blockforge.version import VERSION  # noqa: E402
 
 PORT = int(os.environ.get("BLOCKFORGE_PORT", "8765"))
@@ -48,22 +48,77 @@ def start_job(fn, **kw):
 def run_script_job(code, title="Script build", parent_id=None, log=print):
     log("Running your script...")
     pack, version, popts = mods.build_opts()
-    blocks, meta = sandbox.run_safe(code, placement_opts=popts)
-    final = placement.process(blocks, final=True, **popts)
+    base_id, base = store.edit_base(parent_id) if parent_id else (None, None)
+    blocks, meta = sandbox.run_safe(code, placement_opts=popts, base=base)
+    final = placement.process(blocks, final=True, **popts, only=sandbox.scope(meta))
     sandbox.restore_modules(blocks, meta)
+    if base:
+        sandbox.protect_base(blocks, meta, base[0])
     fixes = (meta.get("fixes") or []) + final["fixed"]
     for f in fixes:
         log("Auto-fixed: " + f)
+    tested = None
+    if meta.get("tests") and testlab.status()["enabled"]:
+        try:
+            res = testlab.run_test(blocks, sandbox.tiles_of(meta), meta.get("entities"), meta["tests"], log)
+            for line in res["report"].splitlines()[:14]:
+                log(line.strip())
+            tested = {"passed": res["passed"], "version": res.get("version"),
+                      "results": [r["text"] for r in res["results"] if r["ok"] is not None][:20], "attempts": 1}
+        except (testlab.LabError, OSError) as e:
+            log(f"Test lab couldn't run the test: {e}")
     prompt = store.get_meta(parent_id).get("prompt", "") if parent_id else ""
     saved = store.save_build(blocks, meta.get("name") or title, prompt=prompt, code=code, source="script",
                              parent=parent_id, description=meta.get("description") or "",
                              warnings=meta.get("redstone_warnings") or [], fixes=fixes,
                              data_version=mods.data_version(version), modpack=(pack or {}).get("name"),
-                             tiles=sandbox.tiles_of(meta), modules=meta.get("modules"))
+                             tiles=sandbox.tiles_of(meta), modules=meta.get("modules"), base=base_id,
+                             entities=meta.get("entities"), tested=tested)
     if parent_id:
         learn.log_correction(parent_id, saved["id"])           # keeps "AI version -> your fix" for learning
         saved = store.get_meta(saved["id"])
     return saved
+
+
+def quick_edit(bid, b):
+    """Swap / rotate / mirror / cut without AI. Saves a new version next to the original."""
+    from blockforge import edits
+    meta = store.get_meta(bid)
+    d = store.get_blocks(bid)
+    blocks = exporters.from_dict(d)
+    tiles = {(x, y, z): t for x, y, z, t in d.get("tiles") or []}
+    op = b.get("op")
+    note = ""
+    if op == "swap":
+        src, dst = edits.check_name(b.get("from")), edits.check_name(b.get("to"))
+        _, version, _ = mods.build_opts()
+        new, n, skipped = edits.swap(blocks, src, dst, bool(b.get("family")), valid=mods.vanilla_ids(version))
+        if not n:
+            raise ValueError("Nothing to swap: that block isn't in this build" + (f" (or {', '.join(skipped[:3])} has no "
+                             f"{dst.split(':')[-1]} version)" if skipped else "."))
+        blocks = new
+        note = f"Swapped {n:,} blocks to {dst.split(':')[-1].replace('_', ' ')}" + (
+            f" (kept {', '.join(skipped[:4])}: no matching block)" if skipped else "")
+        suffix = f" ({dst.split(':')[-1].replace('_', ' ')})"
+    elif op == "rotate":
+        turns = int(b.get("turns", 1))
+        blocks, tiles = edits.rotate(blocks, tiles, turns)
+        note, suffix = f"Turned {90 * (turns % 4)}°", " (turned)"
+    elif op == "mirror":
+        axis = "z" if b.get("axis") == "z" else "x"
+        blocks, tiles = edits.mirror(blocks, tiles, axis)
+        note, suffix = "Mirrored " + ("front to back" if axis == "z" else "left to right"), " (mirrored)"
+    elif op == "cut":
+        blocks, tiles = edits.cut(blocks, tiles, b.get("y_min"), b.get("y_max"))
+        note, suffix = f"Kept layers {b.get('y_min')} to {b.get('y_max')}", " (cut)"
+    else:
+        raise ValueError("unknown edit")
+    fixes = placement.fix_states(blocks)
+    title = re.sub(r" \((edited|turned|mirrored|cut|[a-z ]+)\)$", "", meta.get("title") or "Build")[:60] + suffix
+    saved = store.save_build(blocks, title, prompt=meta.get("prompt") or "", source="edit", parent=bid,
+                             description=note, fixes=fixes, data_version=d.get("data_version"),
+                             modpack=meta.get("modpack"), tiles=tiles)
+    return {**saved, "note": note}
 
 
 class H(BaseHTTPRequestHandler):
@@ -184,6 +239,13 @@ class H(BaseHTTPRequestHandler):
                     return self.err(502, str(e))
             if parts[1:] == ["usage"]:
                 return self.send(200, store.usage_summary())
+            if parts[1:] == ["testlab"]:
+                return self.send(200, {**testlab.status(), "versions": mods.installed_versions(),
+                                       "suggested": mods.build_opts()[1]})
+            if parts[1:] == ["blocks", "ids"]:
+                _, version, _ = mods.build_opts()
+                ids = mods.vanilla_ids(version) or set()
+                return self.send(200, {"ids": sorted(i for i in ids if i not in ("air", "cave_air", "void_air"))})
             if parts[1:] == ["learning"]:
                 s = store.load_settings()
                 return self.send(200, {**learn.stats(), "examples": s.get("learn_examples", True), "log": s.get("learn_log", True),
@@ -312,6 +374,24 @@ class H(BaseHTTPRequestHandler):
                     if k in b and not isinstance(b[k], dict):
                         b.pop(k)
                 return self.send(200, {"ok": True, "engine": store.save_settings(b)["engine"]})
+            if route[:1] == ["testlab"] and len(route) == 2:
+                b = self.json_body()
+                if route[1] == "setup":
+                    if b.get("accept_eula") is not True:
+                        return self.err(400, "Tick the box to accept Mojang's EULA first.")
+                    v = str(b.get("version") or "").strip()
+                    if not re.fullmatch(r"[0-9A-Za-z._-]{2,20}", v):
+                        return self.err(400, "Pick a Minecraft version.")
+                    return self.send(200, {"job": start_job(lambda log=print: testlab.setup(v, True, log))["id"]})
+                if route[1] == "start":
+                    return self.send(200, {"job": start_job(lambda log=print: (testlab.start(log), testlab.status())[1])["id"]})
+                if route[1] == "stop":
+                    testlab.stop()
+                    return self.send(200, testlab.status())
+                if route[1] == "enable":
+                    store.save_settings({"testlab_enabled": bool(b.get("enabled"))})
+                    return self.send(200, testlab.status())
+                return self.err(404, "not found")
             if route == ["pixelart"]:
                 b = self.json_body()
                 try:
@@ -399,6 +479,8 @@ class H(BaseHTTPRequestHandler):
                 if action == "rename":
                     t = (self.json_body().get("title") or "").strip()[:80]
                     return self.send(200, store.update_meta(bid, title=t or "Untitled build"))
+                if action == "edit":
+                    return self.send(200, quick_edit(bid, self.json_body()))
                 if action == "rate":
                     b = self.json_body()
                     return self.send(200, learn.rate(bid, b.get("rating"), b.get("tags"), b.get("note", "")))
@@ -449,6 +531,8 @@ class H(BaseHTTPRequestHandler):
 
 
 def main():
+    import atexit
+    atexit.register(testlab.stop)
     srv = ThreadingHTTPServer(("127.0.0.1", PORT), H)
     print(f"BlockForge running at http://127.0.0.1:{PORT}")
     srv.serve_forever()

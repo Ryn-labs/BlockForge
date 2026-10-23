@@ -10,6 +10,8 @@ MAX_SPAN = 400
 _blocks = {}
 _tiles = {}           # (x, y, z) -> container contents, e.g. {"id": "minecraft:hopper", "items": [...], "name": "..."}
 _modules = []         # proven machines placed by modules.py (locked: the runner rejects scripts that build over them)
+_entities = []        # mobs in the build: [x, y, z, {"id": ..., ...}] (see testkit.py)
+_tests = []           # in-game test steps for the test lab (see testkit.py)
 _meta = {"name": None, "description": None}
 random = _random.Random(1337)
 
@@ -383,3 +385,11 @@ _modules_lib.bind(_blocks, _tiles, _modules, block, BuildError)
 for _n in _modules_lib.EXPORTS:
     globals()[_n] = getattr(_modules_lib, _n)
 EXPORTS += _modules_lib.EXPORTS
+
+# ------------------------------------------------------------------ mobs + in-game tests (see testkit.py)
+from . import testkit as _testkit  # noqa: E402
+
+_testkit.bind(_entities, _tests, BuildError)
+for _n in _testkit.EXPORTS:
+    globals()[_n] = getattr(_testkit, _n)
+EXPORTS += _testkit.EXPORTS

@@ -35,6 +35,16 @@ def main():
     for n in buildkit.EXPORTS:
         g[n] = getattr(buildkit, n)
     err = None
+    base = {}
+    base_path = os.environ.get("BLOCKFORGE_BASE")
+    if base_path:                                    # editing an existing build: its blocks are already placed
+        with open(base_path, encoding="utf-8") as f:
+            b = json.load(f)
+        for x, y, z, s in b["blocks"]:
+            buildkit._blocks[(x, y, z)] = s
+        for x, y, z, t in b.get("tiles") or []:
+            buildkit._tiles[(x, y, z)] = t
+        base = dict(buildkit._blocks)
     try:
         exec(compile(code, "build.py", "exec"), g)
     except Exception as e:
@@ -42,6 +52,12 @@ def main():
         line = next((f.lineno for f in reversed(tb) if f.filename == "build.py"), None)
         err = f"{type(e).__name__}: {e}" + (f" (line {line})" if line else "")
     blocks = buildkit._blocks
+    changed = set()
+    if base and not err:
+        changed = {p for p in set(base) | set(blocks) if base.get(p) != blocks.get(p)}
+        if not changed:
+            err = ("Your script didn't change anything. The build's blocks are already placed when the script starts, "
+                   "so write the code that makes the requested change.")
     if not err and buildkit._modules:
         broken = buildkit._modules_lib.check_intact(blocks)
         if broken:
@@ -51,9 +67,15 @@ def main():
     if not err and blocks:
         try:
             buildkit._meta["warnings"] = buildkit._redstone.finalize(blocks)
+            if buildkit._modules:                    # proven machines are checked in game, not by the simple checker
+                cells = {p for m in buildkit._modules for p in m["cells"]}
+                buildkit._meta["warnings"] = buildkit._redstone.check({p: s for p, s in blocks.items() if p not in cells})
         except Exception as e:                       # noqa: BLE001 - never lose a build over the checker
             buildkit._meta["warnings"] = [f"redstone check failed: {e}"]
         buildkit._modules_lib.restore(blocks, buildkit._modules)
+        for p, s in base.items():                    # auto-wiring must not touch the parts of the build left alone
+            if p not in changed:
+                blocks[p] = s
     if not err and blocks:
         xs, ys, zs = zip(*blocks)
         span = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs)) + 1
@@ -71,7 +93,11 @@ def main():
                 tiles.append([p[0], p[1], p[2], t])
         buildkit._meta["tiles"] = tiles
         buildkit._meta["module_cells"] = [[p[0], p[1], p[2], s] for m in buildkit._modules for p, s in m["cells"].items()]
+        buildkit._meta["entities"] = buildkit._entities
+        buildkit._meta["tests"] = buildkit._tests + [t for m in buildkit._modules for t in m.get("tests", [])]
         buildkit._meta["modules"] = [m["name"] for m in buildkit._modules]
+        if base:
+            buildkit._meta["changed"] = [list(p) for p in changed]
     real_out.write(json.dumps({"error": err, "palette": list(pal), "blocks": flat, "meta": buildkit._meta}))
 
 

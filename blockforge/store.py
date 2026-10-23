@@ -42,7 +42,8 @@ DEFAULT_SETTINGS = {
     "providers": {},
     "modpacks": [],                                         # scanned packs: [{"id", "name", "path"}]
     "active_pack": None, "use_mods": True, "target_version": "1.21.1",
-    "learn_examples": True, "learn_log": True,              # local learning loop (Settings -> Learning)                                       # other AIs: {id: {"api_key", "base_url", "model", "models"}}                                           # the guide character (name, voice, colours...)
+    "learn_examples": True, "learn_log": True,
+    "testlab_enabled": False, "testlab_eula": False, "testlab_version": None,   # Settings -> Test lab              # local learning loop (Settings -> Learning)                                       # other AIs: {id: {"api_key", "base_url", "model", "models"}}                                           # the guide character (name, voice, colours...)
 }
 USAGE_LOG = os.path.join(DATA, "usage.jsonl")
 
@@ -127,11 +128,11 @@ def slug(text):
 
 def save_build(blocks, title, prompt="", code=None, source="app", parent=None, model=None,
                description="", image_bytes=None, image_ext=None, usage=None, references=None, researched=False,
-               redstone=False, warnings=None, fixes=None, data_version=None, modpack=None, tiles=None, modules=None):
+               redstone=False, warnings=None, fixes=None, data_version=None, modpack=None, tiles=None, modules=None, base=None, entities=None, tested=None):
     bid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     d = _dir(bid)
     os.makedirs(d)
-    data = exporters.to_dict(blocks, tiles)
+    data = exporters.to_dict(blocks, tiles, entities)
     if data_version:
         data["data_version"] = data_version
     counts = {}
@@ -145,7 +146,7 @@ def save_build(blocks, title, prompt="", code=None, source="app", parent=None, m
         "materials": sorted(counts.items(), key=lambda kv: -kv[1]),
         "has_image": bool(image_bytes),
         "usage": usage, "references": references or [], "researched": researched,
-        "redstone": redstone, "warnings": warnings or [], "fixes": fixes or [], "modpack": modpack, "modules": modules or [],
+        "redstone": redstone, "warnings": warnings or [], "fixes": fixes or [], "modpack": modpack, "modules": modules or [], "base": base, "tested": tested, "mobs": len(entities or []),
     }
     with open(os.path.join(d, "blocks.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, separators=(",", ":"))
@@ -285,3 +286,16 @@ def usage_summary(limit=100):
         "by_model": {m: total(rs) for m, rs in by_model.items()},
         "recent": list(reversed(rows))[:limit],
     }
+
+
+def edit_base(bid):
+    """(base id, (blocks, tiles)) when edits to `bid` run on top of existing blocks, else (None, None).
+    Imported / quick-edited builds have no script, so they are their own base; AI edits of them keep that base."""
+    m = get_meta(bid)
+    base_id = m.get("base") or (bid if not get_code(bid) else None)
+    if not base_id:
+        return None, None
+    d = get_blocks(base_id)
+    blocks = exporters.from_dict(d)
+    tiles = {(x, y, z): t for x, y, z, t in d.get("tiles") or []}
+    return base_id, (blocks, tiles)

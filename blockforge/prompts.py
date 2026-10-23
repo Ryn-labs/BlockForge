@@ -70,6 +70,17 @@ Redstone helpers (they set the tricky block states for you; directions are north
 - pressure_plate(x,y,z, kind='stone')   piston(x,y,z, push, sticky=False)   observer(x,y,z, watch)
 - hopper(x,y,z, into='down'|side)   dropper/dispenser(x,y,z, out)   lamp(x,y,z)
 - rail(x,y,z, kind='rail'|'powered'|'detector'|'activator', shape=None)   shapes are worked out automatically
+Mobs: entity(x, y, z, kind, name=None, profession=None, baby=False) puts a mob in the build (it never despawns), e.g.
+  villagers for an iron farm, a name-tagged zombie, animals for a farm. They are saved in every export.
+In-game tests (REQUIRED for every redstone build or farm): BlockForge places the build in a hidden real Minecraft
+server, runs these steps fast and checks the result. A failed test comes back to you with exactly what happened.
+- test_put(x,y,z, item, count)          put items into a chest/hopper/dispenser at that spot
+- test_press(x,y,z) / test_power(x,y,z) press a button or flip a lever / put a redstone block on an empty spot
+- test_wait(seconds=..) or ticks=..     let the game run (a day is 24000 ticks; farms often need several minutes)
+- test_expect_items(x,y,z, item, at_least=1, at_most=None)   a container's contents
+- test_expect_block(x,y,z, 'air' or 'redstone_lamp[lit=true]')  a block's state after the action
+- test_expect_mob(kind, x1,y1,z1, x2,y2,z2, at_least=1)        mobs in an area (villagers still in place...)
+- test_note(text)                        explain what the test proves
 Proven machines: tested block for block in real Minecraft. ALWAYS use these instead of wiring your own version:
 - item_sorter(x, y, z, items, facing='south', block='stone_bricks', input_chest=True, overflow_chest=True)
     Automatic storage / item sorter. items = one item id per chest, e.g. ['cobblestone', 'iron_ingot', 'oak_log'].
@@ -78,6 +89,12 @@ Proven machines: tested block for block in real Minecraft. ALWAYS use these inst
     Returns {'input', 'overflow', 'chests', 'size'}. Never place, replace or wire anything inside it, and keep the
     block above each chest clear. Build the room, walls, floor and decoration AROUND it (a script that builds over it
     is rejected). Items that don't stack (tools, armour, potions...) can't be sorted.
+- iron_farm(x, y, z, facing='south', block='stone_bricks')
+    Automatic IRON FARM (villagers, zombie, beds and the night shutter all included). (x,y,z) = back-left corner at
+    ground level; it is 12 wide, 11 deep, 17 tall (its floor is 8 up so golems can't spawn on the ground near it).
+    facing = the side its collection chest is on. Returns {'chest', 'size'}. Never build inside it, and keep 8
+    blocks around its villagers free of solid blocks golems could spawn on (glass, leaves or open air are fine).
+If the request needs a machine that has no proven function here, design it yourself and PROVE it with test_* steps.
 Plain Python (loops, functions, lists, dicts, math) is encouraged. Only math/random/itertools/
 functools/collections/colorsys may be imported. No files, no network.
 
@@ -183,6 +200,8 @@ with exact coordinates. Then build it with the redstone helpers. Rules that make
 - Leave 1 block of air or a non-conductive block (glass, slabs) between separate lines so signals don't cross.
 - Keep the mechanism compact, hide wiring under floors or behind walls if the build has a look to it, and make
   the player-facing input obvious (a lever or button on the outside, with a sign if helpful).
+- Iron farms: ALWAYS call iron_farm(). Golem farms depend on details (sight lines, sleep, golem pathing) that a
+  hand-made design almost always gets wrong.
 - Storage / item sorters / "auto sorting" chests: ALWAYS call item_sorter(). Never build a sorter from hoppers,
   comparators and torches yourself, because a hand-made one will not work. Pick sensible items for the player's
   request, and put the sorter where the player can reach the input chest (stairs or a walkway up to it).
@@ -191,6 +210,8 @@ with exact coordinates. Then build it with the redstone helpers. Rules that make
   station with powered + detector rails.
 - Design for Java Edition behaviour (quasi-connectivity, update order). Note any manual setup the player must do in
   name(..., description=...). item_sorter needs none, because its filters are pre-filled.
+- ALWAYS finish with test_* steps that prove the machine works (item_sorter tests itself, so add tests only for
+  your own machines). Test the real purpose: a farm must actually produce items into its chest, a door must open.
 """
 
 
@@ -201,19 +222,25 @@ def wants_redstone(prompt, previous_code=None):
 
 
 def user_message(prompt, size="medium", palette="auto", previous_code=None, has_image=False,
-                 research_sites=None, palette_text=None, redstone=None, version=None, mods_text=None, learned_text=None):
+                 research_sites=None, palette_text=None, redstone=None, version=None, mods_text=None, learned_text=None, base_text=None):
     parts = []
     if redstone is None:
         redstone = wants_redstone(prompt, previous_code)
+    if base_text:
+        parts.append(base_text)
     if previous_code:
-        parts.append("Here is the current build script:\n```python\n" + previous_code + "\n```\n")
+        parts.append(("Here is the current script of changes (it runs on top of the build above):" if base_text else
+                      "Here is the current build script:") + "\n```python\n" + previous_code + "\n```\n")
         parts.append("Change request: " + prompt.strip())
+    elif base_text:
+        parts.append("Change request: " + (prompt.strip() or "Improve this build.") +
+                     "\nReply with a one-line title, then ONE ```python block containing only the changes.")
     else:
         parts.append("Build request: " + (prompt.strip() or "Recreate the attached image as a 3D build."))
     if has_image:
         parts.append("Reference image attached: reconstruct it as a real 3D Minecraft structure "
                      "(not flat pixel art, unless it is clearly flat art), matching its colours and shapes.")
-    if not previous_code:
+    if not previous_code and not base_text:
         parts.append("Target size: " + SIZES.get(size, SIZES["medium"]) + ".")
     pal = palette_text or PALETTES.get(palette)
     if pal and palette != "auto":
@@ -234,6 +261,18 @@ def user_message(prompt, size="medium", palette="auto", previous_code=None, has_
 def fix_message(error):
     return ("The script failed when it ran:\n```\n" + error + "\n```\n"
             "Fix it and reply with the complete corrected script in one ```python block.")
+
+
+def test_fix_message(report):
+    return ("BlockForge placed your build in a real Minecraft server and ran your test. It did not work:\n\n" + report +
+            "\n\nWork out WHY from the results (think about the real game mechanics involved), fix the design (and the test "
+            "if the test itself was wrong), and reply with the complete corrected script in one ```python block.")
+
+
+def test_missing_message():
+    return ("This build has redstone or a farm, so it must PROVE it works. Add test_* steps to the script: give it its "
+            "inputs (test_put / test_press / test_power), let time pass (test_wait) and check the outcome "
+            "(test_expect_items / test_expect_block / test_expect_mob). Reply with the complete script in one ```python block.")
 
 
 def redstone_fix_message(problems):

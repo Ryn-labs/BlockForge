@@ -42,14 +42,29 @@ def check(code):
             raise ScriptError(f"line {node.lineno}: '{node.id}' is not allowed in build scripts")
 
 
-def run(code, timeout=90, placement_opts=None):
+def run(code, timeout=90, placement_opts=None, base=None):
     """Returns (blocks_dict {(x,y,z): state}, meta). Raises ScriptError with a readable message."""
     check(code)
-    proc = subprocess.run(
-        runner_cmd(),
-        input=code.encode("utf-8"), capture_output=True, timeout=timeout,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
+    env, base_file = None, None
+    if base:
+        import tempfile
+        fd, base_file = tempfile.mkstemp(suffix=".json", prefix="bf_base_")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"blocks": [[x, y, z, s] for (x, y, z), s in base[0].items()],
+                       "tiles": [[x, y, z, t] for (x, y, z), t in (base[1] or {}).items()]}, f)
+        env = dict(os.environ, BLOCKFORGE_BASE=base_file)
+    try:
+        proc = subprocess.run(
+            runner_cmd(),
+            input=code.encode("utf-8"), capture_output=True, timeout=timeout, env=env,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    finally:
+        if base_file:
+            try:
+                os.remove(base_file)
+            except OSError:
+                pass
     out = proc.stdout.decode("utf-8", "replace")
     if proc.returncode != 0 or not out.startswith("{"):
         err = proc.stderr.decode("utf-8", "replace").strip() or out.strip() or "script crashed"
@@ -66,10 +81,14 @@ def run(code, timeout=90, placement_opts=None):
     meta["redstone_warnings"] = list(meta.get("warnings") or [])
     try:
         from . import placement
-        rep = placement.process(blocks, **(placement_opts or {}))
+        rep = placement.process(blocks, **(placement_opts or {}), only=scope(meta) if base else None)
         restore_modules(blocks, meta)
         meta["fixes"] = rep["fixed"]
         meta["warnings"] = meta["redstone_warnings"] + rep["problems"]
+        if base:
+            protect_base(blocks, meta, base[0])
+            meta["warnings"] = only_near_changes(meta["warnings"], meta)
+            meta["redstone_warnings"] = only_near_changes(meta["redstone_warnings"], meta)
     except Exception as e:                               # noqa: BLE001 - never lose a build over the checker
         meta["fixes"] = []
         meta.setdefault("warnings", []).append(f"placement check failed: {e}")
@@ -87,12 +106,51 @@ def restore_modules(blocks, meta):
         blocks[(x, y, z)] = s
 
 
+def _near(meta):
+    if "_near" not in meta:
+        near = set()
+        for x, y, z in meta.get("changed") or []:
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for dz in (-1, 0, 1):
+                        near.add((x + dx, y + dy, z + dz))
+        meta["_near"] = near
+    return meta["_near"]
+
+
+def scope(meta):
+    """Positions the placement checker may look at when editing an existing build (None = everything)."""
+    return _near(meta) if "changed" in meta else None
+
+
+def protect_base(blocks, meta, base_blocks):
+    """Editing an existing build: only the AI's changes (and fixes right next to them) may differ from the original."""
+    near = _near(meta)
+    for p, s in base_blocks.items():
+        if p not in near and blocks.get(p) != s:
+            blocks[p] = s
+    for p in [p for p in blocks if p not in base_blocks and p not in near]:
+        del blocks[p]
+
+
+def only_near_changes(messages, meta):
+    """Keep only checker messages about blocks the AI changed (an imported build's own quirks aren't the AI's problem)."""
+    import re
+    near = _near(meta)
+    keep = []
+    for m in messages or []:
+        pts = [tuple(int(v) for v in t) for t in re.findall(r"\((-?\d+), (-?\d+), (-?\d+)\)", m)]
+        if pts and any(p in near for p in pts):
+            keep.append(m)
+    return keep
+
+
 def tiles_of(meta):
     return {(x, y, z): t for x, y, z, t in meta.get("tiles") or []}
 
 
-def run_safe(code, timeout=90, placement_opts=None):
+def run_safe(code, timeout=90, placement_opts=None, base=None):
     try:
-        return run(code, timeout, placement_opts)
+        return run(code, timeout, placement_opts, base)
     except subprocess.TimeoutExpired:
         raise ScriptError(f"The script took longer than {timeout}s (too many blocks or an endless loop).")

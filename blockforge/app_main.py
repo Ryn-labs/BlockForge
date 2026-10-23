@@ -98,6 +98,11 @@ def run_gui():
     api._window = webview.create_window("BlockForge", URL, width=1440, height=900, min_size=(900, 600),
                                        background_color="#0f1115", text_select=True, js_api=api)
     webview.start(private_mode=False, storage_path=os.path.join(store.DATA, "webview"))
+    try:                                             # window closed: don't leave the hidden test server running
+        from blockforge import testlab
+        testlab.stop()
+    except Exception:                                # noqa: BLE001
+        pass
 
 
 def main():
