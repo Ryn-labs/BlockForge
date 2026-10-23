@@ -200,6 +200,7 @@ function openSettings(tab = 'claude') {
   if (s) {
     initModsTab();
     initLearningTab();
+    initLabTab();
     $('#set-research').checked = s.settings.research !== false;
     $('#set-sites').value = (s.settings.research_sites || s.default_sites).join('\n');
     $('#default-size').value = s.settings.default_size || 'medium';
@@ -433,6 +434,16 @@ async function openBuild(id, fresh = false) {
   $('#prompt-text').textContent = meta.prompt || meta.description || '';
   renderRate(meta);
   if (meta.redstone) $('#prompt-text').insertAdjacentHTML('beforeend', '<span class="redstone-badge">REDSTONE</span>');
+  document.querySelector('#test-list')?.remove();
+  if (meta.tested) {
+    const t = meta.tested;
+    $('#prompt-text').insertAdjacentHTML('beforeend', t.passed
+      ? `<span class="tested-badge ok" title="Placed in a real Minecraft ${esc(t.version)} server and it worked">✓ TESTED IN GAME</span>`
+      : `<span class="tested-badge bad" title="It failed its test in a real Minecraft server">✗ FAILED IN-GAME TEST</span>`);
+    $('#prompt-text').insertAdjacentHTML('afterend', `<details class="fix-list" id="test-list"><summary>${t.passed ? 'Proven in' : 'Failed in'} Minecraft ${esc(t.version)}${t.attempts > 1 ? ` after ${t.attempts} tries` : ''}</summary><ul>${(t.results || []).map(r => `<li>${esc(r)}</li>`).join('')}</ul></details>`);
+  } else if (meta.redstone) {
+    $('#prompt-text').insertAdjacentHTML('beforeend', '<span class="tested-badge" title="Turn on Settings → Test lab to prove machines in a real game">NOT TESTED</span>');
+  }
   if ((meta.warnings || []).length) $('#prompt-text').insertAdjacentHTML('afterend',
     `<ul class="warn-list" id="warn-list">${meta.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul>`);
   if ((meta.fixes || []).length) $('#prompt-text').insertAdjacentHTML('afterend',
@@ -449,12 +460,19 @@ async function openBuild(id, fresh = false) {
   $('#materials').innerHTML = (meta.materials || []).map(([n, c]) => {
     const col = '#' + blockColor(n).toString(16).padStart(6, '0');
     const stacks = c >= 64 ? `${Math.floor(c / 64)}×64${c % 64 ? ' + ' + (c % 64) : ''}` : '';
-    return `<li data-block="${esc(n)}" title="Click to highlight every ${esc(prettyBlock(n))} in the build"><span class="sw" style="background:${col}"></span><span class="nm">${esc(prettyBlock(n))}</span><span class="ct">${c.toLocaleString()}${stacks ? '<br>' + stacks : ''}</span></li>`;
+    return `<li data-block="${esc(n)}" title="Click to highlight every ${esc(prettyBlock(n))} in the build"><span class="sw" style="background:${col}"></span><span class="nm">${esc(prettyBlock(n))}</span><span class="ct">${c.toLocaleString()}${stacks ? '<br>' + stacks : ''}</span><button type="button" class="swap-btn" title="Swap ${esc(prettyBlock(n))} for another block">⇄</button></li>`;
   }).join('');
-  for (const li of $('#materials').querySelectorAll('li')) li.onclick = () => focusBlock(viewer.focusName === li.dataset.block ? null : li.dataset.block);
+  for (const li of $('#materials').querySelectorAll('li')) {
+    li.onclick = () => focusBlock(viewer.focusName === li.dataset.block ? null : li.dataset.block);
+    li.querySelector('.swap-btn').onclick = e => { e.stopPropagation(); openSwap(li.dataset.block); };
+  }
+  $('#q-ymin').value = 0; $('#q-ymax').value = Math.max(0, meta.size[1] - 1);
+  $('#q-ymin').max = $('#q-ymax').max = Math.max(0, meta.size[1] - 1);
   focusBlock(null);
-  $('#code').value = code.code || '# This build was imported from a file, so it has no script.';
-  $('#edit-card').hidden = !code.code;
+  const onBase = !code.code || meta.base;
+  $('#code').value = code.code || '# This build has no script (it was imported or quick-edited).\n# Write a script of CHANGES here: the build\'s blocks are already placed when it runs.\n# e.g. replace(0, 0, 0, 200, 200, 200, "oak_planks", "spruce_planks")\n';
+  $('#edit-card').hidden = false;
+  $('#edit-note').textContent = onBase ? 'This build was imported (or quick-edited). The AI changes it on top of what is there, and everything else stays exactly as it is.' : '';
   const refs = meta.references || [];
   $('#sources').innerHTML = refs.length ? `<p class="muted small">Real builds Claude studied before designing this one. Click one to open it in your browser.</p>` +
     refs.map(r => `<div class="src"><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.title || r.url)}</a>
@@ -1247,3 +1265,102 @@ $('#pixel-make').onclick = async () => {
   } catch (e) { toast(e.message, true); }
   $('#pixel-make').disabled = false;
 };
+
+
+// ---------------------------------------------------------------- quick edits (no AI)
+async function quickEdit(body, label) {
+  if (!state.current || state.job) return;
+  try {
+    toast(label + '…');
+    const meta = await post(`builds/${state.current.id}/edit`, body);
+    await refreshGallery();
+    await openBuild(meta.id);
+    toast(meta.note || 'Done');
+  } catch (e) { toast(e.message, true); }
+}
+$('#q-rotate').onclick = () => quickEdit({ op: 'rotate', turns: 1 }, 'Turning');
+$('#q-mirror-x').onclick = () => quickEdit({ op: 'mirror', axis: 'x' }, 'Mirroring');
+$('#q-mirror-z').onclick = () => quickEdit({ op: 'mirror', axis: 'z' }, 'Mirroring');
+$('#q-cut').onclick = () => {
+  const a = +$('#q-ymin').value, b = +$('#q-ymax').value;
+  if (!(b >= a)) return toast('The second layer must be the same or higher', true);
+  quickEdit({ op: 'cut', y_min: a, y_max: b }, 'Cutting');
+};
+
+let blockIdsLoaded = false;
+const familyOf = n => {
+  n = n.replace(/^minecraft:/, '');
+  if (/_bricks$|_tiles$/.test(n)) return n.slice(0, -1);
+  const m = n.match(/^(.*?)(_planks|_stairs|_slab|_log|_wood|_stem|_hyphae|_fence_gate|_fence|_door|_trapdoor|_sign|_button|_pressure_plate|_wall|_leaves|_sapling|_brick|_tile)$/);
+  return m ? m[1] : n;
+};
+async function openSwap(name) {
+  $('#swap-from').textContent = prettyBlock(name);
+  $('#swap-from').dataset.id = name;
+  $('#swap-to').value = '';
+  const fam = familyOf(name);
+  const isFamily = fam !== name.replace(/^minecraft:/, '');
+  $('#swap-family').checked = isFamily;
+  $('#swap-family').closest('.toggle').hidden = !isFamily;
+  $('#swap-family-note').textContent = `Every ${fam.replace(/_/g, ' ')} block changes: stairs, slabs, fences, walls, doors…`;
+  $('#swap-dlg').showModal();
+  $('#swap-to').focus();
+  if (!blockIdsLoaded) {
+    try {
+      const { ids } = await api('blocks/ids');
+      $('#block-ids').innerHTML = ids.map(i => `<option value="${esc(i)}">`).join('');
+      blockIdsLoaded = true;
+    } catch { /* free text still works */ }
+  }
+}
+$('#swap-cancel').onclick = () => $('#swap-dlg').close();
+$('#swap-go').onclick = async () => {
+  const to = $('#swap-to').value.trim().toLowerCase().replace(/\s+/g, '_');
+  if (!to) return toast('Type the block to swap in', true);
+  $('#swap-dlg').close();
+  await quickEdit({ op: 'swap', from: $('#swap-from').dataset.id, to, family: $('#swap-family').checked && !$('#swap-family').closest('.toggle').hidden }, 'Swapping');
+};
+$('#swap-to').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); $('#swap-go').click(); } };
+
+
+// ---------------------------------------------------------------- Settings -> Test lab
+async function initLabTab() {
+  try {
+    const s = await api('testlab');
+    $('#lab-versions').innerHTML = (s.versions || []).map(v => `<option value="${esc(v)}">`).join('');
+    if (!$('#lab-version').value) $('#lab-version').value = s.version || s.suggested || '';
+    $('#lab-status').innerHTML = s.ready
+      ? `<span><b>Ready</b> · Minecraft ${esc(s.version)} · Java ${esc(s.java_major)} · ${s.tests_run} tests run</span><span class="muted small">${s.running ? 'server running' : 'server stopped (it starts by itself when needed)'}</span>`
+      : '<span>Not set up yet.</span>';
+    $('#lab-setup').querySelector('h3').textContent = s.ready ? 'Change the version' : 'Set it up (one time)';
+    $('#lab-setup-go').textContent = s.ready ? 'Switch version' : 'Set up test lab';
+    $('#lab-enable-row').hidden = $('#lab-run-row').hidden = !s.ready;
+    $('#lab-enabled').checked = s.enabled;
+  } catch (e) { $('#lab-status').textContent = 'Couldn’t check the test lab: ' + e.message; }
+}
+async function watchLabJob(job) {
+  const log = $('#lab-log');
+  log.hidden = false;
+  for (;;) {
+    const j = await api('jobs/' + job).catch(() => null);
+    if (j) {
+      log.innerHTML = j.log.slice(-8).map(l => `<li>${esc(l.msg)}</li>`).join('') + (j.error ? `<li class="err">${esc(j.error)}</li>` : '');
+      if (j.status !== 'running') return j;
+    }
+    await new Promise(r => setTimeout(r, 800));
+  }
+}
+$('#lab-setup-go').onclick = async () => {
+  const version = $('#lab-version').value.trim();
+  if (!version) return toast('Type the Minecraft version you play', true);
+  if (!$('#lab-eula').checked) return toast('Tick the box to accept the Minecraft EULA first', true);
+  try {
+    const { job } = await post('testlab/setup', { version, accept_eula: true });
+    const j = await watchLabJob(job);
+    toast(j.status === 'done' ? 'Test lab is ready' : (j.error || 'Setup failed'), j.status !== 'done');
+  } catch (e) { toast(e.message, true); }
+  initLabTab();
+};
+$('#lab-enabled').onchange = async () => { await post('testlab/enable', { enabled: $('#lab-enabled').checked }).catch(e => toast(e.message, true)); initLabTab(); };
+$('#lab-start').onclick = async () => { const { job } = await post('testlab/start', {}); await watchLabJob(job); initLabTab(); };
+$('#lab-stop').onclick = async () => { await post('testlab/stop', {}); initLabTab(); };

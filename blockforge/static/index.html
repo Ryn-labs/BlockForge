@@ -143,6 +143,16 @@
       <button class="link-btn small" id="reveal">Show file in folder</button>
     </section>
 
+    <section class="card" id="quick-card">
+      <h3>Quick edits <span class="muted small">(no AI, instant)</span></h3>
+      <div class="row-btns wrap"><button type="button" class="btn small" id="q-rotate" title="Turn the whole build 90° clockwise">⟳ Turn 90°</button>
+        <button type="button" class="btn small" id="q-mirror-x" title="Flip left to right">⇋ Mirror</button>
+        <button type="button" class="btn small" id="q-mirror-z" title="Flip front to back">⇅ Mirror</button></div>
+      <div class="row-btns wrap q-cut"><span class="muted small">Keep layers</span><input type="number" id="q-ymin" min="0" class="num">
+        <span class="muted small">to</span><input type="number" id="q-ymax" min="0" class="num"><button type="button" class="btn small" id="q-cut">Cut</button></div>
+      <p class="muted small">To swap a block, press ⇄ next to it in Materials. Every quick edit saves a new version and keeps the original.</p>
+    </section>
+
     <section class="card" id="edit-card">
       <h3>Change it with Claude</h3>
       <textarea id="edit-prompt" rows="3" placeholder="e.g. make the roof dark oak, add a balcony and a garden"></textarea>
@@ -172,7 +182,7 @@
     <h2>Settings</h2>
     <div class="tabs set-tabs">
       <button type="button" data-stab="claude" class="on">AI</button><button type="button" data-stab="research">Research</button>
-      <button type="button" data-stab="look">Appearance</button><button type="button" data-stab="guide">Guide</button><button type="button" data-stab="defaults">Defaults &amp; palettes</button><button type="button" data-stab="mods">Mods</button><button type="button" data-stab="learning">Learning</button>
+      <button type="button" data-stab="look">Appearance</button><button type="button" data-stab="guide">Guide</button><button type="button" data-stab="defaults">Defaults &amp; palettes</button><button type="button" data-stab="mods">Mods</button><button type="button" data-stab="learning">Learning</button><button type="button" data-stab="testlab">Test lab</button>
     </div>
 
     <div class="stab" id="stab-claude">
@@ -319,6 +329,27 @@
       <button type="button" class="btn small" id="add-palette">＋ Add palette</button>
     </div>
 
+    <div class="stab" id="stab-testlab" hidden>
+      <p class="muted small">The test lab is a hidden Minecraft server on this PC. Redstone builds and farms are placed in it and run at high speed,
+        and they only count as working if they really work in the game. If a test fails, the AI redesigns the machine and tries again. It runs with no window,
+        so you can keep playing, and it only listens on this PC.</p>
+      <div class="mod-row" id="lab-status">Checking…</div>
+      <div id="lab-setup">
+        <h3>Set it up (one time)</h3>
+        <div class="field"><label for="lab-version">Minecraft version to test in (use the one you play)</label>
+          <input type="text" id="lab-version" list="lab-versions" placeholder="e.g. 26.3" spellcheck="false"><datalist id="lab-versions"></datalist></div>
+        <label class="toggle"><input type="checkbox" id="lab-eula"><span class="switch"></span>
+          <span><b>I accept the Minecraft EULA</b><small class="muted">Running a Minecraft server needs this.
+            <a href="https://aka.ms/MinecraftEULA" target="_blank" rel="noopener">Read the EULA</a>. BlockForge downloads Mojang's official server (about 60 MB) and checks it.</small></span></label>
+        <div class="row-btns"><button type="button" class="btn primary small" id="lab-setup-go">Set up test lab</button></div>
+      </div>
+      <ul id="lab-log" class="update-log" hidden></ul>
+      <label class="toggle" id="lab-enable-row" hidden><input type="checkbox" id="lab-enabled"><span class="switch"></span>
+        <span><b>Test redstone builds and farms before showing them</b><small class="muted">Each test takes a few seconds. Redesigns use a little more AI usage.</small></span></label>
+      <div class="row-btns" id="lab-run-row" hidden><button type="button" class="btn ghost small" id="lab-start">Start server</button>
+        <button type="button" class="btn ghost small" id="lab-stop">Stop server</button></div>
+    </div>
+
     <div class="stab" id="stab-learning" hidden>
       <p class="muted small">BlockForge learns from your own builds, all on this PC. Nothing is uploaded.</p>
       <label class="toggle"><input type="checkbox" id="set-learn-examples"><span class="switch"></span>
@@ -356,6 +387,19 @@
 
     <div class="row-btns end"><button class="btn primary" id="save-settings" value="save">Save</button><button class="btn ghost" value="cancel">Close</button></div>
   </form>
+</dialog>
+
+<!-- ============ swap a block ============ -->
+<dialog id="swap-dlg">
+  <div class="settings-form">
+    <h2>Swap a block</h2>
+    <p>Replace every <b id="swap-from"></b> with:</p>
+    <input type="text" id="swap-to" list="block-ids" placeholder="e.g. spruce_planks" spellcheck="false" autocomplete="off">
+    <datalist id="block-ids"></datalist>
+    <label class="toggle"><input type="checkbox" id="swap-family" checked><span class="switch"></span>
+      <span><b>Swap the whole family</b><small class="muted" id="swap-family-note">Matching stairs, slabs, fences, walls and doors change too</small></span></label>
+    <div class="row-btns end"><button class="btn primary" type="button" id="swap-go">Swap</button><button class="btn ghost" type="button" id="swap-cancel">Cancel</button></div>
+  </div>
 </dialog>
 
 <!-- ============ pixel art ============ -->
