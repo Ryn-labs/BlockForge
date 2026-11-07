@@ -300,10 +300,45 @@ $('#usage-btn').onclick = openUsage;
 $('#usage-close').onclick = () => $('#usage').close();
 
 // ---------------------------------------------------------------- create form
+const SIZE_INFO = { tiny: '8–12 blocks wide: a small prop, statue or hut', small: '16–24 blocks wide', medium: '32–48 blocks wide',
+  large: '64–96 blocks wide', huge: '128–200 blocks wide (takes longer)', colossal: '200–400 blocks wide: a whole complex, city or mountain (slow, up to millions of blocks)',
+  custom: 'Type the exact size you want' };
+function showSize() {
+  $('#size-hint').textContent = SIZE_INFO[state.size] || '';
+  $('#size-custom').hidden = state.size !== 'custom';
+}
 for (const b of document.querySelectorAll('#size-seg button')) b.onclick = () => {
   document.querySelectorAll('#size-seg button').forEach(x => x.classList.toggle('on', x === b));
   state.size = b.dataset.v;
+  showSize();
+  try { localStorage.setItem('bf-size', state.size); } catch { /* optional */ }
 };
+for (const b of document.querySelectorAll('#sz-mode button')) b.onclick = () => {
+  document.querySelectorAll('#sz-mode button').forEach(x => x.classList.toggle('on', x === b));
+};
+for (const id of ['sz-w', 'sz-h', 'sz-l']) {
+  try { const v = localStorage.getItem('bf-' + id); if (v) $('#' + id).value = v; } catch { /* optional */ }
+  $('#' + id).oninput = () => { try { localStorage.setItem('bf-' + id, $('#' + id).value); } catch { /* optional */ } };
+}
+function sizeChoice() {
+  if (state.size !== 'custom') return state.size;
+  const num = id => { const v = parseInt($('#' + id).value, 10); return v > 0 ? v : null; };
+  const out = { w: num('sz-w'), h: num('sz-h'), l: num('sz-l'), exact: document.querySelector('#sz-mode .on')?.dataset.v !== 'max' };
+  if (!out.w && !out.h && !out.l) throw new Error('Type at least one side of the size (or pick a preset)');
+  return out;
+}
+showSize();
+
+// the prompt box has no limit: it grows as you type
+function growPrompt() {
+  const t = $('#prompt');
+  t.style.height = 'auto';
+  t.style.height = Math.min(t.scrollHeight + 2, Math.round(window.innerHeight * 0.5)) + 'px';
+  const n = t.value.length;
+  $('#prompt-count').textContent = n > 200 ? n.toLocaleString() + ' characters' : '';
+}
+$('#prompt').addEventListener('input', growPrompt);
+setTimeout(growPrompt, 0);
 $('#model').onchange = () => $('#model').dataset.touched = '1';
 for (const ex of EXAMPLES.sort(() => Math.random() - .5).slice(0, 4)) {
   const b = document.createElement('button'); b.textContent = ex;
@@ -332,7 +367,7 @@ async function generate() {
   if (!prompt && !state.image) return toast('Describe a build or add an image first', true);
   if (state.job) return toast('Already building, hang on');
   try {
-    const { job } = await post('generate', { prompt, image: state.image, size: state.size, palette: $('#palette').value, model: $('#model').value, research: $('#research').checked,
+    const { job } = await post('generate', { prompt, image: state.image, size: sizeChoice(), palette: $('#palette').value, model: $('#model').value, research: $('#research').checked,
       redstone: $('#redstone').checked, use_mods: $('#mods-toggle').hidden ? false : $('#use-mods').checked });
     watchJob(job, 'Generating your build…', prompt || 'your picture');
   } catch (e) { toast(e.message, true); }
@@ -432,6 +467,11 @@ async function openBuild(id, fresh = false) {
     [srcName, (meta.model || '').replace('claude-', '') || 'source'], [date.split(',')[0], 'created'],
   ].map(([b, s]) => `<div class="stat"><b>${esc(b)}</b><span>${esc(s)}</span></div>`).join('');
   $('#prompt-text').textContent = meta.prompt || meta.description || '';
+  $('#prompt-text').style.maxHeight = '';
+  const longPrompt = (meta.prompt || '').length > 500;
+  $('#prompt-more').hidden = !longPrompt;
+  $('#prompt-more').textContent = 'Show the whole prompt';
+  $('#prompt-text').classList.toggle('clamped', longPrompt);
   renderRate(meta);
   if (meta.redstone) $('#prompt-text').insertAdjacentHTML('beforeend', '<span class="redstone-badge">REDSTONE</span>');
   document.querySelector('#test-list')?.remove();
@@ -466,6 +506,7 @@ async function openBuild(id, fresh = false) {
     li.onclick = () => focusBlock(viewer.focusName === li.dataset.block ? null : li.dataset.block);
     li.querySelector('.swap-btn').onclick = e => { e.stopPropagation(); openSwap(li.dataset.block); };
   }
+  $('#q-sw').value = meta.size[0]; $('#q-sh').value = meta.size[1]; $('#q-sl').value = meta.size[2];
   $('#q-ymin').value = 0; $('#q-ymax').value = Math.max(0, meta.size[1] - 1);
   $('#q-ymin').max = $('#q-ymax').max = Math.max(0, meta.size[1] - 1);
   focusBlock(null);
@@ -1364,3 +1405,25 @@ $('#lab-setup-go').onclick = async () => {
 $('#lab-enabled').onchange = async () => { await post('testlab/enable', { enabled: $('#lab-enabled').checked }).catch(e => toast(e.message, true)); initLabTab(); };
 $('#lab-start').onclick = async () => { const { job } = await post('testlab/start', {}); await watchLabJob(job); initLabTab(); };
 $('#lab-stop').onclick = async () => { await post('testlab/stop', {}); initLabTab(); };
+
+
+// ---------------------------------------------------------------- show the whole prompt, scale a build
+$('#prompt-more').onclick = () => {
+  const el = $('#prompt-text'), open = el.classList.toggle('clamped');
+  $('#prompt-more').textContent = open ? 'Show the whole prompt' : 'Show less';
+};
+function curSize() { return state.current?.size || [1, 1, 1]; }
+function scaleInput(changed) {                       // keep proportions: editing one side moves the other two
+  if (!$('#q-lock').checked || !state.current) return;
+  const [w, h, l] = curSize();
+  const base = { sw: w, sh: h, sl: l }[changed], f = (+$('#' + 'q-' + changed).value || base) / base;
+  for (const [id, b] of [['sw', w], ['sh', h], ['sl', l]]) if (id !== changed) $('#q-' + id).value = Math.max(1, Math.round(b * f));
+}
+for (const id of ['sw', 'sh', 'sl']) $('#q-' + id).oninput = () => scaleInput(id);
+$('#q-scale').onclick = () => {
+  const [w, h, l] = [+$('#q-sw').value, +$('#q-sh').value, +$('#q-sl').value];
+  if (!(w > 0 && h > 0 && l > 0)) return toast('Type all three sides', true);
+  quickEdit({ op: 'rescale', w, h, l }, 'Scaling');
+};
+$('#q-half').onclick = () => quickEdit({ op: 'rescale', factor: 0.5 }, 'Scaling');
+$('#q-double').onclick = () => quickEdit({ op: 'rescale', factor: 2 }, 'Scaling');

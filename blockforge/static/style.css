@@ -365,3 +365,16 @@ input[type=range] { accent-color: var(--accent); }
 
 /* nine settings tabs: wrap instead of scrolling sideways */
 .set-tabs { flex-wrap: wrap; row-gap: 4px; }
+
+/* ---- custom size, long prompts, scaling ---- */
+.prompt-wrap textarea { max-height: 50vh; overflow-y: auto; }
+.prompt-count { margin-left: auto; }
+.size-custom { margin-top: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--input); }
+.size-custom .dims { display: flex; align-items: flex-end; gap: 6px; margin-bottom: 8px; }
+.size-custom .dims label { display: flex; flex-direction: column; font-size: 11.5px; color: var(--muted, #999); flex: 1; min-width: 0; }
+.size-custom .dims input { width: 100%; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: inherit; }
+.size-custom .dims span { padding-bottom: 7px; }
+#size-seg { flex-wrap: wrap; }
+.prompt-text.clamped { max-height: 120px; }
+.prompt-text:not(.clamped) { max-height: none; }
+.q-scale .num { width: 58px; }

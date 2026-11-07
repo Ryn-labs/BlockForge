@@ -36,13 +36,24 @@
         <div class="prompt-tools">
           <label class="link-btn" title="Turn a picture into a 3D build">＋ Image<input id="image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden></label>
           <span class="hint">or drop / paste an image</span>
+          <span class="prompt-count muted small" id="prompt-count"></span>
           <button type="button" class="link-btn" id="pixel-open" hidden title="Turn this picture into flat pixel art. No AI, instant and free.">▦ Make pixel art</button>
         </div>
       </div>
       <div class="field">
         <label>Size</label>
         <div class="seg" id="size-seg">
-          <button data-v="tiny">Tiny</button><button data-v="small">Small</button><button data-v="medium" class="on">Medium</button><button data-v="large">Large</button><button data-v="huge">Huge</button>
+          <button data-v="tiny">Tiny</button><button data-v="small">Small</button><button data-v="medium" class="on">Medium</button><button data-v="large">Large</button><button data-v="huge">Huge</button><button data-v="colossal">Colossal</button><button data-v="custom">Custom</button>
+        </div>
+        <p class="muted small" id="size-hint"></p>
+        <div id="size-custom" class="size-custom" hidden>
+          <div class="dims">
+            <label>Wide<input type="number" id="sz-w" min="1" max="640" placeholder="auto"></label><span>×</span>
+            <label>Tall<input type="number" id="sz-h" min="1" max="640" placeholder="auto"></label><span>×</span>
+            <label>Long<input type="number" id="sz-l" min="1" max="640" placeholder="auto"></label>
+          </div>
+          <div class="seg" id="sz-mode"><button data-v="exact" class="on">Exactly this</button><button data-v="max">No bigger than</button></div>
+          <p class="muted small">In blocks. Wide = east to west, Tall = up, Long = north to south. Leave a box empty and the AI picks that side to suit the build. After building, BlockForge measures the result and sends it back if it is off.</p>
         </div>
       </div>
       <div class="row2">
@@ -126,6 +137,7 @@
       <input id="title" class="title-input" maxlength="80">
       <div class="stats" id="stats"></div>
       <p class="prompt-text" id="prompt-text"></p>
+      <button type="button" class="link-btn small" id="prompt-more" hidden>Show the whole prompt</button>
       <div id="parent-link" class="muted small"></div>
     </section>
 
@@ -150,6 +162,12 @@
         <button type="button" class="btn small" id="q-mirror-z" title="Flip front to back">⇅ Mirror</button></div>
       <div class="row-btns wrap q-cut"><span class="muted small">Keep layers</span><input type="number" id="q-ymin" min="0" class="num">
         <span class="muted small">to</span><input type="number" id="q-ymax" min="0" class="num"><button type="button" class="btn small" id="q-cut">Cut</button></div>
+      <div class="row-btns wrap q-scale"><span class="muted small">Scale to</span><input type="number" id="q-sw" min="1" max="640" class="num"><span>×</span>
+        <input type="number" id="q-sh" min="1" max="640" class="num"><span>×</span><input type="number" id="q-sl" min="1" max="640" class="num">
+        <button type="button" class="btn small" id="q-scale">Scale</button></div>
+      <div class="row-btns wrap"><button type="button" class="btn small" id="q-half" title="Half the size">½×</button>
+        <button type="button" class="btn small" id="q-double" title="Twice the size">2×</button>
+        <label class="muted small"><input type="checkbox" id="q-lock" checked> keep proportions</label></div>
       <p class="muted small">To swap a block, press ⇄ next to it in Materials. Every quick edit saves a new version and keeps the original.</p>
     </section>
 
