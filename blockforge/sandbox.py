@@ -42,7 +42,7 @@ def check(code):
             raise ScriptError(f"line {node.lineno}: '{node.id}' is not allowed in build scripts")
 
 
-def run(code, timeout=90, placement_opts=None, base=None):
+def run(code, timeout=240, placement_opts=None, base=None):
     """Returns (blocks_dict {(x,y,z): state}, meta). Raises ScriptError with a readable message."""
     check(code)
     env, base_file = None, None
@@ -149,7 +149,7 @@ def tiles_of(meta):
     return {(x, y, z): t for x, y, z, t in meta.get("tiles") or []}
 
 
-def run_safe(code, timeout=90, placement_opts=None, base=None):
+def run_safe(code, timeout=240, placement_opts=None, base=None):
     try:
         return run(code, timeout, placement_opts, base)
     except subprocess.TimeoutExpired:

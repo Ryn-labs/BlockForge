@@ -7,7 +7,74 @@ SIZES = {
     "medium": "about 32-48 blocks wide",
     "large": "about 64-96 blocks wide",
     "huge": "about 128-200 blocks wide (keep total blocks under ~1.5 million)",
+    "colossal": "about 200-400 blocks wide (a whole castle complex, city or mountain: use hollow shells and repeated "
+                "modules, and keep total blocks under ~4 million)",
 }
+PRESET_RANGES = {"tiny": (8, 12), "small": (16, 24), "medium": (32, 48), "large": (64, 96), "huge": (128, 200),
+                 "colossal": (200, 400)}
+
+
+def size_text(size):
+    """The 'Target size' instruction for a preset name or a custom {'w','h','l','exact'} dict."""
+    if isinstance(size, dict):
+        axes = [f"{size['w']} blocks wide (x axis, west to east)" if size.get("w") else None,
+                f"{size['h']} blocks tall (y axis)" if size.get("h") else None,
+                f"{size['l']} blocks long (z axis, north to south)" if size.get("l") else None]
+        axes = [a for a in axes if a]
+        free = [n for n, k in (("width", "w"), ("height", "h"), ("length", "l")) if not size.get(k)]
+        if size.get("exact", True):
+            t = ("the finished build's outer bounding box must be EXACTLY " + ", ".join(axes) + " (counting the outermost "
+                 "blocks). It is measured after your script runs and sent back if any side is more than about 10% off. "
+                 "Plan the whole design to fill that space: scale the proportions of everything to it, and do not leave "
+                 "most of it empty")
+        else:
+            t = ("the finished build must be NO BIGGER than " + ", ".join(axes) + " (outermost blocks). Use most of that "
+                 "space")
+        if free:
+            t += f". The {' and '.join(free)} is up to you: choose what suits the build"
+        return t
+    return SIZES.get(size, SIZES["medium"])
+
+
+def dims_of(blocks):
+    xs = [p[0] for p in blocks]; ys = [p[1] for p in blocks]; zs = [p[2] for p in blocks]
+    return (max(xs) - min(xs) + 1, max(ys) - min(ys) + 1, max(zs) - min(zs) + 1) if blocks else (0, 0, 0)
+
+
+def size_error(size, dims):
+    """(how far off, message or None). 0 = on target."""
+    W, H, L = dims
+    got = f"{W} wide (x) x {H} tall (y) x {L} long (z)"
+    if isinstance(size, dict):
+        off, bits = 0.0, []
+        for key, label, val in (("w", "wide", W), ("h", "tall", H), ("l", "long", L)):
+            want = size.get(key)
+            if not want:
+                continue
+            exact = size.get("exact", True)
+            dev = (val - want) / want
+            tol = max(2.0 / want, 0.10)
+            bad = abs(dev) > tol if exact else dev > max(1.0 / want, 0.05)
+            if bad:
+                off += abs(dev)
+                bits.append(f"{want} {label}" if exact else f"at most {want} {label}")
+        if bits:
+            return off, f"The finished build is {got}, but the player asked for {' and '.join(bits)}."
+        return 0.0, None
+    lo, hi = PRESET_RANGES.get(size, PRESET_RANGES["medium"])
+    big = max(W, L)
+    if big < lo * 0.7:
+        return (lo * 0.7 - big) / lo, f"The finished build is {got}, but size '{size}' means about {lo}-{hi} blocks wide."
+    if big > hi * 1.35:
+        return (big - hi * 1.35) / hi, f"The finished build is {got}, but size '{size}' means about {lo}-{hi} blocks wide."
+    return 0.0, None
+
+
+def size_fix_message(issue):
+    return (issue + " Rework the script so the build matches the requested size: scale the whole design (keep its "
+            "proportions and detail, don't just stretch empty space) and reply with the complete corrected script in one "
+            "```python block.")
+
 
 PALETTES = {
     "auto": "Choose whatever palette suits the build best.",
@@ -241,7 +308,7 @@ def user_message(prompt, size="medium", palette="auto", previous_code=None, has_
         parts.append("Reference image attached: reconstruct it as a real 3D Minecraft structure "
                      "(not flat pixel art, unless it is clearly flat art), matching its colours and shapes.")
     if not previous_code and not base_text:
-        parts.append("Target size: " + SIZES.get(size, SIZES["medium"]) + ".")
+        parts.append("Target size: " + size_text(size) + ".")
     pal = palette_text or PALETTES.get(palette)
     if pal and palette != "auto":
         parts.append("Palette: " + pal)

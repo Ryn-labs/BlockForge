@@ -59,7 +59,7 @@ def log_generation(meta, fixes=None, problems=None):
     if not log_enabled():
         return
     _append(QUALITY_LOG, {"t": round(time.time()), "event": "build", "id": meta["id"], "source": meta.get("source"),
-                          "model": meta.get("model"), "prompt": (meta.get("prompt") or "")[:300],
+                          "model": meta.get("model"), "prompt": meta.get("prompt") or "",
                           "redstone": bool(meta.get("redstone")), "modpack": meta.get("modpack"),
                           "fixes": fixes or [], "problems": problems or []})
 
@@ -73,7 +73,7 @@ def rate(bid, rating, tags=None, note=""):
                              rated=round(time.time()) if rating else None)
     if log_enabled():
         _append(QUALITY_LOG, {"t": round(time.time()), "event": "rating", "id": bid, "rating": rating, "tags": tags,
-                              "prompt": (meta.get("prompt") or "")[:300]})
+                              "prompt": meta.get("prompt") or ""})
     return meta
 
 
@@ -91,7 +91,7 @@ def log_correction(parent_id, child_id):
     store.update_meta(child_id, corrects=parent_id)
     if log_enabled():
         _append(CORRECTIONS_LOG, {"t": round(time.time()), "parent": parent_id, "child": child_id,
-                                  "prompt": (parent.get("prompt") or "")[:300], "before": before[:30000], "after": after[:30000]})
+                                  "prompt": parent.get("prompt") or "", "before": before[:30000], "after": after[:30000]})
 
 
 # ---------------------------------------------------------------- using it

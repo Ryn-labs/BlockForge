@@ -541,6 +541,9 @@ class _Conversation:
 def generate(prompt, size="medium", palette="auto", model=None, engine=None, image=None, parent_id=None,
              research=None, redstone=None, use_mods=None, log=print):
     """image: (bytes, mime). Returns the saved build's meta."""
+    if len(prompt or "") > 500_000:
+        raise EngineError(f"That prompt is about {len(prompt):,} characters. That's more than fits in one request, even for "
+                          "the largest models (about 500,000 characters). Keep the most important parts and try again.")
     settings = store.load_settings()
     engine = engine or settings.get("engine", "claude_code")
     if engine not in CLAUDE_ENGINES and engine not in PROVIDERS:
@@ -624,6 +627,22 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                     refs = refs or refs2
 
         code, blocks, meta = build(code)
+        if not parent_id and not base:                     # did the AI build the size that was asked for?
+            off, issue = prompts.size_error(size, prompts.dims_of(blocks))
+            if issue:
+                log("Size check: " + issue)
+                log(f"Asking {who} to fix the size...")
+                try:
+                    _, code2, _ = extract(convo.follow_up(prompts.size_fix_message(issue), code))
+                    code2, blocks2, meta2 = build(code2)
+                    off2, issue2 = prompts.size_error(size, prompts.dims_of(blocks2))
+                    if off2 < off:
+                        code, blocks, meta = code2, blocks2, meta2
+                        log("Size fixed." if not issue2 else "Size is closer now: " + issue2)
+                    else:
+                        log("Kept the first version (the second wasn't closer to the size you asked for).")
+                except EngineError as e:
+                    log(f"Kept the first version ({e}).")
         problems = meta.get("warnings") or []
         for f in meta.get("fixes") or []:
             log("Auto-fixed: " + f)
@@ -722,7 +741,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
     finally:
         rec = usage.record()
         if rec["requests"]:
-            store.log_usage({**rec, "status": status, "prompt": prompt[:200], "title": (saved or {}).get("title") or title,
+            store.log_usage({**rec, "status": status, "prompt": prompt, "title": (saved or {}).get("title") or title,
                              "build_id": (saved or {}).get("id"), "parent": parent_id, "researched": bool(research),
                              "time": started, "wall_seconds": round(time.time() - started, 1)})
         if image_path:

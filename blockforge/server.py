@@ -80,6 +80,29 @@ def run_script_job(code, title="Script build", parent_id=None, log=print):
     return saved
 
 
+def clean_size(size):
+    """A preset name, or a custom {'w','h','l','exact'} with whole numbers (blank = the AI chooses)."""
+    from blockforge import buildkit
+    if isinstance(size, dict):
+        out = {}
+        for k in ("w", "h", "l"):
+            v = size.get(k)
+            if v in (None, "", 0, "0"):
+                continue
+            try:
+                v = int(v)
+            except (TypeError, ValueError):
+                raise ValueError("Sizes must be whole numbers of blocks.")
+            if not 1 <= v <= buildkit.MAX_SPAN:
+                raise ValueError(f"Each side must be between 1 and {buildkit.MAX_SPAN} blocks.")
+            out[k] = v
+        if not out:
+            raise ValueError("Type at least one side of the size, or pick a preset.")
+        out["exact"] = size.get("exact", True) is not False
+        return out
+    return size if size in prompts.SIZES else "medium"
+
+
 def quick_edit(bid, b):
     """Swap / rotate / mirror / cut without AI. Saves a new version next to the original."""
     from blockforge import edits
@@ -87,6 +110,7 @@ def quick_edit(bid, b):
     d = store.get_blocks(bid)
     blocks = exporters.from_dict(d)
     tiles = {(x, y, z): t for x, y, z, t in d.get("tiles") or []}
+    ents = d.get("entities") or []
     op = b.get("op")
     note = ""
     if op == "swap":
@@ -102,22 +126,41 @@ def quick_edit(bid, b):
         suffix = f" ({dst.split(':')[-1].replace('_', ' ')})"
     elif op == "rotate":
         turns = int(b.get("turns", 1))
-        blocks, tiles = edits.rotate(blocks, tiles, turns)
+        blocks, tiles, ents = edits.rotate(blocks, tiles, turns, ents)
         note, suffix = f"Turned {90 * (turns % 4)}°", " (turned)"
     elif op == "mirror":
         axis = "z" if b.get("axis") == "z" else "x"
-        blocks, tiles = edits.mirror(blocks, tiles, axis)
+        blocks, tiles, ents = edits.mirror(blocks, tiles, axis, ents)
         note, suffix = "Mirrored " + ("front to back" if axis == "z" else "left to right"), " (mirrored)"
     elif op == "cut":
-        blocks, tiles = edits.cut(blocks, tiles, b.get("y_min"), b.get("y_max"))
+        blocks, tiles, ents = edits.cut(blocks, tiles, b.get("y_min"), b.get("y_max"), ents)
         note, suffix = f"Kept layers {b.get('y_min')} to {b.get('y_max')}", " (cut)"
+    elif op == "rescale":
+        if meta.get("modules"):
+            raise ValueError("This build has a tested machine in it (" + ", ".join(meta["modules"]) + "). Scaling it would "
+                             "break the machine, so scale the rest of the build in the script instead.")
+        old = d["size"]
+        if b.get("factor"):
+            f = float(b["factor"])
+            new = [max(1, round(old[0] * f)), max(1, round(old[1] * f)), max(1, round(old[2] * f))]
+        else:
+            new = [int(b.get("w") or old[0]), int(b.get("h") or old[1]), int(b.get("l") or old[2])]
+        from blockforge import buildkit
+        if max(new) > buildkit.MAX_SPAN:
+            raise ValueError(f"Each side can be at most {buildkit.MAX_SPAN} blocks.")
+        blocks, tiles, ents = edits.rescale(blocks, tiles, new, ents)
+        _, version, _ = mods.build_opts()
+        fx = placement.process(blocks, final=True, pack=None, version=version, check_ids=False)
+        note = f"Scaled from {old[0]}×{old[1]}×{old[2]} to {new[0]}×{new[1]}×{new[2]}" + (
+            " (fixed up " + "; ".join(fx["fixed"][:2]) + ")" if fx["fixed"] else "")
+        suffix = f" ({new[0]}×{new[1]}×{new[2]})"
     else:
         raise ValueError("unknown edit")
     fixes = placement.fix_states(blocks)
-    title = re.sub(r" \((edited|turned|mirrored|cut|[a-z ]+)\)$", "", meta.get("title") or "Build")[:60] + suffix
+    title = re.sub(r" \((edited|turned|mirrored|cut|[a-z0-9×x ]+)\)$", "", meta.get("title") or "Build")[:60] + suffix
     saved = store.save_build(blocks, title, prompt=meta.get("prompt") or "", source="edit", parent=bid,
                              description=note, fixes=fixes, data_version=d.get("data_version"),
-                             modpack=meta.get("modpack"), tiles=tiles)
+                             modpack=meta.get("modpack"), tiles=tiles, entities=ents)
     return {**saved, "note": note}
 
 
@@ -320,7 +363,7 @@ class H(BaseHTTPRequestHandler):
                     image = (base64.b64decode(data), head.split(";")[0].split(":")[1])
                 if not (b.get("prompt") or "").strip() and not image:
                     return self.err(400, "Describe a build or attach an image.")
-                job = start_job(engine.generate, prompt=b.get("prompt", ""), size=b.get("size", "medium"),
+                job = start_job(engine.generate, prompt=b.get("prompt", ""), size=clean_size(b.get("size", "medium")),
                                 palette=b.get("palette", "auto"), model=b.get("model"), engine=b.get("engine"),
                                 image=image, parent_id=b.get("parent_id"), research=b.get("research"),
                                 redstone=b.get("redstone"), use_mods=b.get("use_mods"))

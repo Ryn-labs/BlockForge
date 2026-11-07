@@ -4,8 +4,8 @@ finished build is shifted so its lowest corner is (0, 0, 0)."""
 import math
 import random as _random
 
-MAX_BLOCKS = 3_000_000
-MAX_SPAN = 400
+MAX_BLOCKS = 5_000_000
+MAX_SPAN = 640
 
 _blocks = {}
 _tiles = {}           # (x, y, z) -> container contents, e.g. {"id": "minecraft:hopper", "items": [...], "name": "..."}

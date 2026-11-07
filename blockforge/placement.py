@@ -402,7 +402,7 @@ def fix_states(blocks):
     return [f"{t} (×{n})" if n > 1 else t for t, n in c.fixes.items()]
 
 
-def process(blocks, final=False, version=None, pack="auto", only=None):
+def process(blocks, final=False, version=None, pack="auto", only=None, check_ids=True):
     """Fix and check `blocks` ({(x,y,z): state}) in place. Returns {'fixed': [...], 'problems': [...]}.
     pack: a modpack index, None for vanilla only, or "auto" for the pack selected in Settings.
     only: a set of positions to check (editing an existing build: only what the AI changed, and next to it)."""
@@ -414,7 +414,8 @@ def process(blocks, final=False, version=None, pack="auto", only=None):
     c.pack = pack
     c.only = only
     try:
-        _check_ids(c, final, version)
+        if check_ids:
+            _check_ids(c, final, version)
     except Exception:                                      # noqa: BLE001 - never lose a build over the checker
         pass
     try:
