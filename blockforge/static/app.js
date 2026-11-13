@@ -30,6 +30,7 @@ const FORMAT_INFO = {
 
 const state = { size: 'medium', image: null, builds: [], current: null, job: null, status: null };
 const viewer = new Viewer($('#viewer'));
+window.bfViewer = viewer;                    // for performance checks from the dev console
 const guide = new Guide(document.querySelector('.stage'));
 window.blockforge = { viewer, guide, get loadStatus() { return loadStatus; } };   // handy for poking at things from the dev console
 
@@ -212,6 +213,7 @@ function openSettings(tab = 'claude') {
   if (s) fillEngineForm(s);
   fillLookForm();
   fillGuideForm();
+  loadLink();
   showSettingsTab(tab);
   $('#settings').showModal();
 }
@@ -226,6 +228,31 @@ $('#engine-pill').onclick = () => loadStatus().then(() => openSettings('claude')
 $('#research-sites').onclick = e => { e.preventDefault(); openSettings('research'); };
 $('#cc-login').onclick = async () => { try { await post('login', {}); toast('A sign-in window opened. Finish signing in there, then click “Check again”.'); } catch (e) { toast(e.message, true); } };
 $('#cc-refresh').onclick = () => loadStatus();
+// ---------------------------------------------------------------- connect to Claude (MCP + /blockforge)
+function showLink(s) {
+  const put = (el, t, cls) => { el.textContent = t; el.className = 'status' + (cls ? ' ' + cls : ''); };
+  const c = s.code || {}, d = s.desktop || {};
+  put($('#link-code'), !c.installed ? 'Not installed' : c.error ? 'Couldn’t read its settings: ' + c.error
+    : c.linked && c.ok ? 'Connected' + (c.slash ? ', /blockforge ready' : '') : c.linked ? 'Connected to an old copy of BlockForge. Press Connect again.' : 'Not connected',
+    c.linked && c.ok ? 'ok' : c.installed ? 'warn' : '');
+  put($('#link-desktop'), !d.installed ? 'Not installed' : d.error ? 'Couldn’t read its settings: ' + d.error
+    : d.linked && d.ok ? 'Connected' : d.linked ? 'Connected to an old copy of BlockForge. Press Connect again.' : 'Not connected',
+    d.linked && d.ok ? 'ok' : d.installed ? 'warn' : '');
+  $('#link-disconnect').hidden = !(c.linked || d.linked);
+}
+const loadLink = () => api('claude/link').then(showLink).catch(e => { $('#link-code').textContent = e.message; });
+$('#link-connect').onclick = async () => {
+  try {
+    const r = await post('claude/link/connect', {});
+    showLink(r);
+    if (r.problems.length) toast(r.problems.join(' '), !r.done.length);
+    if (r.done.length) toast(`Connected to ${r.done.join(' and ')}. Restart Claude, then try /blockforge.`);
+  } catch (e) { toast(e.message, true); }
+};
+$('#link-disconnect').onclick = async () => {
+  try { const r = await post('claude/link/disconnect', {}); showLink(r); toast(r.problems.length ? r.problems.join(' ') : 'Disconnected from Claude', !!r.problems.length); }
+  catch (e) { toast(e.message, true); }
+};
 let savedUI = null;
 $('#settings').addEventListener('close', () => { if (savedUI) { ui = savedUI; savedUI = null; applyUI(); } });
 $('#save-settings').onclick = async e => {
@@ -1064,6 +1091,9 @@ setInterval(() => checkUpdate(), 6 * 3600 * 1000);
 await refreshGallery();
 // builds made from a Claude Code chat appear without a reload
 let known = new Set(state.builds.map(b => b.id));
+// Claude (through BlockForge's MCP server) can open a build here and ask what's on screen
+window.bfOpen = async id => { await refreshGallery(); known.add(id); await openBuild(id); return true; };
+window.bfCurrent = () => state.current ? { id: state.current.id, title: state.current.title } : null;
 setInterval(async () => {
   if (document.hidden) return;
   await refreshGallery();

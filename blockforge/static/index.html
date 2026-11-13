@@ -228,8 +228,14 @@
     <h3>About &amp; updates</h3>
     <div class="about-row"><span>BlockForge <b id="about-version"></b></span><span id="about-update" class="muted small"></span>
       <button type="button" class="btn small" id="check-update">Check for updates</button></div>
-    <h3>Build from a Claude Code chat</h3>
-    <p class="muted small">BlockForge is also linked to Claude Code: in a Claude Code chat opened in a folder with BlockForge’s <code>.mcp.json</code> (like the BlockForge source folder), ask Claude to “make a build in BlockForge” and it shows up in your gallery here.</p>
+    <h3>Connect to Claude</h3>
+    <p class="muted small">Let Claude talk to BlockForge from any chat: open or close the app, show a build, or make a new one. In Claude Code, type <code>/blockforge</code> (for example <code>/blockforge open</code>, <code>/blockforge close</code> or <code>/blockforge a wizard tower</code>). In Claude Desktop, ask for it in a chat, or pick BlockForge from the + menu.</p>
+    <div class="link-rows">
+      <div class="link-row"><b>Claude Code</b><span class="status" id="link-code">Checking…</span></div>
+      <div class="link-row"><b>Claude Desktop</b><span class="status" id="link-desktop">Checking…</span></div>
+    </div>
+    <div class="row-btns"><button type="button" class="btn small" id="link-connect">Connect to Claude</button><button type="button" class="btn ghost small" id="link-disconnect">Disconnect</button></div>
+    <p class="muted small">Restart Claude after connecting. Only BlockForge’s own entry is added to Claude’s settings, and a backup is kept. The claude.ai website can’t reach apps on your PC, so use Claude Code or Claude Desktop.</p>
     </div>
 
     <div class="stab" id="stab-research" hidden>

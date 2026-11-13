@@ -189,8 +189,11 @@ export class Guide {
     ground.position.y = -0.25;
     this.scene.add(ground);
     this.clock = new THREE.Clock();
+    let acc = 0;
     const loop = () => {
-      const dt = Math.min(0.05, this.clock.getDelta());
+      acc += this.clock.getDelta();
+      if (acc < 1 / 30) { requestAnimationFrame(loop); return; }   // 30 fps is plenty for the guide
+      const dt = Math.min(0.05, acc); acc = 0;
       if (this.anim && !this.hiddenNow) {
         this.anim.update(dt);
         this.ch.root.rotation.y += ((this.turn || 0.25) - this.ch.root.rotation.y) * Math.min(1, dt * 4);

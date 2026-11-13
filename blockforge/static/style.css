@@ -283,6 +283,8 @@ input[type=range] { accent-color: var(--accent); }
 /* ---------- updates ---------- */
 .btn.update { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); animation: upd-pulse 2.2s infinite; }
 @keyframes upd-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent); } }
+.link-rows { display: grid; gap: 6px; margin: 8px 0; }
+.link-row { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 10px; font-size: 13px; }
 .about-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; }
 .update-notes { max-height: 260px; overflow: auto; font-size: 12.5px; white-space: pre-wrap; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; color: var(--muted); }
 .update-log { list-style: none; padding: 0; margin: 0; font-size: 12.5px; }
