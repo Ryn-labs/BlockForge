@@ -18,6 +18,25 @@ from blockforge import eleven, engine, exporters, learn, mods, pixelart, placeme
 from blockforge.version import VERSION  # noqa: E402
 
 PORT = int(os.environ.get("BLOCKFORGE_PORT", "8765"))
+# Set by app_main when this server has a window: {"show": fn(), "quit": fn(), "js": fn(code) -> value}.
+# Lets Claude (through the MCP server) bring the window up, open a build in it, or close it.
+APP = {}
+
+
+def busy_jobs():
+    return [j for j in JOBS.values() if j["status"] == "running"]
+
+
+def app_state():
+    cur, ready = None, False
+    if APP.get("js"):
+        try:
+            ready = bool(APP["js"]("!!window.bfOpen"))
+            cur = APP["js"]("window.bfCurrent ? window.bfCurrent() : null") if ready else None
+        except Exception:                            # noqa: BLE001
+            pass
+    return {"version": VERSION, "window": bool(APP), "ready": ready, "busy": len(busy_jobs()), "current": cur,
+            "builds": len(store.list_builds())}
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 JOBS = {}
 
@@ -217,6 +236,11 @@ class H(BaseHTTPRequestHandler):
                 return self.static(path)
             if parts[1:] == ["builds"]:
                 return self.send(200, store.list_builds())
+            if parts[1:] == ["app"]:
+                return self.send(200, app_state())
+            if parts[1:] == ["claude", "link"]:
+                from blockforge import claudelink
+                return self.send(200, claudelink.status())
             if parts[1:] == ["status"]:
                 s = store.load_settings()
                 key = s.get("api_key") or ""
@@ -355,6 +379,31 @@ class H(BaseHTTPRequestHandler):
             if parts[:1] != ["api"]:
                 return self.err(404, "not found")
             route = parts[1:]
+            if route == ["app", "show"]:
+                if not APP:
+                    return self.err(409, "BlockForge is running without a window.")
+                b = self.json_body()
+                APP["show"]()
+                bid = b.get("build_id")
+                if bid:
+                    store.get_meta(bid)                  # 404 if there's no such build
+                    APP["js"](f"(window.bfOpen && window.bfOpen({json.dumps(bid)}), true)")   # don't wait on the promise
+                return self.send(200, app_state())
+            if route == ["app", "quit"]:
+                if not APP:
+                    return self.err(409, "BlockForge is running without a window.")
+                b = self.json_body()
+                if busy_jobs() and not b.get("force"):
+                    return self.err(409, "BlockForge is still making a build. Wait for it to finish, or close it anyway with force.")
+                threading.Timer(0.4, APP["quit"]).start()  # reply first, then close the window
+                return self.send(200, {"ok": True})
+            if route[:2] == ["claude", "link"]:
+                from blockforge import claudelink
+                b = self.json_body()
+                if route[2:] == ["connect"]:
+                    return self.send(200, claudelink.connect(b.get("targets") or ["code", "desktop"]))
+                if route[2:] == ["disconnect"]:
+                    return self.send(200, claudelink.disconnect(b.get("targets") or ["code", "desktop"]))
             if route == ["generate"]:
                 b = self.json_body()
                 image = None

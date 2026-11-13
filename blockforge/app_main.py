@@ -11,7 +11,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-PORT = 8765
+PORT = int(os.environ.get("BLOCKFORGE_PORT", "8765"))
 URL = f"http://127.0.0.1:{PORT}"
 
 
@@ -74,18 +74,51 @@ class WindowApi:
         return dest
 
 
+def focus_running():
+    """BlockForge is already open: bring its window to the front instead of opening a second one."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(URL + "/api/app/show", data=b"{}", headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status == 200
+    except Exception:                                # noqa: BLE001
+        return False
+
+
+def window_hooks(window):
+    """What the server (and so Claude, through the MCP server) may do with the window."""
+    def show():
+        try:
+            window.restore()
+        except Exception:                            # noqa: BLE001
+            pass
+        window.show()
+        try:                                         # Windows won't let a background app steal focus; a brief on-top does it
+            window.on_top = True
+            time.sleep(0.3)
+            window.on_top = False
+        except Exception:                            # noqa: BLE001
+            pass
+
+    return {"show": show, "quit": window.destroy, "js": window.evaluate_js}
+
+
 def run_gui():
     from blockforge import store
     if sys.stdout is None:                           # windowed exe: keep logs in a file
         sys.stdout = sys.stderr = open(os.path.join(store.DATA, "blockforge.log"), "a", buffering=1, encoding="utf-8")
-    if not port_in_use():
+    own_server = not port_in_use()
+    if own_server:
         from blockforge import server
         threading.Thread(target=server.main, daemon=True).start()
         for _ in range(100):
             if port_in_use():
                 break
             time.sleep(0.05)
-    elif not is_blockforge():
+    elif is_blockforge():
+        if focus_running():
+            return
+    else:
         import ctypes
         ctypes.windll.user32.MessageBoxW(None, f"Another program is using port {PORT}, so BlockForge can't start.",
                                          "BlockForge", 0x10)
@@ -97,6 +130,8 @@ def run_gui():
     api = WindowApi()
     api._window = webview.create_window("BlockForge", URL, width=1440, height=900, min_size=(900, 600),
                                        background_color="#0f1115", text_select=True, js_api=api)
+    if own_server:
+        server.APP.update(window_hooks(api._window))
     webview.start(private_mode=False, storage_path=os.path.join(store.DATA, "webview"))
     try:                                             # window closed: don't leave the hidden test server running
         from blockforge import testlab

@@ -2,15 +2,39 @@
 in the BlockForge app's gallery. No extra packages needed."""
 import json
 import os
+import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from blockforge import exporters, learn, mods, placement, prompts, sandbox, store, testlab  # noqa: E402
 
-SERVER = {"name": "blockforge", "version": "1.0.0"}
-APP_URL = "http://127.0.0.1:8765"
+SERVER = {"name": "blockforge", "version": "1.1.0"}
+APP_URL = f"http://127.0.0.1:{os.environ.get('BLOCKFORGE_PORT', '8765')}"
 
 TOOLS = [
+    {
+        "name": "app_status",
+        "description": "Is the BlockForge app open? Returns its version, the build on screen, whether it's busy "
+                       "making a build, and how many builds are in the gallery.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "app_open",
+        "description": "Open the BlockForge app (starts it if it's closed) and bring its window to the front. "
+                       "Pass build_id to show that build in it.",
+        "inputSchema": {"type": "object", "properties": {
+            "build_id": {"type": "string", "description": "Optional build to show"}}, "additionalProperties": False},
+    },
+    {
+        "name": "app_close",
+        "description": "Close the BlockForge app window. Refuses while a build is being made unless force is true "
+                       "(ask the user first).",
+        "inputSchema": {"type": "object", "properties": {
+            "force": {"type": "boolean", "default": False}}, "additionalProperties": False},
+    },
     {
         "name": "get_build_guide",
         "description": "Read this FIRST before writing a BlockForge build script: the build toolkit "
@@ -91,7 +115,135 @@ def _summary(meta):
                if meta.get("warnings") else ""))
 
 
+# ------------------------------------------------------------------ the app window
+def _api(path, body=None, timeout=10):
+    """Talk to the running app. Returns (status, json), or (None, None) if it isn't running."""
+    req = urllib.request.Request(APP_URL + path, data=None if body is None else json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read() or b"{}")
+        except ValueError:
+            return e.code, {}
+    except (OSError, ValueError):
+        return None, None
+
+
+def _app_command():
+    """How to start the app: the installed BlockForge.exe if there is one, else from source."""
+    if getattr(sys, "frozen", False):
+        exe = os.path.join(os.path.dirname(sys.executable), "BlockForge.exe")
+        if os.path.exists(exe):
+            return [exe]
+    exe = os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "BlockForge", "BlockForge.exe")
+    if os.path.exists(exe) and not os.environ.get("BLOCKFORGE_DATA"):   # a test data folder means: run this source
+        return [exe]
+    py = sys.executable
+    pyw = os.path.join(os.path.dirname(py), "pythonw.exe")
+    return [pyw if os.path.exists(pyw) else py, os.path.join(os.path.dirname(os.path.abspath(__file__)), "launcher.pyw")]
+
+
+def _launch():
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("_MEI", "_PYI"))}   # don't confuse another frozen exe
+    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    subprocess.Popen(_app_command(), env=env, creationflags=flags, close_fds=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _describe(st):
+    cur = st.get("current")
+    return (f"BlockForge {st.get('version')} is open"
+            + (f", showing '{cur['title']}' (id {cur['id']})" if cur else ", no build open")
+            + (f", busy making {st['busy']} build(s)" if st.get("busy") else "")
+            + f". {st.get('builds', 0)} builds in the gallery.")
+
+
+def app_status():
+    code, st = _api("/api/app")
+    if code is None:
+        return "BlockForge is closed."
+    if code != 200:
+        return "BlockForge is running, but it's an older version that can't report its status. Update it."
+    if not st.get("window"):
+        return "BlockForge's server is running without a window (developer mode)."
+    return _describe(st)
+
+
+def app_open(build_id=None):
+    if build_id:
+        try:
+            store.get_meta(build_id)
+        except (KeyError, OSError, ValueError):
+            raise ToolError(f"There's no build with id {build_id}. Use list_builds to find it.") from None
+    started = False
+    code, st = _api("/api/app")
+    if code is None:
+        _launch()
+        started = True
+        for _ in range(120):                          # up to ~60 s for the first start after an install
+            time.sleep(0.5)
+            code, st = _api("/api/app", timeout=3)
+            if code == 200 and st.get("ready"):
+                break
+        else:
+            raise ToolError("BlockForge was started but didn't answer within a minute. It may still be loading.")
+    elif code != 200:
+        raise ToolError("BlockForge is running, but it's an older version that can't be controlled. Update it.")
+    code, st = _api("/api/app/show", {"build_id": build_id} if build_id else {})
+    if code != 200:
+        raise ToolError((st or {}).get("error") or "Couldn't bring BlockForge to the front.")
+    if build_id:
+        for _ in range(20):                           # wait for the build to load in the window
+            time.sleep(0.25)
+            st = _api("/api/app")[1] or st
+            if (st.get("current") or {}).get("id") == build_id:
+                break
+    return ("Started BlockForge. " if started else "") + _describe(st)
+
+
+def app_close(force=False):
+    code, st = _api("/api/app/quit", {"force": bool(force)})
+    if code is None:
+        return "BlockForge is already closed."
+    if code == 409:
+        raise ToolError((st or {}).get("error") or "BlockForge can't be closed right now.")
+    if code != 200:
+        raise ToolError("BlockForge is running, but it's an older version that can't be closed from here.")
+    for _ in range(20):
+        time.sleep(0.25)
+        if _api("/api/app", timeout=1)[0] is None:
+            return "Closed BlockForge."
+    return "Asked BlockForge to close."
+
+
+PROMPTS = [{
+    "name": "blockforge",
+    "title": "BlockForge",
+    "description": "Open or close BlockForge, show a build, or make a new Minecraft build",
+    "arguments": [{"name": "request", "description": "open, close, status, show <build>, or what to build",
+                   "required": False}],
+}]
+
+
+def get_prompt(name, args):
+    if name != "blockforge":
+        raise LookupError(name)
+    from blockforge import claudelink
+    text = claudelink.COMMAND.replace(claudelink.MARK, "").strip().replace("$ARGUMENTS", (args or {}).get("request") or "open")
+    return {"description": PROMPTS[0]["description"],
+            "messages": [{"role": "user", "content": {"type": "text", "text": text}}]}
+
+
 def call(name, args):
+    if name == "app_status":
+        return app_status()
+    if name == "app_open":
+        return app_open(args.get("build_id"))
+    if name == "app_close":
+        return app_close(args.get("force"))
     if name == "get_build_guide":
         guide = prompts.SYSTEM.replace("Reply with a one-line title, then ONE ```python code block. No other prose is needed.",
                                        "Pass your script to the create_build tool.")
@@ -177,13 +329,19 @@ def handle(msg):
     method, mid = msg.get("method"), msg.get("id")
     if method == "initialize":
         ver = (msg.get("params") or {}).get("protocolVersion", "2025-06-18")
-        return {"protocolVersion": ver, "capabilities": {"tools": {}}, "serverInfo": SERVER,
+        return {"protocolVersion": ver, "capabilities": {"tools": {}, "prompts": {}}, "serverInfo": SERVER,
                 "instructions": "BlockForge makes Minecraft builds. Call get_build_guide before writing a script, "
-                                "then create_build. Builds appear in the user's BlockForge app."}
+                                "then create_build. Builds appear in the user's BlockForge app. app_open opens the "
+                                "app (and can show a build), app_close closes it, app_status says what it's doing."}
     if method == "ping":
         return {}
     if method == "tools/list":
         return {"tools": TOOLS}
+    if method == "prompts/list":
+        return {"prompts": PROMPTS}
+    if method == "prompts/get":
+        p = msg.get("params") or {}
+        return get_prompt(p.get("name"), p.get("arguments"))
     if method == "tools/call":
         p = msg.get("params") or {}
         try:
