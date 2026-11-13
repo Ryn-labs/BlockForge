@@ -51,6 +51,8 @@ Then you download it in the format you need. There's no paywall and no per-downl
   repeated lines are cached so they never cost credits twice, and your remaining credits are shown. If your
   credits run out or the key fails, Flint falls back to his offline voice by himself.
 - **Blocks that can really exist.** Every build is checked against vanilla survival rules: no lanterns stuck to the side of a wall, no torches or plants floating in mid-air, no half doors or beds, no gravity blocks hanging over nothing. BlockForge fixes what it can (a wall lantern gets a small fence bracket to hang from), asks Claude to fix the rest, and lists every auto-fix in the build's details.
+- **Talk to it from Claude.** Press **Settings → AI → Connect to Claude** once. Then in Claude Code type `/blockforge open`, `/blockforge close`, `/blockforge show cottage` or `/blockforge a wizard tower`, or just ask in Claude Desktop. Claude can open BlockForge (starting it if it's closed), show any build in it, check what it's doing, close it, and make new builds that open on screen straight away.
+- **Huge builds stay smooth.** The 3D view only redraws when something changes, skips what's off screen, and the layer slider and Flint's build animation cut the model instead of rebuilding it. A 2.4 million block build opens in 0.2 s, and the slider and hover are instant.
 - **Any prompt, any size.** The prompt box has no limit (it grows as you type, and the full prompt is always kept). Pick a size preset (Tiny to Colossal, with the real block counts shown) or choose **Custom** and type the exact width, height and length. BlockForge measures what the AI built and sends it back to be fixed if it's off. **Quick edits → Scale** resizes any build, or just halves or doubles it, with no AI. Builds up to 640 blocks across and 5 million blocks are supported.
 - **Customise imported schematics.** Import any `.schem`, `.litematic` or `.nbt` and change it however you like. Ask the AI (for example "give it a dark oak roof and add a garden"). It gets a picture and a map of the build, writes only the changes, and everything it doesn't touch stays exactly as it was, modded blocks included. Or use **Quick edits**, which need no AI: swap any block or a whole family (oak → spruce changes the stairs, slabs, fences and doors too), turn 90°, mirror, or cut layers. Every change saves a new version and keeps the original.
 - **A built-in test lab.** Redstone builds and farms are proven in a real Minecraft server before you see them. BlockForge runs Mojang's official server hidden in the background (you can keep playing), places the build, runs its test at high speed, for example "after 2 in-game days the chest must have iron", and reads the result. If it fails, the AI gets exactly what happened and redesigns the machine. Builds show **✓ TESTED IN GAME** or **✗ FAILED IN-GAME TEST**. Set it up once in **Settings → Test lab**: pick your Minecraft version and accept Mojang's EULA.
@@ -129,10 +131,22 @@ Online research uses Claude's web search, so it's only available with Claude. Ot
 guide, the redstone checker and automatic error fixing. Usage shows their token counts. OpenRouter also reports
 real cost, while other providers bill your account directly.
 
-## Build from a Claude Code chat
+## Connect to Claude (Claude Code and Claude Desktop)
 
-Claude Code can make builds straight into BlockForge. In the cloned folder, create a file named `.mcp.json`
-containing:
+In the app, open **Settings → AI** and press **Connect to Claude**, then restart Claude. This adds BlockForge's
+MCP server to Claude Code (for every folder) and to Claude Desktop, and adds a `/blockforge` command to Claude Code.
+Only BlockForge's own entry is added, a backup of each settings file is kept, and **Disconnect** removes it again.
+
+- `/blockforge` or `/blockforge open`: open the app and bring it to the front
+- `/blockforge close`: close it (it won't close while a build is being made unless you say so)
+- `/blockforge status`: what it's doing and which build is on screen
+- `/blockforge show <name>`: open a build in the app
+- `/blockforge <anything else>`: make a new build, which then opens in the app
+
+In Claude Desktop just ask, or pick BlockForge from the **+** menu. The claude.ai website can't reach apps on your
+PC, so use Claude Code or Claude Desktop.
+
+Running from source? The same server works with `python blockforge/mcp_server.py`, for example in a `.mcp.json`:
 
 ```json
 {
@@ -141,10 +155,6 @@ containing:
   }
 }
 ```
-
-Then open a Claude Code chat in that folder, approve the **blockforge** server, and ask for something like
-*"make me a wizard tower in BlockForge"*.
-Claude writes the build, researches the same schematic sites, and the result appears in the app's gallery.
 
 ## How it works
 
@@ -162,7 +172,8 @@ blockforge/
   buildkit.py     the building toolkit build scripts use
   sandbox.py      checks and runs build scripts in a separate process
   exporters.py    .schem / .litematic / .nbt / .mcstructure writers and importers
-  mcp_server.py   Claude Code chat link (MCP over stdio)
+  mcp_server.py   Claude link (MCP over stdio): builds, open/close/show the app
+  claudelink.py   Connect to Claude: adds the MCP server and /blockforge to Claude's settings
   app_main.py     desktop entry point (pywebview window)
   static/         the UI: three.js viewer, Flint (character.js, guide.js)
 installer/        PyInstaller spec + WiX installer source
