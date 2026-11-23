@@ -52,6 +52,7 @@ Then you download it in the format you need. There's no paywall and no per-downl
   credits run out or the key fails, Flint falls back to his offline voice by himself.
 - **Blocks that can really exist.** Every build is checked against vanilla survival rules: no lanterns stuck to the side of a wall, no torches or plants floating in mid-air, no half doors or beds, no gravity blocks hanging over nothing. BlockForge fixes what it can (a wall lantern gets a small fence bracket to hang from), asks Claude to fix the rest, and lists every auto-fix in the build's details.
 - **Talk to it from Claude.** Press **Settings → AI → Connect to Claude** once. Then in Claude Code type `/blockforge open`, `/blockforge close`, `/blockforge show cottage` or `/blockforge a wizard tower`, or just ask in Claude Desktop. Claude can open BlockForge (starting it if it's closed), show any build in it, check what it's doing, close it, and make new builds that open on screen straight away.
+- **3D preview links anyone can open.** Every build gets a link that opens it in 3D in any browser, on a PC or a phone, with no install: rotate, zoom, scrub through the layers and hover a block to see what it is. Builds Claude makes come with the link in its reply, and the 🔗 button copies it in the app. Small builds fit inside the link itself; add a GitHub token in **Settings → AI** and every link is short (each shared build is saved as a secret gist on your GitHub). Anyone can also drop a .schem, .litematic or .nbt file on [the preview page](https://ryn-labs.github.io/BlockForge/view/) to look at it. Nothing is uploaded.
 - **Huge builds stay smooth.** The 3D view only redraws when something changes, skips what's off screen, and the layer slider and Flint's build animation cut the model instead of rebuilding it. A 2.4 million block build opens in 0.2 s, and the slider and hover are instant.
 - **Any prompt, any size.** The prompt box has no limit (it grows as you type, and the full prompt is always kept). Pick a size preset (Tiny to Colossal, with the real block counts shown) or choose **Custom** and type the exact width, height and length. BlockForge measures what the AI built and sends it back to be fixed if it's off. **Quick edits → Scale** resizes any build, or just halves or doubles it, with no AI. Builds up to 640 blocks across and 5 million blocks are supported.
 - **Customise imported schematics.** Import any `.schem`, `.litematic` or `.nbt` and change it however you like. Ask the AI (for example "give it a dark oak roof and add a garden"). It gets a picture and a map of the build, writes only the changes, and everything it doesn't touch stays exactly as it was, modded blocks included. Or use **Quick edits**, which need no AI: swap any block or a whole family (oak → spruce changes the stairs, slabs, fences and doors too), turn 90°, mirror, or cut layers. Every change saves a new version and keeps the original.
@@ -174,8 +175,10 @@ blockforge/
   exporters.py    .schem / .litematic / .nbt / .mcstructure writers and importers
   mcp_server.py   Claude link (MCP over stdio): builds, open/close/show the app
   claudelink.py   Connect to Claude: adds the MCP server and /blockforge to Claude's settings
+  share.py        3D preview links (build packed into the link, or a secret gist)
   app_main.py     desktop entry point (pywebview window)
-  static/         the UI: three.js viewer, Flint (character.js, guide.js)
+  static/         the UI: three.js viewer, Flint (character.js, guide.js), view.html (web preview page)
+docs/view/       the web preview page, served by GitHub Pages
 installer/        PyInstaller spec + WiX installer source
 ```
 
