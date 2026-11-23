@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import exporters, learn, mods, placement, prompts, sandbox, store, testlab  # noqa: E402
+from blockforge import exporters, learn, mods, placement, prompts, sandbox, share, store, testlab  # noqa: E402
 
 SERVER = {"name": "blockforge", "version": "1.1.0"}
 APP_URL = f"http://127.0.0.1:{os.environ.get('BLOCKFORGE_PORT', '8765')}"
@@ -86,6 +86,13 @@ TOOLS = [
     {
         "name": "get_build",
         "description": "Get a build's details, material list and its build script.",
+        "inputSchema": {"type": "object", "properties": {"build_id": {"type": "string"}},
+                        "required": ["build_id"], "additionalProperties": False},
+    },
+    {
+        "name": "preview_link",
+        "description": "Get a link to a 3D preview of a build that anyone can open in a web browser (rotate, zoom, "
+                       "see inside layer by layer). Give it to the user exactly as returned.",
         "inputSchema": {"type": "object", "properties": {"build_id": {"type": "string"}},
                         "required": ["build_id"], "additionalProperties": False},
     },
@@ -291,7 +298,7 @@ def call(name, args):
                              tiles=sandbox.tiles_of(meta), modules=meta.get("modules"), base=base_id,
                              entities=meta.get("entities"), tested=tested)
         learn.log_generation(m, fixes, meta.get("redstone_warnings") or [])
-        return _summary(m) + lab_report
+        return _summary(m) + lab_report + share.chat_text(m["id"])
     if name == "list_builds":
         q = (args.get("query") or "").lower()
         items = [b for b in store.list_builds() if not q or q in (b["title"] + " " + b.get("prompt", "")).lower()]
@@ -313,6 +320,9 @@ def call(name, args):
                     "\n\nTo change it, call update_build with build_id and a script of ONLY the changes"
                     + (f". Current script of changes:\n```python\n{code}\n```" if code else "."))
         return head + "Script:\n```python\n" + (code or "") + "\n```"
+    if name == "preview_link":
+        store.get_meta(args["build_id"])
+        return share.chat_text(args["build_id"]).strip()
     if name == "export_build":
         fmt = args["format"]
         if fmt not in exporters.FORMATS:

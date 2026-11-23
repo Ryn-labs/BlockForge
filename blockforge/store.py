@@ -43,6 +43,7 @@ DEFAULT_SETTINGS = {
     "modpacks": [],                                         # scanned packs: [{"id", "name", "path"}]
     "active_pack": None, "use_mods": True, "target_version": "1.21.1",
     "learn_examples": True, "learn_log": True,
+    "share": {},                                           # short preview links: {"github_token", "github_user"}
     "testlab_enabled": False, "testlab_eula": False, "testlab_version": None,   # Settings -> Test lab              # local learning loop (Settings -> Learning)                                       # other AIs: {id: {"api_key", "base_url", "model", "models"}}                                           # the guide character (name, voice, colours...)
 }
 USAGE_LOG = os.path.join(DATA, "usage.jsonl")

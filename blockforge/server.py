@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import eleven, engine, exporters, learn, mods, pixelart, placement, prompts, testlab, sandbox, store, tts, updater, voices  # noqa: E402
+from blockforge import eleven, engine, share, exporters, learn, mods, pixelart, placement, prompts, testlab, sandbox, store, tts, updater, voices  # noqa: E402
 from blockforge.version import VERSION  # noqa: E402
 
 PORT = int(os.environ.get("BLOCKFORGE_PORT", "8765"))
@@ -245,7 +245,8 @@ class H(BaseHTTPRequestHandler):
                 s = store.load_settings()
                 key = s.get("api_key") or ""
                 return self.send(200, {
-                    "settings": {**{k: v for k, v in s.items() if k not in ("providers", "eleven")}, "api_key": ("•" * 8 + key[-4:]) if key else ""},
+                    "settings": {**{k: v for k, v in s.items() if k not in ("providers", "eleven", "share")}, "api_key": ("•" * 8 + key[-4:]) if key else ""},
+                    "share": {"github_user": (s.get("share") or {}).get("github_user") or None, "viewer": share.VIEWER},
                     "has_api_key": bool(key or os.environ.get("ANTHROPIC_API_KEY")),
                     "claude_code": engine.claude_status(),
                     "models": engine.MODELS, "formats": {k: v[0] for k, v in exporters.FORMATS.items()},
@@ -350,6 +351,8 @@ class H(BaseHTTPRequestHandler):
                     return self.send(200, store.get_meta(bid))
                 if parts[3] == "blocks":
                     return self.send(200, store.get_blocks_raw(bid))
+                if parts[3] == "share":
+                    return self.send(200, share.best_link(bid))
                 if parts[3] == "code":
                     return self.send(200, {"code": store.get_code(bid)})
                 if parts[3] == "file" and len(parts) == 5:
@@ -379,6 +382,14 @@ class H(BaseHTTPRequestHandler):
             if parts[:1] != ["api"]:
                 return self.err(404, "not found")
             route = parts[1:]
+            if route == ["share", "github"]:
+                token = str(self.json_body().get("token") or "").strip()
+                if not token:
+                    store.save_settings({"share": {}})
+                    return self.send(200, {"github_user": None})
+                user = share.github_login(token)          # ValueError -> 400 with the reason
+                store.save_settings({"share": {"github_token": token, "github_user": user}})
+                return self.send(200, {"github_user": user})
             if route == ["app", "show"]:
                 if not APP:
                     return self.err(409, "BlockForge is running without a window.")
@@ -434,6 +445,7 @@ class H(BaseHTTPRequestHandler):
                 if "api_key" in b and b["api_key"].startswith("•"):
                     b.pop("api_key")
                 b.pop("modpacks", None)                      # only the Mods endpoints manage packs
+                b.pop("share", None)                         # only /api/share/github sets the token
                 if "research_sites" in b:
                     sites = [re.sub(r"^https?://(www\.)?", "", str(s).strip()).strip("/") for s in b["research_sites"] or []]
                     b["research_sites"] = [s for s in sites if s][:20] or None
