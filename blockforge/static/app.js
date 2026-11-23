@@ -214,6 +214,7 @@ function openSettings(tab = 'claude') {
   fillLookForm();
   fillGuideForm();
   loadLink();
+  showGithub(s?.share?.github_user);
   showSettingsTab(tab);
   $('#settings').showModal();
 }
@@ -228,6 +229,39 @@ $('#engine-pill').onclick = () => loadStatus().then(() => openSettings('claude')
 $('#research-sites').onclick = e => { e.preventDefault(); openSettings('research'); };
 $('#cc-login').onclick = async () => { try { await post('login', {}); toast('A sign-in window opened. Finish signing in there, then click “Check again”.'); } catch (e) { toast(e.message, true); } };
 $('#cc-refresh').onclick = () => loadStatus();
+// ---------------------------------------------------------------- 3D preview links
+async function shareLink() {
+  const id = state.current?.id;
+  if (!id) { toast('Open a build first', true); return null; }
+  const r = await api(`builds/${id}/share`);
+  $('#share-note').textContent = r.url ? (r.short ? 'Short link, saved as a secret gist on your GitHub.'
+    : r.url.length > 8000 ? `Long link (${r.url.length.toLocaleString()} characters): some chat apps cut long messages. Add a GitHub token in Settings → AI for short links.` : '') + (r.note ? ' ' + r.note : '') : r.note;
+  return r.url;
+}
+async function copyShare() {
+  try {
+    const url = await shareLink();
+    if (!url) return;
+    await navigator.clipboard.writeText(url);
+    toast('Preview link copied. Anyone can open it to look around this build in 3D.');
+  } catch (e) { toast(e.message, true); }
+}
+$('#share-btn').onclick = copyShare;
+$('#share-copy').onclick = copyShare;
+$('#share-open').onclick = async () => { try { const url = await shareLink(); if (url) window.open(url, '_blank'); } catch (e) { toast(e.message, true); } };
+function showGithub(user) {
+  $('#gh-status').textContent = user ? `Short links on: builds are saved as secret gists on github.com/${user}.` : 'Not set up: long builds use the full link.';
+  $('#gh-status').className = 'status' + (user ? ' ok' : '');
+  $('#gh-clear').hidden = !user;
+  $('#gh-token').value = '';
+}
+$('#gh-save').onclick = async () => {
+  const token = $('#gh-token').value.trim();
+  if (!token) return toast('Paste a GitHub token first', true);
+  try { const r = await post('share/github', { token }); showGithub(r.github_user); toast(`Connected to GitHub as ${r.github_user}`); }
+  catch (e) { toast(e.message, true); }
+};
+$('#gh-clear').onclick = async () => { try { await post('share/github', { token: '' }); showGithub(null); toast('GitHub token removed'); } catch (e) { toast(e.message, true); } };
 // ---------------------------------------------------------------- connect to Claude (MCP + /blockforge)
 function showLink(s) {
   const put = (el, t, cls) => { el.textContent = t; el.className = 'status' + (cls ? ' ' + cls : ''); };

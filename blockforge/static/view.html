@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BlockForge 3D preview</title>
+<meta name="description" content="Look around a Minecraft build in 3D: rotate, zoom and see inside it layer by layer.">
+<link rel="icon" href="icon.svg">
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.js",
+  "three/addons/": "./vendor/"
+} }
+</script>
+<style>
+  :root { --bg: #0f1115; --panel: #171a21; --line: #2a2f3a; --text: #e7eaf0; --muted: #9aa3b5; --accent: #5fbf4a; --bad: #e0605a; }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--text); text-decoration: none; }
+  .brand img { width: 22px; height: 22px; }
+  #title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+  #stats { color: var(--muted); font-size: 12.5px; }
+  .grow { flex: 1; }
+  button, .btn { background: #232834; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 11px; font: inherit; font-size: 13px; cursor: pointer; text-decoration: none; }
+  button:hover, .btn:hover { border-color: var(--accent); }
+  button.on { background: var(--accent); color: #0b1a08; border-color: var(--accent); }
+  main { position: relative; flex: 1; min-height: 0; display: flex; }
+  #viewer { position: relative; flex: 1; min-width: 0; }
+  #viewer canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  #mats { width: 250px; background: var(--panel); border-left: 1px solid var(--line); overflow: auto; padding: 10px; }
+  #mats[hidden] { display: none; }
+  #mats h3 { margin: 2px 0 8px; font-size: 13px; color: var(--muted); font-weight: 600; }
+  #mats ul { list-style: none; margin: 0; padding: 0; }
+  #mats li { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; cursor: pointer; font-size: 12.5px; }
+  #mats li:hover { background: #222733; }
+  #mats li.on { background: #2b3a27; }
+  #mats li .n { margin-left: auto; color: var(--muted); }
+  .sw { width: 14px; height: 14px; border-radius: 3px; flex: none; border: 1px solid #0006; }
+  footer { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel); border-top: 1px solid var(--line); }
+  footer input[type=range] { flex: 1; accent-color: var(--accent); }
+  #layer-val { color: var(--muted); font-size: 12.5px; min-width: 64px; text-align: right; }
+  #tip { position: absolute; pointer-events: none; background: #0d0f14ee; border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; font-size: 12.5px; max-width: 260px; z-index: 5; }
+  #tip .id { color: var(--muted); font-size: 11.5px; }
+  .center { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 4; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 26px 28px; max-width: 460px; text-align: center; }
+  .card h1 { font-size: 20px; margin: 0 0 8px; }
+  .card p { color: var(--muted); margin: 8px 0 16px; }
+  .card.bad h1 { color: var(--bad); }
+  #drop { position: fixed; inset: 0; background: #5fbf4a22; border: 3px dashed var(--accent); display: none; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; z-index: 20; pointer-events: none; }
+  body.dragging #drop { display: flex; }
+  #toast { position: fixed; left: 50%; bottom: 64px; transform: translateX(-50%); background: #0d0f14f0; border: 1px solid var(--line); border-radius: 10px; padding: 9px 14px; z-index: 30; max-width: min(520px, calc(100vw - 32px)); }
+  #focus-chip { position: absolute; top: 10px; left: 10px; background: #0d0f14e6; border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px; font-size: 12.5px; z-index: 3; cursor: pointer; }
+  @media (max-width: 700px) {
+    #mats { position: absolute; right: 0; top: 0; bottom: 0; z-index: 6; width: min(260px, 80vw); }
+    #title { max-width: 60vw; }
+    .wide { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <a class="brand" href="https://github.com/Ryn-labs/BlockForge" target="_blank" rel="noopener"><img src="icon.svg" alt="">BlockForge</a>
+  <span id="title"></span><span id="stats"></span>
+  <span class="grow"></span>
+  <button id="mats-btn" hidden>Materials</button>
+  <button id="reset" hidden>Reset view</button>
+  <button id="copy" hidden>Copy link</button>
+  <button id="open">Open file</button>
+  <input id="file" type="file" accept=".schem,.litematic,.nbt,.schematic" hidden>
+</header>
+<main>
+  <div id="viewer">
+    <div id="tip" hidden></div>
+    <div id="focus-chip" hidden></div>
+    <div class="center" id="msg">
+      <div class="card"><h1>Loading…</h1></div>
+    </div>
+  </div>
+  <aside id="mats" hidden><h3>Materials (click one to highlight it)</h3><ul id="mat-list"></ul></aside>
+</main>
+<footer id="foot" hidden>
+  <span class="wide">Layers</span><input id="layer" type="range" min="0" max="0" value="0"><span id="layer-val"></span>
+</footer>
+<div id="drop">Drop the schematic to preview it</div>
+<div id="toast" hidden></div>
+<script type="module" src="view.js"></script>
+</body>
+</html>

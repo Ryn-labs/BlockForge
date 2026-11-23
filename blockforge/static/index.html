@@ -128,6 +128,7 @@
       <button class="icon-btn" id="reset-view" title="Reset camera">⟲</button>
       <button class="icon-btn on" id="names-btn" title="Show block names when you hover (click a block to highlight every one like it)">🏷</button>
       <button class="icon-btn" id="shot" title="Save a screenshot">📷</button>
+      <button class="icon-btn" id="share-btn" title="Copy a 3D preview link anyone can open in a browser">🔗</button>
     </div>
   </section>
 
@@ -153,6 +154,10 @@
       <h3>Download</h3>
       <div class="downloads" id="downloads"></div>
       <button class="link-btn small" id="reveal">Show file in folder</button>
+      <h3>Share a 3D preview</h3>
+      <p class="muted small">A link anyone can open in a browser, on a PC or a phone, to look around this build. No install needed.</p>
+      <div class="row-btns"><button type="button" class="btn small" id="share-copy">Copy preview link</button><button type="button" class="btn ghost small" id="share-open">Open it</button></div>
+      <div class="muted small" id="share-note"></div>
     </section>
 
     <section class="card" id="quick-card">
@@ -235,6 +240,10 @@
       <div class="link-row"><b>Claude Desktop</b><span class="status" id="link-desktop">Checking…</span></div>
     </div>
     <div class="row-btns"><button type="button" class="btn small" id="link-connect">Connect to Claude</button><button type="button" class="btn ghost small" id="link-disconnect">Disconnect</button></div>
+    <h3>Short preview links</h3>
+    <p class="muted small">Every build gets a 3D preview link. Small builds fit inside the link itself; bigger ones need somewhere to live. Add a GitHub token and BlockForge saves each shared build as a secret gist on your GitHub, so every link is short, even for huge builds. <a class="link-btn small" href="https://github.com/settings/tokens/new?scopes=gist&amp;description=BlockForge%20previews" target="_blank" rel="noopener">Make a token</a> (tick only “gist”), then paste it here.</p>
+    <div class="row-btns"><input id="gh-token" type="password" class="search" placeholder="ghp_… or github_pat_…" autocomplete="off"><button type="button" class="btn small" id="gh-save">Save</button><button type="button" class="btn ghost small" id="gh-clear" hidden>Remove</button></div>
+    <div class="status" id="gh-status">Not set up: long builds use the full link.</div>
     <p class="muted small">Restart Claude after connecting. Only BlockForge’s own entry is added to Claude’s settings, and a backup is kept. The claude.ai website can’t reach apps on your PC, so use Claude Code or Claude Desktop.</p>
     </div>
 
