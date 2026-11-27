@@ -446,6 +446,8 @@ class H(BaseHTTPRequestHandler):
                     return self.send(200, {"job": job and job["id"]})
                 if act == "undo":
                     return self.send(200, chat.undo(cid))
+                if act == "pause":
+                    return self.send(200, chat.pause(cid))
                 if act == "keep":
                     return self.send(200, chat.keep(cid, b.get("version")))
                 if act == "checkout":

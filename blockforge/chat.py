@@ -20,6 +20,8 @@ HISTORY_MESSAGES = 14
 MAX_QUESTIONS = 3
 _LOCKS = {}
 _BUSY = set()
+_PROCS = {}                      # chat id -> the running AI process (for Pause)
+_PAUSED = set()
 _GUARD = threading.Lock()
 
 
@@ -267,7 +269,7 @@ def user_message(c, text, part=None):
     return out + "\nThe user now says:\n" + text.strip()
 
 
-def _run_claude(system, user, sid, model, usage, exe, log):
+def _run_claude(system, user, sid, model, usage, exe, log, cid=None):
     """One claude -p run on the session tools. Returns the AI's final text."""
     from .engine import EngineError
     work = tempfile.mkdtemp(prefix="blockforge_chat_")
@@ -280,6 +282,7 @@ def _run_claude(system, user, sid, model, usage, exe, log):
                "--mcp-config", loop.mcp_config(work), "--strict-mcp-config", "--tools", "Read", "--allowedTools", allowed,
                "--disallowedTools", banned, "--max-turns", str(loop.MAX_TURNS), "--no-session-persistence"]
         proc = loop._spawn(cmd, work, dict(os.environ))
+        _PROCS[cid] = proc
         proc.stdin.write(user.encode("utf-8"))
         proc.stdin.close()
         timer = threading.Timer(loop.TIMEOUT, proc.kill)
@@ -331,6 +334,7 @@ def _run_claude(system, user, sid, model, usage, exe, log):
             raise EngineError("Claude returned an error: " + msg[:800])
         return str(res.get("result") or last_text or "")
     finally:
+        _PROCS.pop(cid, None)
         shutil.rmtree(work, ignore_errors=True)
 
 
@@ -458,8 +462,12 @@ def run_turn(cid, text, part_id=None, log=print, add_user=True):
             exe = engine.find_claude()
             if exe is None:
                 raise EngineError("Claude Code isn't installed, so the chat can't build yet.")
-            reply = _run_claude(system_prompt(text), user_message(c, text, part), c["session"], model, usage, exe, log)
+            reply = _run_claude(system_prompt(text), user_message(c, text, part), c["session"], model, usage, exe, log, cid)
         except Exception as e:
+            if cid in _PAUSED:                              # Pause: keep what was built so far as a version
+                _PAUSED.discard(cid)
+                with _lock(cid):
+                    return _finish_turn(load(cid), before, "Paused. What was built so far is kept.", part, text, usage, log)
             with _lock(cid):
                 c = load(cid)
                 _set_status(c)
@@ -541,6 +549,16 @@ def _finish_turn(c, before, reply, part, text, usage, log):
     save_state(c)
     log("Done: " + (f"{added} added, {removed} removed, {changed} changed." if version else "no blocks changed."))
     return {"chat_id": c["id"], "version": version and version["id"]}
+
+
+def pause(cid):
+    """Stops the running AI turn. Blocks it already placed stay (they become a version)."""
+    proc = _PROCS.get(cid)
+    if cid not in _BUSY or proc is None:
+        raise ChatError("It is not working on anything right now.")
+    _PAUSED.add(cid)
+    proc.kill()
+    return {"ok": True}
 
 
 def keep(cid, vid):

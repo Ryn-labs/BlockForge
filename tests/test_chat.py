@@ -167,6 +167,38 @@ class ChatFlow(unittest.TestCase):
         self.assertEqual(len(session.load(c["session"]).blocks), 25)
         self.assertEqual(chat.view(c["id"])["info"]["blocks"], 25)
 
+    def test_pause_keeps_the_work_so_far(self):
+        c = chat.create("A hall")
+        cid = c["id"]
+        stopped = threading.Event()
+
+        class Slow(FakeProc):
+            def _play(self, sid, script, text):
+                yield from super()._play(sid, script, None)
+                stopped.wait(10)                        # still "working" until Pause kills it
+
+            def kill(self):
+                stopped.set()
+        slow = Slow(c["session"], [("build_step", {"code": FLOOR, "note": "floor"})], None)
+        # the result line is never reached: the generator ends after kill without one
+        slow.stdout = (l for l in slow.stdout if b'"result"' not in l)
+        with mock.patch.object(engine, "find_claude", return_value="claude"), mock.patch.object(loop, "_spawn", lambda *a: slow):
+            t = threading.Thread(target=lambda: chat.run_turn(cid, "A hall", add_user=False, log=lambda m: None))
+            t.start()
+            for _ in range(100):
+                if cid in chat._PROCS:
+                    break
+                time.sleep(0.05)
+            time.sleep(0.3)
+            chat.pause(cid)
+            t.join(10)
+        self.assertFalse(t.is_alive())
+        c = chat.load(cid)
+        self.assertEqual(c["head"], "v2")
+        self.assertIn("Paused", c["messages"][-1]["text"])
+        with self.assertRaises(chat.ChatError):
+            chat.pause(cid)
+
     def test_failed_turn_is_reported(self):
         c = chat.create("x")
         with mock.patch.object(engine, "find_claude", return_value=None):
