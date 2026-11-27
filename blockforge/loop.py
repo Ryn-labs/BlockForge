@@ -159,11 +159,10 @@ def run(text, model, usage, exe, log=print, image_path=None):
                         name = uses.get(c.get("tool_use_id"), "").replace(PREFIX, "")
                         out = _text_of(c.get("content"))
                         if name == "start_build" and not c.get("is_error"):
-                            m0 = re.search(r"[Ss]ession(?: id)?:?\s*([\w-]{6,})", out) or re.search(r"([0-9a-f]{8,}|[\w]{6,}-[\w-]+)", out)
+                            m0 = re.search(r"session (\S+) started", out)
                             sid = m0.group(1) if m0 else sid
                         if c.get("is_error") and name == "save_build":
-                            log("Save refused: " + out[:160].replace("
-", " "))
+                            log("Save refused: " + out[:160].replace(chr(10), " "))
                         if name == "check":
                             m = re.search(r"(\d+) problem", out)
                             log("Checks: " + (f"{m.group(1)} problems" if m else "no problems"))

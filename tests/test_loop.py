@@ -84,12 +84,12 @@ class LoopEngine(unittest.TestCase):
         self.assertIn("blockforge", captured["cfg"]["mcpServers"])
         self.assertEqual(captured["cfg"]["mcpServers"]["blockforge"]["env"]["BLOCKFORGE_DATA"], store.DATA)
 
-    def test_missing_save_is_an_error(self):
+    def test_missing_save_keeps_the_unfinished_build(self):
         with mock.patch.object(engine, "find_claude", return_value="claude"), \
                 mock.patch.object(loop, "_spawn", lambda *a: FakeProc(SCRIPT[:3])), \
                 mock.patch.object(loop, "newest_build", lambda since: None):
-            with self.assertRaises(engine.EngineError):
-                engine.generate("A well", size="tiny", engine="claude_loop", research=False, log=lambda s: None)
+            meta = engine.generate("A well", size="tiny", engine="claude_loop", research=False, log=lambda s: None)
+            self.assertTrue(meta.get("id"))
 
     def test_default_mode_is_script(self):
         self.assertEqual(store.DEFAULT_SETTINGS["build_mode"], "script")
