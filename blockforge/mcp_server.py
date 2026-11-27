@@ -1,5 +1,6 @@
 """BlockForge MCP server (stdio). Lets a Claude Code chat create, edit and export builds that show up
 in the BlockForge app's gallery. No extra packages needed."""
+import base64
 import json
 import os
 import subprocess
@@ -9,7 +10,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import exporters, learn, mods, placement, prompts, sandbox, share, store, testlab  # noqa: E402
+from blockforge import exporters, learn, mods, placement, prompts, sandbox, session, share, store, testlab  # noqa: E402
 
 SERVER = {"name": "blockforge", "version": "1.1.0"}
 APP_URL = f"http://127.0.0.1:{os.environ.get('BLOCKFORGE_PORT', '8765')}"
@@ -104,6 +105,51 @@ TOOLS = [
             "build_id": {"type": "string"},
             "format": {"type": "string", "enum": list(exporters.FORMATS)}},
             "required": ["build_id", "format"], "additionalProperties": False},
+    },
+    {
+        "name": "start_build",
+        "description": 'Start a step-by-step build session (the build lives on the server until save_build). Returns the session id. Read get_build_guide first.',
+        "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "size_hint": {"type": "string", "description": "Rough size or idea, e.g. 24 x 16 x 30 cottage"}}, "required": ["title"], "additionalProperties": False},
+    },
+    {
+        "name": "build_step",
+        "description": 'Run a SHORT buildkit snippet on top of what is already in the session (same functions as create_build scripts, coordinates x east, y up, z south). Returns blocks added/replaced/removed, overwrites, placement warnings and the build checks with coordinates. Build one part at a time, then view and check.',
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "code": {"type": "string", "description": "Build script for this part only"}, "note": {"type": "string", "description": "What this step is, e.g. north wall"}}, "required": ["session", "code"], "additionalProperties": False},
+    },
+    {
+        "name": "view",
+        "description": 'Look at the build: flat elevations (north, east, south, west, top) as pictures, nearest block per column, darker when further back. Use it after every part.',
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "sides": {"type": "array", "items": {"type": "string", "enum": ["north", "east", "south", "west", "top"]}, "description": "Default: all five"}}, "required": ["session"], "additionalProperties": False},
+    },
+    {
+        "name": "check",
+        "description": 'Run all build checks (floating parts, buried or jumpy paths, wrong stair facing, corner turns, blocked doors, head room) and list every problem with coordinates.',
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}}, "required": ["session"], "additionalProperties": False},
+    },
+    {
+        "name": "walk_test",
+        "description": 'Walk a path through the build and report jumps over 0.6 of a block, blocked head room (less than 2 free blocks) and missing floor, each with coordinates.',
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "path": {"type": "array", "items": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2}, "description": "Points [x, z] to walk between in order, e.g. [[2, 12], [2, 5], [9, 5]]"}}, "required": ["session", "path"], "additionalProperties": False},
+    },
+    {
+        "name": "undo",
+        "description": 'Undo the last step(s) of the session.',
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "steps": {"type": "integer", "default": 1}}, "required": ["session"], "additionalProperties": False},
+    },
+    {
+        "name": "history",
+        "description": 'List the steps done so far in the session.',
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}}, "required": ["session"], "additionalProperties": False},
+    },
+    {
+        "name": "describe",
+        "description": 'Text description of the build as it is now: size, materials with where they are, and top, front and side letter maps.',
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}}, "required": ["session"], "additionalProperties": False},
+    },
+    {
+        "name": "save_build",
+        "description": 'Finish: run the final placement pass and save the session as a build in the BlockForge gallery. Returns the build id and the 3D preview link (give it to the user exactly as returned).',
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "title": {"type": "string"}}, "required": ["session"], "additionalProperties": False},
     },
 ]
 
@@ -244,6 +290,55 @@ def get_prompt(name, args):
             "messages": [{"role": "user", "content": {"type": "text", "text": text}}]}
 
 
+def _skill_text():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "SKILL.md")
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+SESSION_TOOLS = ("start_build", "build_step", "view", "check", "walk_test", "undo", "history", "describe", "save_build")
+
+
+def _session_call(name, args):
+    try:
+        if name == "start_build":
+            s = session.start(args.get("title"), args.get("size_hint"))
+            return (f"Build session {s.id} started ('{s.title}'). Build one part at a time with build_step, then view and "
+                    f"check. Coordinates: x east, y up, z south; start at 0,0,0.")
+        s = session.load(args.get("session"))
+        if name == "build_step":
+            if not str(args.get("code") or "").strip():
+                raise ToolError("build_step needs some code.")
+            return session.step(s, args["code"], args.get("note"))
+        if name == "view":
+            pics = session.view(s, args.get("sides"))
+            out = [{"type": "text", "text": f"{len(s.blocks):,} blocks. Views: " + ", ".join(p[0] for p in pics)
+                    + ". Each picture is the nearest block in every column; darker means further back."}]
+            for side, png in pics:
+                out.append({"type": "text", "text": side + ":"})
+                out.append({"type": "image", "data": base64.b64encode(png).decode("ascii"), "mimeType": "image/png"})
+            return out
+        if name == "check":
+            return session.check_text(s)
+        if name == "walk_test":
+            return session.walk(s, args.get("path"))
+        if name == "undo":
+            return session.undo(s, args.get("steps", 1))
+        if name == "history":
+            return session.history_text(s)
+        if name == "describe":
+            return session.describe_text(s)
+        if name == "save_build":
+            m, link = session.save(s, args.get("title"))
+            return _summary(m) + link
+    except session.SessionError as e:
+        raise ToolError(str(e)) from None
+    raise ToolError("Unknown tool " + name)
+
+
 def call(name, args):
     if name == "app_status":
         return app_status()
@@ -256,8 +351,12 @@ def call(name, args):
                                        "Pass your script to the create_build tool.")
         sites = store.load_settings().get("research_sites") or prompts.DEFAULT_SITES
         brief = prompts.research_brief(sites).split("Your reply must contain")[0]
-        return (guide + "\n" + brief + "\nPass the builds you studied to create_build as `references`.\n\n"
+        skill = _skill_text()
+        return ((skill + "\n\n---\n\nThe older whole-script guide follows. It still applies to create_build.\n\n" if skill else "")
+                + guide + "\n" + brief + "\nPass the builds you studied to create_build as `references`.\n\n"
                 + "If the request needs working redstone (doors, farms, sorters, contraptions):\n" + prompts.REDSTONE_GUIDE)
+    if name in SESSION_TOOLS:
+        return _session_call(name, args)
     if name in ("create_build", "update_build"):
         parent = args.get("build_id")
         if parent:
@@ -341,7 +440,8 @@ def handle(msg):
         ver = (msg.get("params") or {}).get("protocolVersion", "2025-06-18")
         return {"protocolVersion": ver, "capabilities": {"tools": {}, "prompts": {}}, "serverInfo": SERVER,
                 "instructions": "BlockForge makes Minecraft builds. Call get_build_guide before writing a script, "
-                                "then create_build. Builds appear in the user's BlockForge app. app_open opens the "
+                                "then build step by step (start_build, build_step, view, check, save_build) or write a whole script with "
+                                "create_build. Builds appear in the user's BlockForge app. app_open opens the "
                                 "app (and can show a build), app_close closes it, app_status says what it's doing."}
     if method == "ping":
         return {}
@@ -355,8 +455,8 @@ def handle(msg):
     if method == "tools/call":
         p = msg.get("params") or {}
         try:
-            text = call(p.get("name"), p.get("arguments") or {})
-            return {"content": [{"type": "text", "text": text}]}
+            res = call(p.get("name"), p.get("arguments") or {})
+            return {"content": res if isinstance(res, list) else [{"type": "text", "text": res}]}
         except KeyError as e:
             return {"content": [{"type": "text", "text": f"Not found: {e}"}], "isError": True}
         except ToolError as e:
