@@ -38,7 +38,7 @@ def _version(exe):
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         m = re.search(r"(\d+)\.(\d+)\.(\d+)", r.stdout.decode("utf-8", "replace"))
         return tuple(map(int, m.groups())) if m else (0,)
-    except Exception:                                # noqa: BLE001
+    except Exception:                                # noqa: BLE001 - harmless: unknown version just means "old"
         return (0,)
 
 
@@ -762,4 +762,4 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
             try:
                 os.remove(image_path)
             except OSError:
-                pass
+                pass                                     # temp reference image already gone: harmless

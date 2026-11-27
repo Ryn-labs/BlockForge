@@ -33,7 +33,7 @@ def app_state():
         try:
             ready = bool(APP["js"]("!!window.bfOpen"))
             cur = APP["js"]("window.bfCurrent ? window.bfCurrent() : null") if ready else None
-        except Exception:                            # noqa: BLE001
+        except Exception:                            # noqa: BLE001 - harmless: window script not ready yet, status shows not ready
             pass
     return {"version": VERSION, "window": bool(APP), "ready": ready, "busy": len(busy_jobs()), "current": cur,
             "builds": len(store.list_builds())}

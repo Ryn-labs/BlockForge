@@ -28,7 +28,7 @@ def is_blockforge():
     try:
         with urllib.request.urlopen(URL + "/api/builds", timeout=2) as r:
             return r.status == 200
-    except Exception:                                # noqa: BLE001
+    except Exception:                                # noqa: BLE001 - harmless: no answer means BlockForge is not running
         return False
 
 
@@ -81,7 +81,7 @@ def focus_running():
         req = urllib.request.Request(URL + "/api/app/show", data=b"{}", headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=5) as r:
             return r.status == 200
-    except Exception:                                # noqa: BLE001
+    except Exception:                                # noqa: BLE001 - harmless: nothing answers means "no other instance"
         return False
 
 
@@ -90,14 +90,14 @@ def window_hooks(window):
     def show():
         try:
             window.restore()
-        except Exception:                            # noqa: BLE001
+        except Exception:                            # noqa: BLE001 - harmless UI nicety (window may not be minimised)
             pass
         window.show()
         try:                                         # Windows won't let a background app steal focus; a brief on-top does it
             window.on_top = True
             time.sleep(0.3)
             window.on_top = False
-        except Exception:                            # noqa: BLE001
+        except Exception:                            # noqa: BLE001 - harmless UI nicety (focus trick not supported)
             pass
 
     return {"show": show, "quit": window.destroy, "js": window.evaluate_js}
@@ -136,7 +136,7 @@ def run_gui():
     try:                                             # window closed: don't leave the hidden test server running
         from blockforge import testlab
         testlab.stop()
-    except Exception:                                # noqa: BLE001
+    except Exception:                                # noqa: BLE001 - harmless: app is closing, best-effort shutdown of the test server
         pass
 
 

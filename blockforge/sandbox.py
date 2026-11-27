@@ -64,7 +64,7 @@ def run(code, timeout=240, placement_opts=None, base=None):
             try:
                 os.remove(base_file)
             except OSError:
-                pass
+                pass                                     # temp file already gone or locked: harmless, the OS cleans temp
     out = proc.stdout.decode("utf-8", "replace")
     if proc.returncode != 0 or not out.startswith("{"):
         err = proc.stderr.decode("utf-8", "replace").strip() or out.strip() or "script crashed"
@@ -91,6 +91,7 @@ def run(code, timeout=240, placement_opts=None, base=None):
             meta["redstone_warnings"] = only_near_changes(meta["redstone_warnings"], meta)
     except Exception as e:                               # noqa: BLE001 - never lose a build over the checker
         meta["fixes"] = []
+        print(f"blockforge sandbox: placement check failed: {type(e).__name__}: {e}", file=sys.stderr)
         meta.setdefault("warnings", []).append(f"placement check failed: {e}")
     if not blocks:
         raise ScriptError("The script ran but placed no blocks.")

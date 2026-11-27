@@ -5,6 +5,7 @@ becomes a wall torch...) and returns what's left as problems for the AI to fix. 
 pass: whatever still couldn't exist (it would pop off or fall the moment the world updates) is replaced or removed,
 and listed."""
 import re
+import sys
 from collections import Counter
 
 from . import mods as modlib
@@ -418,6 +419,13 @@ def fix_states(blocks):
     return c.fixed_list()
 
 
+def _checker_error(c, what, e):
+    """A checker step crashed: the build is kept, but the error is printed and returned in the problems."""
+    msg = f"The placement {what} crashed ({type(e).__name__}: {e}), so some blocks were not checked."
+    print("blockforge placement: " + msg, file=sys.stderr)
+    c.problems.append(msg)
+
+
 def process(blocks, final=False, version=None, pack="auto", only=None, check_ids=True):
     """Fix and check `blocks` ({(x,y,z): state}) in place. Returns {'fixed': [...], 'problems': [...]}.
     pack: a modpack index, None for vanilla only, or "auto" for the pack selected in Settings.
@@ -432,12 +440,13 @@ def process(blocks, final=False, version=None, pack="auto", only=None, check_ids
     try:
         if check_ids:
             _check_ids(c, final, version)
-    except Exception:                                      # noqa: BLE001 - never lose a build over the checker
-        pass
+    except Exception as e:                                 # noqa: BLE001 - never lose a build over the checker, but say so
+        _checker_error(c, "block id check", e)
     try:
         _check_states(c)
-    except Exception:                                      # noqa: BLE001
-        pass
+    except Exception as e:                                 # noqa: BLE001
+        _checker_error(c, "block state check", e)
+    crashed = []
     for p in sorted(blocks if only is None else [q for q in blocks if q in only],
                     key=lambda q: (q[1], q[0], q[2])):          # bottom-up so supports are settled first
         st = blocks.get(p)
@@ -445,8 +454,12 @@ def process(blocks, final=False, version=None, pack="auto", only=None, check_ids
             continue
         try:
             _check_block(c, p, st, final)
-        except Exception:                                  # noqa: BLE001
+        except Exception as e:                             # noqa: BLE001 - keep checking the other blocks, but report it
+            crashed.append((p, _name(st), e))
             continue
+    if crashed:
+        p0, n0, e0 = crashed[0]
+        _checker_error(c, f"check of {len(crashed)} block(s), first {n0} at {p0}", e0)
     if c.fixes:
         rs._fix_connections(blocks)                        # new fences/etc. need their connections worked out
         rs._fix_dust(blocks)

@@ -24,3 +24,14 @@ class FinalRemovalReport(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CheckerCrashIsReported(unittest.TestCase):
+    def test_crash_in_block_check_reaches_problems(self):
+        real = placement._check_block
+        placement._check_block = lambda *a, **k: 1 / 0
+        try:
+            rep = placement.process({(0, 0, 0): "minecraft:stone"}, pack=None, version="1.21.1", check_ids=False)
+        finally:
+            placement._check_block = real
+        self.assertTrue(any("crashed" in p and "ZeroDivisionError" in p for p in rep["problems"]))
