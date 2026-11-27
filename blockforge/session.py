@@ -280,12 +280,6 @@ def _check_lines(blocks, limit, ground=None):
 def check_text(s):
     if not s.blocks:
         return "The build is empty, nothing to check."
-<<<<<<< HEAD
-    found = checks.run(s.blocks, ground=s.ground())
-    if not found:
-        return "No problems found: no floating parts, buried or jumpy paths, wrong stairs or blocked doors."
-    return "\n".join(["Checks: " + checks.summary(found) + "."] + checks.advice(found) + ["- " + f["text"] for f in found])
-=======
     a = selfimprove.assess(s.blocks, s.ground(), s.terrain_blocks, s.size_hint)
     if not a["found"]:
         ok = "No problems found: no floating parts, buried or jumpy paths, wrong stairs or blocked doors."
@@ -295,8 +289,7 @@ def check_text(s):
                     + "\n".join(selfimprove.quality_lines(a)))
         return ok
     return ("NOT DONE YET - fix these, then call check again (repeat until it says no problems):\n"
-            "Checks: " + checks.summary(a["found"]) + ".\n" + "\n".join("- " + f["text"] for f in a["found"]))
->>>>>>> 17213e7 (One-shot and session tools say NOT DONE YET with the findings until the build is clean)
+            + "\n".join(["Checks: " + checks.summary(a["found"]) + "."] + checks.advice(a["found"]) + ["- " + f["text"] for f in a["found"]]))
 
 
 def ground_text(s, x1=None, z1=None, x2=None, z2=None, step=None):
