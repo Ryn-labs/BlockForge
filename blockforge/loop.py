@@ -131,6 +131,38 @@ def newest_build(since, exclude=()):
     return best
 
 
+def _look(sid):
+    """Checks + quality of a build session now (None when it can't be read)."""
+    from . import selfimprove, session as _ss
+    try:
+        s = _ss.load(sid)
+        return selfimprove.assess(s.blocks, s.ground(), s.terrain_blocks, s.size_hint)
+    except Exception:
+        return None
+
+
+def _improve(sid, request, turn, usage, log):
+    """After the AI ended: up to LOOP_ROUNDS more turns while the session has check problems or low quality."""
+    from . import selfimprove
+    from .engine import EngineError
+    n = selfimprove.LOOP_ROUNDS
+    for k in range(1, n + 1):
+        a = _look(sid)
+        if a is None or a["ok"]:
+            return
+        log(selfimprove.status_line(a, k, n))
+        msg = (f"Session id: {sid}\nThe build session already exists and holds the build for this request (shortened): "
+               f"{request.strip()[:1200]}\n\n" + selfimprove.improve_message(a, k, n)
+               + f"\n\nPass session=\"{sid}\" to every tool and do not call start_build. Fix, check until it says no problems, "
+               "call review, then call save_build.")
+        try:
+            res = turn(msg, first=False)
+        except EngineError as e:
+            log("Could not keep improving: " + str(e)[:160])
+            return
+        usage.add_claude_code(res, 0)
+
+
 def run(text, model, usage, exe, log=print, image_path=None, terrain=None, title=None):
     """Run the loop. Returns the id of the build that save_build stored. Raises engine.EngineError.
     terrain = a build id or a .schem/.litematic path: the session is started on that land before the AI begins."""
@@ -158,61 +190,69 @@ def run(text, model, usage, exe, log=print, image_path=None, terrain=None, title
                "--system-prompt", system_prompt(text), "--mcp-config", mcp_config(work), "--strict-mcp-config",
                "--tools", "Read", "--allowedTools", allowed, "--disallowedTools", ",".join(PREFIX + t for t in ("create_build", "update_build", "app_open", "app_close", "export_build")), "--max-turns", str(MAX_TURNS), "--no-session-persistence"]
         log("Asking Claude to build it step by step (via Claude Code)...")
-        proc = _spawn(cmd, work, dict(os.environ))
-        proc.stdin.write(user_text(text, pre.id if pre else None).encode("utf-8"))
-        proc.stdin.close()
-        timer = threading.Timer(TIMEOUT, proc.kill)
-        timer.start()
-        res, uses, saved_id, sid = None, {}, None, (pre.id if pre else None)
-        try:
-            for raw in proc.stdout:
-                try:
-                    ev = json.loads(raw)
-                except ValueError:
-                    continue
-                kind = ev.get("type")
-                if not isinstance(ev, dict): continue
-                msg = ev.get("message")
-                content = msg.get("content") if isinstance(msg, dict) else None
-                if not isinstance(content, list): content = None
-                if kind == "assistant":
-                    for c in [x for x in (content or []) if isinstance(x, dict)]:
-                        if c.get("type") == "tool_use":
-                            uses[c.get("id")] = c.get("name", "")
-                            line = _describe(c.get("name", ""), c.get("input") or {})
-                            if line:
-                                log(line)
-                elif kind == "user" and isinstance(content, list):
-                    for c in content:
-                        if c.get("type") != "tool_result":
-                            continue
-                        name = uses.get(c.get("tool_use_id"), "").replace(PREFIX, "")
-                        out = _text_of(c.get("content"))
-                        if name == "start_build" and not c.get("is_error"):
-                            m0 = re.search(r"session (\S+) started", out)
-                            sid = m0.group(1) if m0 else sid
-                        if c.get("is_error") and name == "save_build":
-                            log("Save refused: " + out[:160].replace(chr(10), " "))
-                        if name == "check":
-                            m = re.search(r"(\d+) problem", out)
-                            log("Checks: " + (f"{m.group(1)} problems" if m else "no problems"))
-                        elif name == "save_build" and not c.get("is_error"):
-                            m = re.search(r"\(id ([\w-]+)\)", out)
-                            if m:
-                                saved_id = m.group(1)
-                        elif c.get("is_error") and name == "build_step":
-                            log("A step failed and changed nothing: " + out[:120].replace("\n", " "))
-                elif kind == "result":
-                    res = ev
-            proc.wait()
-        finally:
-            timer.cancel()
-        if res is None:
-            proc.err_file.seek(0)
-            err = proc.err_file.read().decode("utf-8", "replace").strip()
-            if "login" in err.lower() or "auth" in err.lower():
-                raise EngineError("Claude Code isn't signed in. Open Settings and click 'Sign in to Claude'.")
-            raise EngineError("Claude Code stopped without an answer. " + err[-600:])
+        saved_id, sid = None, (pre.id if pre else None)
+
+        def turn(message, first=True):
+            """One claude -p run on the session tools; returns its result event (None when it stopped without one)."""
+            nonlocal saved_id, sid
+            proc = _spawn(cmd, work, dict(os.environ))
+            proc.stdin.write(message.encode("utf-8"))
+            proc.stdin.close()
+            timer = threading.Timer(TIMEOUT, proc.kill)
+            timer.start()
+            res, uses = None, {}
+            try:
+                for raw in proc.stdout:
+                    try:
+                        ev = json.loads(raw)
+                    except ValueError:
+                        continue
+                    kind = ev.get("type")
+                    if not isinstance(ev, dict): continue
+                    msg = ev.get("message")
+                    content = msg.get("content") if isinstance(msg, dict) else None
+                    if not isinstance(content, list): content = None
+                    if kind == "assistant":
+                        for c in [x for x in (content or []) if isinstance(x, dict)]:
+                            if c.get("type") == "tool_use":
+                                uses[c.get("id")] = c.get("name", "")
+                                line = _describe(c.get("name", ""), c.get("input") or {})
+                                if line:
+                                    log(line)
+                    elif kind == "user" and isinstance(content, list):
+                        for c in content:
+                            if c.get("type") != "tool_result":
+                                continue
+                            name = uses.get(c.get("tool_use_id"), "").replace(PREFIX, "")
+                            out = _text_of(c.get("content"))
+                            if name == "start_build" and not c.get("is_error") and first:
+                                m0 = re.search(r"session (\S+) started", out)
+                                sid = m0.group(1) if m0 else sid
+                            if c.get("is_error") and name == "save_build":
+                                log("Save refused: " + out[:160].replace(chr(10), " "))
+                            if name == "check":
+                                m = re.search(r"(\d+) problem", out)
+                                log("Checks: " + (f"{m.group(1)} problems" if m else "no problems"))
+                            elif name == "save_build" and not c.get("is_error"):
+                                m = re.search(r"\(id ([\w-]+)\)", out)
+                                if m:
+                                    saved_id = m.group(1)
+                            elif c.get("is_error") and name == "build_step":
+                                log("A step failed and changed nothing: " + out[:120].replace("\n", " "))
+                    elif kind == "result":
+                        res = ev
+                proc.wait()
+            finally:
+                timer.cancel()
+            if res is None:
+                proc.err_file.seek(0)
+                err = proc.err_file.read().decode("utf-8", "replace").strip()
+                if "login" in err.lower() or "auth" in err.lower():
+                    raise EngineError("Claude Code isn't signed in. Open Settings and click 'Sign in to Claude'.")
+                raise EngineError("Claude Code stopped without an answer. " + err[-600:])
+            return res
+
+        res = turn(user_text(text, pre.id if pre else None))
         usage.add_claude_code(res, 0)
         if res.get("is_error") and not saved_id:
             msg = str(res.get("result") or res.get("error") or res)
@@ -221,6 +261,14 @@ def run(text, model, usage, exe, log=print, image_path=None, terrain=None, title
             if "limit" in msg.lower():
                 raise EngineError("You've hit your Claude usage limit for now: " + msg[:300])
             raise EngineError("Claude returned an error: " + msg[:800])
+        if sid:                                                         # check -> fix -> check until clean, before anything is saved
+            first_saved = saved_id
+            _improve(sid, text, turn, usage, log)
+            if first_saved and saved_id != first_saved:                 # the improved build replaces the flawed one saved earlier in this run
+                try:
+                    store.delete_build(first_saved)
+                except Exception:
+                    pass
         if not saved_id:
             b = newest_build(started, before)
             saved_id = b and b["id"]
