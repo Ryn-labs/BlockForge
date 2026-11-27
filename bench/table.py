@@ -4,7 +4,7 @@ python bench/table.py <version> [<baseline version>]   -> TABLE_OK <version> mis
 import os, sys, json, glob
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KEYS = ("floating", "removed", "overwritten", "buried_path", "jump_steps", "corner_turns", "blocked_doors", "wrong_facing", "size_off",
-        "script_errors", "fix_rounds")
+        "terrain_floating", "terrain_buried", "script_errors", "fix_rounds")
 def rows(v):
     d = {}
     for f in sorted(glob.glob(os.path.join(ROOT, "bench", "out", v, "results*.jsonl"))):

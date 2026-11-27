@@ -9,7 +9,9 @@ Works on a build folder in the (temp) data dir: blocks.json, meta.json, code.py.
   blocked_doors  doors with a solid block right in front of or behind them
   wrong_facing   walkable stairs whose high side points downhill
   size_off       how far the largest side is outside the asked size range (blocks)
-python bench/score.py <build dir> [target_lo target_hi]   -> one JSON line"""
+  terrain_floating / terrain_buried   (builds on a terrain) floating groups with ground under them, and path blocks / steps with
+                 untouched terrain on top of them. They are counted INSTEAD of floating / buried_path, never twice.
+python bench/score.py <build dir> [target_lo target_hi] [--terrain file.schem]   -> one JSON line"""
 import sys, os, json, collections, re
 
 FULLISH = ("planks", "stone", "bricks", "log", "wood", "cobblestone", "dirt", "grass_block", "sand", "gravel", "terracotta", "concrete",
@@ -64,11 +66,30 @@ def feet_dir(s, y, dv, end):
     return feet(s, y)
 
 
-def score(d, lo=None, hi=None):
+def load_terrain(path):
+    """{(x, y, z): name} of a .schem/.litematic terrain file, minecraft: stripped like load()."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    from blockforge import exporters
+    with open(path, "rb") as f:
+        return {p: s.replace("minecraft:", "") for p, s in exporters.import_file(f.read()).items()}
+
+
+def score(d, lo=None, hi=None, terrain=None):
+    """terrain = {(x, y, z): name} the build was started on (load_terrain), or None."""
     size, C = load(d)
     meta = json.load(open(os.path.join(d, "meta.json")))
     g = lambda x, y, z: C.get((x, y, z))
     r = collections.Counter()
+    T = terrain or {}
+
+    def land(p):
+        """An untouched natural ground block of the terrain (not a tree)."""
+        s = T.get(p)
+        return s is not None and C.get(p) == s and solid(s) and not nm(s).endswith(("log", "wood"))
+    land_cols = collections.defaultdict(list)
+    for p in T:
+        if land(p):
+            land_cols[(p[0], p[2])].append(p[1])
     # floating: solid groups (6-neighbour, all non-air blocks) not touching y 0
     seen = set()
     for p in C:
@@ -76,11 +97,13 @@ def score(d, lo=None, hi=None):
         comp = [p]; seen.add(p); k = 0; ground = False
         while k < len(comp):
             x, y, z = comp[k]; k += 1
-            if y == 0: ground = True
+            if y == 0 or (T and land((x, y, z))): ground = True
             for a, b, c in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)):
                 q = (x + a, y + b, z + c)
                 if q in C and q not in seen: seen.add(q); comp.append(q)
-        if not ground: r["floating"] += len(comp)
+        if not ground:
+            over = T and any(any(ly < q[1] for ly in land_cols.get((q[0], q[2]), ())) for q in comp)
+            r["terrain_floating" if over else "floating"] += len(comp)
     # removed by the final pass
     for f in meta.get("fixes") or []:
         if f.startswith("Removed") and any(t in f for t in ("lantern", "torch", "sign", "plant", "door", "candle", "carpet", "pot")):
@@ -103,12 +126,13 @@ def score(d, lo=None, hi=None):
                         if nm(g(x + a, y, z + c)) in PATHMAT and nm(g(x - a, y, z - c)) in PATHMAT and any(
                                 (x + a * k * sg, z + c * k * sg, y) in stand and nm(g(x + a * k * sg, y, z + c * k * sg)) in PATHMAT
                                 for k in range(1, 9) for sg in (1, -1)):
-                            r["buried_path"] += 1; break
+                            r["terrain_buried" if land((x, y + 1, z)) else "buried_path"] += 1; break
                 continue                                                    # a covered wall/floor block is not a path
             if n in PATHMAT and not any(nm(g(x + a, y + h, z + c)).endswith(("_stairs", "_slab")) for a, c in DV.values() for h in (-1, 0, 1)):
                 continue                                                    # an open path material counts only next to steps (a path, not a floor)
             walk[(x, y, z)] = s
-            if n not in PATHMAT and (solid(g(x, y + 1, z)) or solid(g(x, y + 2, z))): r["buried_path"] += 1   # v2: buried = a step (stair/slab) with a solid block over it
+            if n not in PATHMAT and (solid(g(x, y + 1, z)) or solid(g(x, y + 2, z))):
+                r["terrain_buried" if (land((x, y + 1, z)) or land((x, y + 2, z))) else "buried_path"] += 1   # v2: buried = a step (stair/slab) with a solid block over it
     pairs = set()
     for (x, y, z), s in walk.items():
         if (x, z, y) not in stand: continue
@@ -140,7 +164,10 @@ def score(d, lo=None, hi=None):
             if dv and (solid(g(x + dv[0], y, z + dv[1])) or solid(g(x - dv[0], y, z - dv[1]))): r["blocked_doors"] += 1
     if lo:
         big = max(size[0], size[2]); r["size_off"] = max(0, lo - big, big - hi)
-    return {k: r.get(k, 0) for k in ("floating", "removed", "buried_path", "jump_steps", "corner_turns", "blocked_doors", "wrong_facing", "size_off")}
+    keys = ["floating", "removed", "buried_path", "jump_steps", "corner_turns", "blocked_doors", "wrong_facing", "size_off"]
+    if T:
+        keys += ["terrain_floating", "terrain_buried"]
+    return {k: r.get(k, 0) for k in keys}
 
 
 def overwritten(code):
@@ -169,8 +196,11 @@ def overwritten(code):
 
 
 if __name__ == "__main__":
-    d = sys.argv[1]; lo = int(sys.argv[2]) if len(sys.argv) > 2 else None; hi = int(sys.argv[3]) if len(sys.argv) > 3 else None
-    out = score(d, lo, hi)
+    argv = sys.argv[1:]
+    terr = load_terrain(argv.pop(argv.index("--terrain") + 1)) if "--terrain" in argv else None
+    if "--terrain" in argv: argv.remove("--terrain")
+    d = argv[0]; lo = int(argv[1]) if len(argv) > 1 else None; hi = int(argv[2]) if len(argv) > 2 else None
+    out = score(d, lo, hi, terr)
     cp = os.path.join(d, "code.py")
     out["overwritten"] = overwritten(open(cp, encoding="utf-8").read()) if os.path.exists(cp) else -1
     print(json.dumps(out))
