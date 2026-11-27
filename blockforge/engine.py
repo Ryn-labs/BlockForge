@@ -21,6 +21,7 @@ MODELS = {
     "claude-haiku-5-5": "Quick - Claude Haiku 5.5 (fastest)",
 }
 MAX_FIX_ATTEMPTS = 2
+MAX_CHECK_FIXES = 1
 MAX_TEST_FIXES = 3          # times the AI may redesign a machine that failed its in-game test
 
 
@@ -671,6 +672,22 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                     problems = meta.get("warnings") or []
             except EngineError as e:
                 log(f"Kept the first version ({e}).")
+        from . import checks
+        found = checks.run(blocks, size)
+        if found and MAX_CHECK_FIXES > 0:
+            log("Checks: " + checks.summary(found))
+            log(f"Asking {who} to fix the walking, door and floating problems...")
+            try:
+                _, code2, _ = extract(convo.follow_up(prompts.checks_fix_message(found), code))
+                code2, blocks2, meta2 = build(code2)
+                found2 = checks.run(blocks2, size)
+                if checks.total(found2) < checks.total(found):
+                    code, blocks, meta, found = code2, blocks2, meta2, found2
+                    log("Checks after the fix: " + (checks.summary(found) if found else "no problems"))
+                else:
+                    log("Kept the first version (the second didn't have fewer check problems).")
+            except EngineError as e:
+                log(f"Kept the first version ({e}).")
         final = placement.process(blocks, final=True, **popts, only=sandbox.scope(meta))   # last resort: nothing impossible is left
         sandbox.restore_modules(blocks, meta)
         if base:
@@ -731,6 +748,10 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                     log(f"Kept the earlier version ({e}).")
                     break
 
+        found = checks.run(blocks, size)                  # final state (the test lab may have changed the build)
+        checks_meta = {"total": checks.total(found), "by_check": checks.counts(found)}
+        if found:
+            log("Checks: " + checks.summary(found))
         title = meta.get("name") or title or prompt[:60] or "Build"
         rec = usage.record()
         cost = f" (about ${rec['cost_usd']:.2f})" if rec["cost_usd"] else ""
@@ -748,7 +769,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                                  researched=bool(research), redstone=bool(redstone), warnings=problems, fixes=fixes,
                                  data_version=mods.data_version(version), modpack=(pack or {}).get("name"),
                                  tiles=sandbox.tiles_of(meta), modules=meta.get("modules"), base=base_id,
-                                 entities=meta.get("entities"), tested=tested)
+                                 entities=meta.get("entities"), tested=tested, checks=checks_meta)
         status = "done"
         learn.log_generation(saved, fixes, list(meta.get("redstone_warnings") or []))
         return saved

@@ -129,7 +129,7 @@ def slug(text):
 
 def save_build(blocks, title, prompt="", code=None, source="app", parent=None, model=None,
                description="", image_bytes=None, image_ext=None, usage=None, references=None, researched=False,
-               redstone=False, warnings=None, fixes=None, data_version=None, modpack=None, tiles=None, modules=None, base=None, entities=None, tested=None):
+               redstone=False, warnings=None, fixes=None, data_version=None, modpack=None, tiles=None, modules=None, base=None, entities=None, tested=None, checks=None):
     bid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
     d = _dir(bid)
     os.makedirs(d)
@@ -147,7 +147,7 @@ def save_build(blocks, title, prompt="", code=None, source="app", parent=None, m
         "materials": sorted(counts.items(), key=lambda kv: -kv[1]),
         "has_image": bool(image_bytes),
         "usage": usage, "references": references or [], "researched": researched,
-        "redstone": redstone, "warnings": warnings or [], "fixes": fixes or [], "modpack": modpack, "modules": modules or [], "base": base, "tested": tested, "mobs": len(entities or []),
+        "redstone": redstone, "warnings": warnings or [], "fixes": fixes or [], "modpack": modpack, "modules": modules or [], "base": base, "tested": tested, "checks": checks, "mobs": len(entities or []),
     }
     with open(os.path.join(d, "blocks.json"), "w", encoding="utf-8") as f:
         json.dump(data, f, separators=(",", ":"))
