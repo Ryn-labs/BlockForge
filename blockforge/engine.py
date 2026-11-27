@@ -766,6 +766,9 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
         sandbox.restore_modules(blocks, meta)
         if base:
             sandbox.protect_base(blocks, meta, base[0])
+        if not parent_id and not base:                     # the saved size, checked once more after the check-fix round
+            off_f, issue_f = prompts.size_error(size, prompts.dims_of(blocks))
+            log("Final size check: " + (issue_f or "the size is what was asked for ({} x {} x {}).".format(*prompts.dims_of(blocks))))
         fixes = list(meta.get("fixes") or []) + final["fixed"]
         for f in final["fixed"]:
             log("Auto-fixed: " + f)

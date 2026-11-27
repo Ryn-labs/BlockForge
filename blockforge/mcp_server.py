@@ -401,6 +401,11 @@ def _session_call(name, args):
                 raise ToolError("Not saved yet: check still finds problems. Fix them with build_step (look with view, test paths with walk_test), "
                                 "then call save_build again. If one can't be fixed or is intended, call save_build with accept_problems "
                                 "explaining why.\n" + session.check_text(s))
+            size_msg = prompts.size_problem(s.size_hint, prompts.dims_of(s.blocks))
+            if size_msg and not (args.get("accept_problems") or "").strip():   # same rule for the size that was asked for
+                raise ToolError("Not saved yet: the size is off. " + size_msg + " Resize the build with build_step (scale the whole design, "
+                                "keep the detail), then call save_build again. If this size is intended, call save_build with "
+                                "accept_problems explaining why.")
             m, link = session.save(s, args.get("title"))
             return _summary(m) + link
     except session.SessionError as e:
