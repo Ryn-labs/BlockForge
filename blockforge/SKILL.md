@@ -91,6 +91,11 @@ Every step sees the same coordinates, so write down key numbers (floor level, wa
 - copy(...) and mirror(...) repeat a part. pick(a, b, weights=...) and noise(x, z) add variety.
 - Only math, random, itertools, functools, collections, colorsys can be imported. No file or network access.
 
+## The loop: check -> fix -> check
+- Never hand over a build with problems. After every part: check, fix what it lists, check again, until it says no problems and the quality is 60 or more.
+- A result that starts with "NOT DONE YET" means exactly that: fix the listed things (change nothing else) with build_step or update_build, then check again.
+- Only a clean result ("Done" or "No problems found") may be shown to the user.
+
 ## Walkable paths (what check and walk_test enforce)
 - A path is walked at feet height: full block = +1, bottom stair or slab = +0.5. A jump over 0.6 stops people.
 - To go UP one block use a bottom stair FACING UPHILL (its low side is where you step on, its high side leads up).

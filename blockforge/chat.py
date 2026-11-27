@@ -12,7 +12,7 @@ import threading
 import time
 import uuid
 
-from . import checks, exporters, loop, session, share, store
+from . import checks, exporters, loop, selfimprove, session, share, store
 
 DIR = os.path.join(store.DATA, "chats")
 SCOPE_PAD = 2                   # a scoped change may grow this many blocks past the part's box (a steeper roof needs room)
@@ -229,6 +229,9 @@ CHAT_RULES = """
   "done" lists the plan part ids that are finished now.
 - When the message says "Scope", change ONLY blocks inside that box and nothing else, keep everything outside exactly as it is. Say what you changed.
 - Never write the blocks of a questions, plan or status block anywhere else. Do not paste build scripts in your reply.
+- Never end a turn with problems you did not try to fix: after each part call check, fix what it lists, check again.
+- A message that starts with "Automatic improvement" comes from the server, not the user: fix exactly the listed problems,
+  change nothing else, call check, and answer in one short sentence (no questions, plan or status block).
 """
 
 
@@ -250,8 +253,8 @@ def _plan_text(plan):
     return "\n".join(f"{p['id']}: {p['name']} [{p.get('status', 'pending')}]" for p in plan)
 
 
-def user_message(c, text, part=None):
-    hist = [m for m in c["messages"][:-1] if m.get("text")][-HISTORY_MESSAGES:]
+def user_message(c, text, part=None, speaker="The user now says"):
+    hist = [m for m in c["messages"][:-1] if m.get("text") and not m.get("status")][-HISTORY_MESSAGES:]
     lines = [("User" if m["role"] == "user" else "You") + ": " + m["text"][:600].replace("\n", " ") for m in hist]
     out = f"Session id: {c['session']}\n"
     if c.get("terrain"):
@@ -266,7 +269,7 @@ def user_message(c, text, part=None):
             out += (f" Only change blocks with x {box[0]}..{box[3]}, y {box[1]}..{box[4]}, z {box[2]}..{box[5]} "
                     "(session coordinates). Everything outside stays exactly as it is.")
         out += "\n"
-    return out + "\nThe user now says:\n" + text.strip()
+    return out + f"\n{speaker}:\n" + text.strip()
 
 
 def _run_claude(system, user, sid, model, usage, exe, log, cid=None):
@@ -433,13 +436,96 @@ def answer(cid, question_id, choice):
 
 
 def run_turn(cid, text, part_id=None, log=print, add_user=True):
-    """One AI turn. Returns {"chat_id", "version" (or None if no blocks changed)}."""
-    from . import engine
-    from .engine import EngineError
+    """One user request: an AI turn, then (when the blocks it changed have problems or low quality) up to CHAT_ROUNDS
+    improvement turns on its own. Returns {"chat_id", "version" (the first turn's, or None if no blocks changed), "rounds"}."""
     with _GUARD:
         if cid in _BUSY:
             raise ChatError("It is still working on your last message.")
         _BUSY.add(cid)
+    try:
+        res = _one_turn(cid, text, part_id, log, add_user)
+        res["rounds"] = 0
+        if res["version"] and not res.get("paused"):
+            res["rounds"] = _auto_improve(cid, log)
+        return res
+    finally:
+        _BUSY.discard(cid)
+        _PAUSED.discard(cid)
+
+
+def improve(cid, log=print):
+    """The "Keep improving" button: up to CHAT_ROUNDS more improvement rounds, quality included, without a user message."""
+    with _GUARD:
+        if cid in _BUSY:
+            raise ChatError("It is still working on your last message.")
+        _BUSY.add(cid)
+    try:
+        return {"chat_id": cid, "version": None, "rounds": _auto_improve(cid, log, force=True)}
+    finally:
+        _BUSY.discard(cid)
+        _PAUSED.discard(cid)
+
+
+def _look(cid, force=False):
+    """Checks + quality of the chat's session now. Quality counts once the plan is finished (a half-built house has no roof yet)."""
+    c = load(cid)
+    s = session.load(c["session"])
+    finished = force or all(p.get("status") == "done" for p in c["plan"])
+    return selfimprove.assess(s.blocks, s.ground(), s.terrain_blocks, s.size_hint, with_quality=finished)
+
+
+def _auto_improve(cid, log, rounds=selfimprove.CHAT_ROUNDS, force=False):
+    """Improvement rounds until 0 problems and quality >= QUALITY_MIN, or `rounds` are used. Returns the rounds run."""
+    first = last = _look(cid, force)
+    if first["ok"]:
+        return 0
+    used, paused, last_version = 0, False, None
+    for k in range(1, rounds + 1):
+        if cid in _PAUSED:
+            _PAUSED.discard(cid)
+            paused = True
+            break
+        line = selfimprove.status_line(last, k, rounds)
+        with _lock(cid):
+            c = load(cid)
+            _msg(c, "system", line, status=True, round=k)
+            save_state(c)
+        log(line)
+        try:
+            r = _one_turn(cid, selfimprove.improve_message(last, k, rounds), None, log, False, improve=line)
+        except Exception:                                   # the error is already in the chat; keep the hand-back below
+            break
+        used = k
+        last_version = r["version"] or last_version
+        if r.get("paused"):
+            paused = True
+            break
+        last = _look(cid, force)
+        if last["ok"]:
+            break
+    text, done = selfimprove.hand_back(first, last, used, rounds)
+    if paused:
+        text = "Paused while improving. " + text
+    with _lock(cid):
+        c = load(cid)
+        extra = {"improved": {"before": {"problems": first["problems"], "quality": first["qtotal"]},
+                              "after": {"problems": last["problems"], "quality": last["qtotal"]}, "rounds": used}}
+        if last_version:
+            v = _version(c, last_version)
+            extra["change"] = {k: v[k] for k in ("added", "removed", "changed", "stayed") if k in v}
+            extra["change"].update({"version": v["id"], "part": "Improvements", "kept": None})
+        if not done:
+            extra["keep_improving"] = True
+        _msg(c, "ai", text, **extra)
+        save_state(c)
+    log("Improved: " + text)
+    return used
+
+
+def _one_turn(cid, text, part_id, log, add_user, improve=None):
+    """One AI turn (the busy flag is held by the caller). improve = the status line of an automatic improvement round."""
+    from . import engine
+    from .engine import EngineError
     try:
         with _lock(cid):
             c = load(cid)
@@ -448,7 +534,9 @@ def run_turn(cid, text, part_id=None, log=print, add_user=True):
                 raise ChatError("That part is not in the plan.")
             if add_user:
                 _msg(c, "user", text, **({"scope": {"part_id": part["id"], "name": part["name"]}} if part else {}))
-            if not part:
+            if improve:
+                pass                                        # the plan is not touched by an improvement round
+            elif not part:
                 _set_status(c, next((p for p in c["plan"] if p.get("status") != "done"), None))
             else:
                 _set_status(c)
@@ -462,12 +550,15 @@ def run_turn(cid, text, part_id=None, log=print, add_user=True):
             exe = engine.find_claude()
             if exe is None:
                 raise EngineError("Claude Code isn't installed, so the chat can't build yet.")
-            reply = _run_claude(system_prompt(text), user_message(c, text, part), c["session"], model, usage, exe, log, cid)
+            reply = _run_claude(system_prompt(text), user_message(c, text, part, "Automatic improvement message" if improve else "The user now says"),
+                                c["session"], model, usage, exe, log, cid)
         except Exception as e:
             if cid in _PAUSED:                              # Pause: keep what was built so far as a version
                 _PAUSED.discard(cid)
                 with _lock(cid):
-                    return _finish_turn(load(cid), before, "Paused. What was built so far is kept.", part, text, usage, log)
+                    res = _finish_turn(load(cid), before, "Paused. What was built so far is kept.", part, text, usage, log, improve)
+                    res["paused"] = True
+                    return res
             with _lock(cid):
                 c = load(cid)
                 _set_status(c)
@@ -476,12 +567,12 @@ def run_turn(cid, text, part_id=None, log=print, add_user=True):
             raise
         with _lock(cid):
             c = load(cid)
-            return _finish_turn(c, before, reply, part, text, usage, log)
+            return _finish_turn(c, before, reply, part, text, usage, log, improve)
     finally:
-        _BUSY.discard(cid)
+        pass
 
 
-def _finish_turn(c, before, reply, part, text, usage, log):
+def _finish_turn(c, before, reply, part, text, usage, log, improve=None):
     sid = c["session"]
     s = session.load(sid)
     after = s.blocks
@@ -505,6 +596,8 @@ def _finish_turn(c, before, reply, part, text, usage, log):
             reverted = len(outside)
     added, removed, changed, pos = diff_blocks(before, after)
     clean, questions, plan, status = parse_reply(reply)
+    if improve:                                          # an improvement round never changes the plan or asks questions
+        questions = plan = status = None
     if plan:
         old = {p["id"]: p for p in c["plan"]}
         c["plan"] = [{**p, **{k: old[p["id"]][k] for k in ("status", "bbox") if k in old.get(p["id"], {})}} for p in plan]
@@ -518,6 +611,8 @@ def _finish_turn(c, before, reply, part, text, usage, log):
         target = next(p for p in c["plan"] if p["id"] == part["id"])
         if pos:
             target["bbox"] = _union(target.get("bbox"), _bbox(pos))
+    elif improve:
+        pass
     else:
         marked = [p for p in c["plan"] if p["id"] in done_ids]
         if not marked and pos:                              # no status block: the first open part is the one it built
@@ -529,7 +624,7 @@ def _finish_turn(c, before, reply, part, text, usage, log):
             if len(marked) == 1:
                 target["bbox"] = _bbox(pos)
     if pos:
-        note = f"{part['name']}: {text.strip()[:50]}" if part else (target["name"] if target else text.strip()[:60])
+        note = improve or (f"{part['name']}: {text.strip()[:50]}" if part else (target["name"] if target else text.strip()[:60]))
         change = {"added": added, "removed": removed, "changed": changed, "stayed": len(before) - removed - changed}
         if reverted:
             change["kept_outside"] = reverted
@@ -545,7 +640,8 @@ def _finish_turn(c, before, reply, part, text, usage, log):
         extra["change"].update({"version": version["id"], "part": (part or {}).get("name") or version["note"], "kept": None})
     if not clean:
         clean = "Done." if version else "OK."
-    _msg(c, "ai", clean, **extra)
+    if not improve:                                      # the improvement rounds speak once, in the hand-back message
+        _msg(c, "ai", clean, **extra)
     save_state(c)
     log("Done: " + (f"{added} added, {removed} removed, {changed} changed." if version else "no blocks changed."))
     return {"chat_id": c["id"], "version": version and version["id"]}
@@ -554,10 +650,11 @@ def _finish_turn(c, before, reply, part, text, usage, log):
 def pause(cid):
     """Stops the running AI turn. Blocks it already placed stay (they become a version)."""
     proc = _PROCS.get(cid)
-    if cid not in _BUSY or proc is None:
+    if cid not in _BUSY:
         raise ChatError("It is not working on anything right now.")
-    _PAUSED.add(cid)
-    proc.kill()
+    _PAUSED.add(cid)                                     # between two AI turns (checking, improving) the flag stops the next round
+    if proc is not None:
+        proc.kill()
     return {"ok": True}
 
 

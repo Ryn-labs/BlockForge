@@ -20,7 +20,7 @@ class TerrainProc:
         self.stdout = self._play(script)
 
     def _play(self, script):
-        sid = re.search(r"Build session (\w+) is ALREADY started", self.stdin.getvalue().decode("utf-8")).group(1)
+        sid = re.search(r"(?:Build session |Session id: )(\w+)(?: is ALREADY started)?", self.stdin.getvalue().decode("utf-8")).group(1)
         n = 0
         for name, args in script:
             n += 1

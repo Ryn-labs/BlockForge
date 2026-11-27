@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import blockinfo, exporters, learn, lessons, mods, patterns, placement, prompts, quality, sandbox, session, share, store, testlab  # noqa: E402
+from blockforge import blockinfo, exporters, learn, lessons, mods, patterns, placement, prompts, quality, sandbox, selfimprove, session, share, store, testlab  # noqa: E402
 
 SERVER = {"name": "blockforge", "version": "1.1.0"}
 APP_URL = f"http://127.0.0.1:{os.environ.get('BLOCKFORGE_PORT', '8765')}"
@@ -535,7 +535,14 @@ def call(name, args):
                              tiles=sandbox.tiles_of(meta), modules=meta.get("modules"), base=base_id,
                              entities=meta.get("entities"), tested=tested)
         learn.log_generation(m, fixes, meta.get("redstone_warnings") or [])
-        return _summary(m) + lab_report + share.chat_text(m["id"])
+        try:                                                  # look at it like a reviewer would: checks + quality
+            a = selfimprove.assess(blocks)
+        except Exception:                                     # a broken look must never lose the saved build
+            a = None
+        bad = a and selfimprove.not_done_text(a, "build", f"update_build with build_id {m['id']} and ONLY the changes")
+        if bad:
+            return bad + "\n\n" + _summary(m) + lab_report
+        return "Done. " + _summary(m) + lab_report + share.chat_text(m["id"])
     if name == "list_builds":
         q = (args.get("query") or "").lower()
         items = [b for b in store.list_builds() if not q or q in (b["title"] + " " + b.get("prompt", "")).lower()]
