@@ -65,7 +65,9 @@ class GenerateOnTerrain(unittest.TestCase):
         y = top[(4, 4)] + 1
         script = [("describe", {"session": "x"}), ("ground", {"session": "x", "x1": 0, "z1": 0, "x2": 6, "z2": 6}),
                   ("build_step", {"session": "x", "code": f"fill(3,{y},3,6,{y + 3},6,'oak_planks', hollow=True)\n", "note": "hut"}),
-                  ("check", {"session": "x"}), ("save_build", {"session": "x", "title": "Hill hut"})]
+                  ("check", {"session": "x"}),
+                  ("save_build", {"session": "x", "title": "Hill hut",               # a bare test hut: below the quality gate
+                                  "keep_quality_user_answer": "a bare box is fine for this test"})]
         captured, lines = {}, []
 
         def spawn(cmd, work, env):
