@@ -172,6 +172,28 @@ class FixMessage(unittest.TestCase):
         self.assertIn("```python", msg)
 
 
+class StairAdvice(unittest.TestCase):
+    def test_jump_and_corner_findings_point_to_the_stair_patterns(self):
+        b = floor()
+        b[(1, 1, 1)] = stair("east")
+        b[(1, 1, 2)] = stair("south")
+        found = checks.run(b)
+        tips = checks.advice(found)
+        self.assertEqual(len(tips), 1)
+        for name in ("straight_stair_run", "external_stair", "switchback_landing", "porch", "cross_gable_roof"):
+            self.assertIn(name, tips[0])
+        self.assertIn("external_stair", prompts.checks_fix_message(found))
+        from blockforge import session
+        lines = session._check_lines(b, 10)
+        self.assertIn(checks.STAIR_ADVICE, lines)
+        self.assertLessEqual(len(lines), 10)
+
+    def test_no_advice_without_stair_findings(self):
+        b = floor()
+        b[(5, 6, 5)] = M + "stone"
+        self.assertEqual(checks.advice(checks.run(b)), [])
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -404,6 +404,7 @@ def checks_fix_message(findings):
         lines += ["- " + f["text"] for f in items]
         if counts.get(chk, len(items)) > len(items):
             lines.append(f"- ...and {counts[chk] - len(items)} more of the same kind")
+    lines += checks.advice(findings)
     return ("The build ran, but BlockForge's walk-through check found these problems (coordinates are x, y, z in the build):\n"
             + "\n".join(lines) +
             "\n\nFix these and keep everything else exactly as it is. Reply with the complete corrected script in one ```python block.")

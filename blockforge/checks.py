@@ -323,6 +323,19 @@ def run(blocks, size=None, ground=None):
     return _cap(found)
 
 
+STAIR_CHECKS = ("jump_step", "corner_turn", "wrong_facing")
+STAIR_ADVICE = ("Stairs and steps: build them from the proven patterns, which have no jump steps and no corner turns - "
+                "straight_stair_run, external_stair (straight flights with flat landings, up to a terrace, balcony or upper "
+                "door; balcony(..., gap='start') leaves the railing open for it), switchback_landing (turn on a landing), "
+                "porch(..., steps=n). Where two roof slopes meet, use cross_gable_roof or a full block in the valley, never "
+                "a stair that turns on one block.")
+
+
+def advice(findings):
+    """Lines that tell the AI which proven patterns fix these findings (stairs: straight_stair_run, external_stair ...)."""
+    return [STAIR_ADVICE] if any(f["check"] in STAIR_CHECKS for f in findings) else []
+
+
 def _cap(found):
     """Keep the first CAP findings of each check; every kept finding carries the true count for its check."""
     count = collections.Counter(chk for chk, _, _ in found)
