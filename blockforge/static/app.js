@@ -510,6 +510,7 @@ $('#import-input').onchange = async e => {
 // ---------------------------------------------------------------- open build
 window.blockforge.openBuild = (...a) => openBuild(...a);
 async function openBuild(id, fresh = false) {
+  window.bfChatLeave?.();
   const [meta, data, code] = await Promise.all([api('builds/' + id), api(`builds/${id}/blocks`), api(`builds/${id}/code`)]);
   state.current = meta;
   document.querySelector('#warn-list')?.remove();
@@ -1492,3 +1493,231 @@ $('#q-scale').onclick = () => {
 };
 $('#q-half').onclick = () => quickEdit({ op: 'rescale', factor: 0.5 }, 'Scaling');
 $('#q-double').onclick = () => quickEdit({ op: 'rescale', factor: 2 }, 'Scaling');
+
+// ---------------------------------------------------------------- Talk: chat with the AI
+const chat = { id: null, data: null, scope: null, busy: false, log: [], compare: {}, shownVersion: null };
+const CHAT_KEY = 'bf-chat';
+
+function showSideTab(which) {
+  const talk = which === 'talk';
+  $('#pane-talk').hidden = !talk; $('#pane-quick').hidden = talk;
+  for (const [id, on] of [['#tab-talk', talk], ['#tab-quick', !talk]]) { $(id).classList.toggle('on', on); $(id).setAttribute('aria-selected', on); }
+}
+$('#tab-talk').onclick = () => showSideTab('talk');
+$('#tab-quick').onclick = () => showSideTab('quick');
+
+const partNo = d => (d.plan || []).filter(p => p.status === 'done').length;
+function fillTerrainChoices() {
+  const sel = $('#chat-terrain'), keep = sel.value;
+  sel.innerHTML = '<option value="">Flat ground</option>' + state.builds.map(b => `<option value="${b.id}">My terrain: ${esc(b.title)}</option>`).join('');
+  sel.value = keep;
+}
+
+function renderChat() {
+  const d = chat.data, th = $('#chat-thread');
+  $('#chat-new').hidden = !d;
+  $('#chat-terrain-wrap').hidden = !!d;
+  $('#chat-save').hidden = !d || !(d.info?.blocks > 0);
+  $('#chat-send').disabled = chat.busy;
+  $('#chat-input').placeholder = chat.scope ? `Change ${chat.scope.name}...` : 'Tell it what to build or change...';
+  const lastAi = d ? [...d.messages].reverse().find(m => m.role === 'ai') : null;
+  const html = !d ? '<p class="muted small thread-empty">Say what you want built. It may ask a question or two, then shows a plan and builds it one part at a time. You can say what to change at any point.</p>'
+    : d.messages.map(m => {
+      const scope = m.scope ? `<span class="scope-tag">About ${esc(m.scope.name)}</span>` : '';
+      let extra = '';
+      for (const q of m.questions || []) {
+        const open = m === lastAi && q.answer == null && !chat.busy;
+        extra += `<div class="q-block"><b>${esc(q.text)}</b><div class="choices" role="group" aria-label="${esc(q.text)}">` +
+          q.choices.map(c => `<button type="button" class="choice ${q.answer === c ? 'picked' : ''}" data-q="${esc(q.id)}" data-c="${esc(c)}" ${open ? '' : 'disabled'}>${esc(c)}</button>`).join('') + '</div></div>';
+      }
+      if (m.change) {
+        const c = m.change, isHead = d.head === c.version;
+        extra += `<div class="change-card"><b>${esc(c.part)}</b> (${esc(c.version)}): ${c.added} added, ${c.removed} removed, ${c.changed} changed. ${c.stayed.toLocaleString()} blocks stayed as they were.` +
+          (c.kept_outside ? ` ${c.kept_outside} stray change${c.kept_outside === 1 ? '' : 's'} outside the part were put back.` : '') +
+          (c.kept === true ? ' <span class="kept">Kept</span>' : '') +
+          (isHead && c.kept !== true ? `<div class="row-btns"><button type="button" class="btn small primary" data-keep="${esc(c.version)}">Keep</button><button type="button" class="btn small" data-undo="1">Undo</button></div>` : '') + '</div>';
+      }
+      return `<div class="msg ${m.role} ${m.error ? 'error' : ''}">${scope}${esc(m.text)}${extra}</div>`;
+    }).join('');
+  const last = chat.log[chat.log.length - 1];
+  th.innerHTML = html + (chat.busy ? `<div class="working" role="status"><div class="spinner"></div><span>Working...<small>${esc(last || '')}</small></span></div>` : '');
+  th.scrollTop = th.scrollHeight;
+  th.querySelectorAll('.choice:not(:disabled)').forEach(b => b.onclick = () => chatAnswer(b.dataset.q, b.dataset.c));
+  th.querySelectorAll('[data-keep]').forEach(b => b.onclick = () => chatAct('keep', { version: b.dataset.keep }));
+  th.querySelectorAll('[data-undo]').forEach(b => b.onclick = () => chatAct('undo', {}, true));
+  // plan card
+  const plan = d?.plan || [];
+  $('#chat-plan').hidden = !plan.length;
+  $('#plan-count').textContent = plan.length ? `(${partNo(d)} of ${plan.length} done)` : '';
+  const nextId = (plan.find(p => p.status === 'pending') || {}).id;
+  $('#plan-list').innerHTML = plan.map(p => {
+    const st = p.status === 'done' ? 'done' : p.status === 'building' ? 'building' : p.id === nextId ? 'next' : '';
+    const on = chat.scope?.id === p.id;
+    return `<li><button type="button" class="plan-part ${p.status} ${on ? 'scoped' : ''}" data-p="${esc(p.id)}" aria-pressed="${on}" title="${p.bbox ? 'Talk about just this part' : 'Not built yet'}"><span class="num"></span><span class="nm">${esc(p.name)}</span><span class="st">${st}</span></button></li>`;
+  }).join('');
+  $('#plan-list').querySelectorAll('.plan-part').forEach(b => b.onclick = () => {
+    const p = plan.find(x => x.id === b.dataset.p);
+    if (!p.bbox) return toast('That part is not built yet', true);
+    chat.scope = chat.scope?.id === p.id ? null : { id: p.id, name: p.name };
+    renderChat(); $('#chat-input').focus();
+  });
+  const ck = d?.info?.check;
+  $('#plan-check').textContent = ck ? 'Checks: ' + (ck.total ? `${ck.total} problem${ck.total === 1 ? '' : 's'} (${ck.text})` : 'no problems') : '';
+  $('#chat-scope').hidden = !chat.scope;
+  $('#scope-name').textContent = chat.scope ? `Part ${plan.findIndex(p => p.id === chat.scope.id) + 1}: ${chat.scope.name}` : '';
+  // header over the viewer
+  $('#ch-title').textContent = d?.title || '';
+  const total = plan.length, done = d ? partNo(d) : 0;
+  $('#ch-sub').textContent = d?.info ? [total ? `Part ${Math.min(total, done + (done < total ? 1 : 0))} of ${total}` : 'Draft', `${d.info.blocks.toLocaleString()} blocks`, d.info.size.join('×')].join(' · ') : '';
+  const bad = ck?.total || 0;
+  $('#ch-checks').textContent = `Checks: ${bad} problem${bad === 1 ? '' : 's'}`;
+  $('#ch-checks').classList.toggle('bad', bad > 0);
+  $('#ch-pause').hidden = !chat.busy;
+  $('#ch-download').disabled = !(d?.info?.blocks > 0);
+}
+
+async function chatLoad(id, { camera = true } = {}) {
+  const d = await api('chat/' + id);
+  chat.id = id; chat.data = d; chat.busy = d.busy;
+  if (chat.scope && !d.plan.find(p => p.id === chat.scope.id)) chat.scope = null;
+  try { localStorage.setItem(CHAT_KEY, id); } catch {}
+  renderChat();
+  if (d.info.blocks > 0) {
+    const key = d.info.version + ':' + d.session;
+    if (chat.shownVersion !== key) {
+      const data = await api(`chat/${id}/blocks`);
+      const want = data.palette.map(st => st.split('[')[0]).filter(isModded);
+      if (want.length) { try { setModColors((await post('mods/colors', { names: want })).colors); } catch { /* built-in colours */ } }
+      viewer.load(data, { keepCamera: !camera });
+      chat.shownVersion = key;
+    }
+    showChatStage(true);
+  } else showChatStage(false);
+  if (!$('#history-drawer').hidden) chatHistory();
+  return d;
+}
+function showChatStage(has) {
+  if (state.current) { state.current = null; renderGallery(); }
+  $('#chat-bar').hidden = false;
+  $('#empty').hidden = has;
+  $('#toolbar').hidden = true; $('#details').hidden = true;
+  document.querySelector('.layout').classList.add('no-details');
+}
+window.bfChatLeave = () => { $('#chat-bar').hidden = true; $('#history-drawer').hidden = true; };
+
+function resetChat() {
+  Object.assign(chat, { id: null, data: null, scope: null, busy: false, log: [], shownVersion: null });
+  try { localStorage.removeItem(CHAT_KEY); } catch {}
+  window.bfChatLeave(); renderChat();
+  if (!state.current) $('#empty').hidden = false;
+  $('#chat-input').focus();
+}
+$('#chat-new').onclick = resetChat;
+$('#scope-clear').onclick = () => { chat.scope = null; renderChat(); };
+
+function watchChat(job, first = false) {
+  chat.busy = true; chat.log = []; renderChat();
+  const poll = async () => {
+    let j;
+    try { j = job ? await api('jobs/' + job) : { status: (await api('chat/' + chat.id)).busy ? 'running' : 'done', log: [] }; } catch { return setTimeout(poll, 1500); }
+    chat.log = j.log.map(l => l.msg);
+    if (j.status === 'running') { renderChat(); return setTimeout(poll, 1000); }
+    chat.busy = false;
+    if (j.status === 'error') toast(j.error || 'That did not work', true);
+    try { await chatLoad(chat.id, { camera: first }); } catch (e) { toast(e.message, true); }
+  };
+  poll();
+}
+
+async function chatSend(text) {
+  try {
+    if (!chat.id) {
+      const r = await post('chat/start', { prompt: text, terrain_build_id: $('#chat-terrain').value || undefined });
+      chat.id = r.chat_id; chat.shownVersion = null;
+      await chatLoad(r.chat_id);
+      watchChat(r.job, true);
+    } else {
+      const r = await post(`chat/${chat.id}/message`, { text, part_id: chat.scope?.id });
+      await chatLoad(chat.id);
+      watchChat(r.job);
+    }
+  } catch (e) { toast(e.message, true); chat.busy = false; renderChat(); }
+}
+$('#chat-form').onsubmit = e => {
+  e.preventDefault();
+  const text = $('#chat-input').value.trim();
+  if (!text) return toast('Tell it what to build or change first', true);
+  if (chat.busy) return toast('It is still working, hang on', true);
+  $('#chat-input').value = '';
+  chatSend(text);
+};
+$('#chat-input').onkeydown = e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); $('#chat-form').requestSubmit(); } };
+
+async function chatAnswer(question_id, choice) {
+  try {
+    const r = await post(`chat/${chat.id}/answer`, { question_id, choice });
+    await chatLoad(chat.id);
+    if (r.job) watchChat(r.job);
+  } catch (e) { toast(e.message, true); }
+}
+async function chatAct(act, body, camera = false) {
+  try { await post(`chat/${chat.id}/${act}`, body); await chatLoad(chat.id, { camera }); } catch (e) { toast(e.message, true); }
+}
+$('#ch-pause').onclick = () => post(`chat/${chat.id}/pause`, {}).then(() => toast('Pausing, keeping what is built so far')).catch(e => toast(e.message, true));
+document.querySelectorAll('[data-look]').forEach(b => b.onclick = () => viewer.lookFrom(b.dataset.look));
+
+async function chatSave() {
+  const r = await post(`chat/${chat.id}/save`, {});
+  refreshGallery();
+  return r;
+}
+$('#chat-save').onclick = async () => {
+  try {
+    const r = await chatSave();
+    if (r.share?.url) { try { await navigator.clipboard.writeText(r.share.url); } catch { /* no clipboard */ } }
+    toast(`Saved “${r.title}” to My builds${r.share?.url ? '. Preview link copied.' : '.'}`);
+  } catch (e) { toast(e.message, true); }
+};
+$('#ch-download').onclick = async () => {
+  try { const r = await chatSave(); downloadBuild(r.id, 'schem'); } catch (e) { toast(e.message, true); }
+};
+
+// history drawer
+async function chatHistory() {
+  const h = await api(`chat/${chat.id}/history`);
+  $('#hd-list').innerHTML = h.versions.map(v => `<li class="ver ${v.current ? 'current' : ''} ${v.on_path ? '' : 'off'}">
+    <div><b>v${v.n}</b>${esc(v.note)}${v.current ? ' <span class="checks-pill">now</span>' : ''}</div>
+    <div class="sub">${v.branch === 'main' ? '' : 'branch ' + esc(v.branch) + ' · '}${v.blocks.toLocaleString()} blocks${v.added != null ? ` · +${v.added} −${v.removed} ~${v.changed}` : ''} · ${v.check.total ? v.check.total + ' problems' : 'no problems'}${v.on_path ? '' : ' · undone'}</div>
+    ${v.current ? '' : `<div class="row-btns"><button type="button" class="btn small" data-go="${v.id}">Go back to this version</button><button type="button" class="btn small ghost" data-cmp="${v.id}">Compare with now</button></div>`}
+    <div class="cmp" aria-live="polite">${esc(chat.compare[v.id] || '')}</div></li>`).join('');
+  $('#hd-list').querySelectorAll('[data-go]').forEach(b => b.onclick = async () => {
+    await chatAct('checkout', { version: b.dataset.go }, true); toast('Started a new branch from ' + b.dataset.go);
+    $('#history-drawer').hidden = true; $('#ch-history').setAttribute('aria-expanded', 'false');
+  });
+  $('#hd-list').querySelectorAll('[data-cmp]').forEach(b => b.onclick = async () => {
+    try {
+      const c = await api(`chat/${chat.id}/compare?version=${b.dataset.cmp}`);
+      chat.compare[b.dataset.cmp] = c.same ? 'Same as now.' : `Now vs this version: ${c.added} blocks added, ${c.removed} removed, ${c.changed} changed.`;
+      chatHistory();
+    } catch (e) { toast(e.message, true); }
+  });
+}
+$('#ch-history').onclick = () => {
+  const dr = $('#history-drawer'); dr.hidden = !dr.hidden;
+  $('#ch-history').setAttribute('aria-expanded', String(!dr.hidden));
+  if (!dr.hidden) { chat.compare = {}; chatHistory().catch(e => toast(e.message, true)); }
+};
+$('#hd-close').onclick = () => { $('#history-drawer').hidden = true; $('#ch-history').setAttribute('aria-expanded', 'false'); $('#ch-history').focus(); };
+
+// start: open #chat=<id> from the address, else the chat from last time
+(async () => {
+  showSideTab('talk');
+  setTimeout(fillTerrainChoices, 800);
+  let id = (location.hash.match(/chat=([0-9a-f]+)/) || [])[1];
+  if (!id) { try { id = localStorage.getItem(CHAT_KEY); } catch { /* no storage */ } }
+  if (id) {
+    try { const d = await chatLoad(id); if (d.busy) watchChat(null); }
+    catch { try { localStorage.removeItem(CHAT_KEY); } catch { /* no storage */ } }
+  }
+  renderChat();
+})();

@@ -28,7 +28,41 @@
 <main class="layout">
   <!-- ============ left: create + gallery ============ -->
   <aside class="panel left">
-    <section class="card create">
+    <div class="tabs side-tabs" role="tablist" aria-label="How to make a build">
+      <button type="button" role="tab" id="tab-talk" aria-controls="pane-talk" aria-selected="true" class="on">Talk</button>
+      <button type="button" role="tab" id="tab-quick" aria-controls="pane-quick" aria-selected="false">Quick create</button>
+    </div>
+
+    <!-- ============ Talk: chat with the AI ============ -->
+    <section class="card talk" id="pane-talk" role="tabpanel" aria-labelledby="tab-talk">
+      <div class="talk-top">
+        <h2>Talk to it</h2>
+        <button type="button" class="link-btn small" id="chat-new" hidden>New chat</button>
+      </div>
+      <div id="chat-thread" class="thread" role="log" aria-live="polite" aria-label="Conversation">
+        <p class="muted small thread-empty" id="chat-empty">Say what you want built. It may ask a question or two, then shows a plan and builds it one part at a time. You can say what to change at any point.</p>
+      </div>
+      <section id="chat-plan" class="plan" aria-label="Plan" hidden>
+        <h3>Plan <span class="muted" id="plan-count"></span></h3>
+        <ol id="plan-list"></ol>
+        <p class="plan-check small" id="plan-check"></p>
+      </section>
+      <div id="chat-scope" class="scope-pill" hidden><span>Talking about: <b id="scope-name"></b></span><button type="button" class="link-btn small" id="scope-clear">Whole build</button></div>
+      <form id="chat-form" class="composer" autocomplete="off">
+        <div class="field" id="chat-terrain-wrap">
+          <label for="chat-terrain">Build on</label>
+          <select id="chat-terrain"><option value="">Flat ground</option></select>
+        </div>
+        <label for="chat-input" class="sr-only">Message</label>
+        <textarea id="chat-input" rows="2" placeholder="Tell it what to build or change..."></textarea>
+        <div class="composer-row">
+          <button type="button" class="btn ghost small" id="chat-save" hidden title="Save this version to My builds">Save to My builds</button>
+          <button type="submit" class="btn primary" id="chat-send">Send</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card create" id="pane-quick" role="tabpanel" aria-labelledby="tab-quick" hidden>
       <h2>Create</h2>
       <div class="prompt-wrap" id="drop-zone">
         <textarea id="prompt" rows="5" placeholder="Describe a build… e.g. a cozy medieval blacksmith with a water wheel, stone base and spruce frame"></textarea>
@@ -98,6 +132,26 @@
   <!-- ============ centre: 3D view ============ -->
   <section class="stage">
     <div id="viewer" class="viewer"></div>
+    <div class="chat-bar" id="chat-bar" hidden>
+      <div class="chat-head">
+        <div class="chat-title"><b id="ch-title"></b><span class="muted small" id="ch-sub"></span></div>
+        <div class="chat-actions">
+          <button type="button" class="btn small" id="ch-pause" hidden>Pause</button>
+          <button type="button" class="btn small" id="ch-history" aria-expanded="false" aria-controls="history-drawer">History</button>
+          <button type="button" class="btn primary small" id="ch-download">Download</button>
+        </div>
+      </div>
+      <div class="quick-look" role="group" aria-label="Quick look">
+        <span class="muted small">Quick look</span>
+        <button type="button" class="btn small" data-look="north">North</button><button type="button" class="btn small" data-look="east">East</button><button type="button" class="btn small" data-look="south">South</button><button type="button" class="btn small" data-look="west">West</button><button type="button" class="btn small" data-look="top">Top</button>
+        <span class="checks-pill" id="ch-checks"></span>
+      </div>
+    </div>
+    <aside class="history-drawer" id="history-drawer" aria-label="History" hidden>
+      <div class="hd-head"><h2>History</h2><button type="button" class="icon-btn" id="hd-close" aria-label="Close history">&times;</button></div>
+      <p class="muted small">Going back starts a new branch. Nothing is deleted.</p>
+      <ul id="hd-list"></ul>
+    </aside>
     <div id="empty" class="empty">
       <div class="empty-inner">
         <img src="icon.svg" alt="">
