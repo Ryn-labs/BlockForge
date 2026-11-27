@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import blockinfo, exporters, learn, lessons, mods, patterns, placement, prompts, sandbox, session, share, store, testlab  # noqa: E402
+from blockforge import blockinfo, exporters, learn, lessons, mods, patterns, placement, prompts, quality, sandbox, session, share, store, testlab  # noqa: E402
 
 SERVER = {"name": "blockforge", "version": "1.1.0"}
 APP_URL = f"http://127.0.0.1:{os.environ.get('BLOCKFORGE_PORT', '8765')}"
@@ -124,7 +124,7 @@ TOOLS = [
     },
     {
         "name": "pattern",
-        "description": 'A proven build part (stairs, landings, doorway, window, lantern post, roof house shell, bridge, tree, spiral stair in a round or square tower) as buildkit text you pass to build_step. Unknown or empty name lists the patterns with their arguments.',
+        "description": 'A proven build part as buildkit text you pass to build_step: house parts (framed_house, framed_wall, window_with_box, porch, balcony, gable_roof_trim, hip_roof_trim, cross_gable_roof, chimney, stilt_base, fence_garden, farm_plot, site, road, plaza) and stairs, landings, doorway, lantern post, bridge, tree, spiral stairs. Unknown or empty name lists the patterns with their arguments.',
         "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "args": {"type": "object", "description": "Keyword arguments of the pattern, e.g. {\"x\": 3, \"y\": 1, \"z\": 4, \"facing\": \"south\"}"}}, "additionalProperties": False},
     },
     {
@@ -180,7 +180,12 @@ TOOLS = [
     {
         "name": "save_build",
         "description": 'Finish: run the final placement pass and save the session as a build in the BlockForge gallery. Returns the build id and the 3D preview link (give it to the user exactly as returned).',
-        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "title": {"type": "string"}, "accept_problems": {"type": "string", "description": "Only when check still finds problems you cannot fix: say why each one is fine. Without it, save_build refuses while check finds problems."}, "keep_size_user_answer": {"type": "string", "description": "Only after the USER answered that the current size is fine: their words. The AI can not waive a size miss itself."}}, "required": ["session"], "additionalProperties": False},
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "title": {"type": "string"}, "accept_problems": {"type": "string", "description": "Only when check still finds problems you cannot fix: say why each one is fine. Without it, save_build refuses while check finds problems."}, "keep_size_user_answer": {"type": "string", "description": "Only after the USER answered that the current size is fine: their words. The AI can not waive a size miss itself."}, "keep_quality_user_answer": {"type": "string", "description": "Only after the USER answered that a plain building is what they want: their words. The AI can not waive a low quality score itself."}}, "required": ["session"], "additionalProperties": False},
+    },
+    {
+        "name": "review",
+        "description": 'Look at the build like a judge before save_build: the four side views and the top as pictures, the quality score (facade depth, roof, massing, palette, detail, surroundings; streets, variety, open space, landmark, density for towns) with what to fix and where, and a rubric. Score yourself 1-5 per part and fix every part below 4.',
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}}, "required": ["session"], "additionalProperties": False},
     },
 ]
 
@@ -330,7 +335,7 @@ def _skill_text():
         return ""
 
 
-SESSION_TOOLS = ("block_info", "style_sheet", "lessons", "pattern", "start_build", "build_step", "view", "check", "walk_test", "undo", "history", "ground", "plan_layout", "describe", "save_build")
+SESSION_TOOLS = ("block_info", "style_sheet", "lessons", "pattern", "start_build", "build_step", "view", "check", "walk_test", "undo", "history", "ground", "plan_layout", "describe", "review", "save_build")
 
 
 def _pattern_table():
@@ -342,6 +347,27 @@ def _pattern_table():
 def _pattern_list(table):
     return "\n".join(f"- {n}{inspect.signature(f)}: {(f.__doc__ or '').strip().splitlines()[0] if (f.__doc__ or '').strip() else ''}"
                      for n, f in sorted(table.items()))
+
+
+def _review(s):
+    """review(session): the side views and the top, the quality score with what to fix, and the rubric."""
+    if not s.blocks:
+        raise ToolError("The build is empty, there is nothing to review yet.")
+    q = quality.score(quality.built_only(s.blocks, s.terrain_blocks), s.size_hint)
+    if q["building"]:
+        head = (f"Quality {quality.summary(q)}; save_build needs {quality.QUALITY_MIN} or more.\n"
+                + "\n".join("- " + f for f in q["findings"][:12]))
+        weak = "\n".join(f"- {quality.LABELS[k]} {v}/100: " + " ".join(fx[:2]) for k, v, fx in quality.weakest(q) if fx)
+        head += ("\nFix first:\n" + weak) if weak else ""
+    else:
+        head = "Not a building (no closed room), so it has no quality score; still make it look good."
+    out = [{"type": "text", "text": head + "\n\n" + quality.RUBRIC}]
+    for side, png in session.view(s, ["north", "east", "south", "west", "top"]):
+        out.append({"type": "text", "text": side + ":"})
+        out.append({"type": "image", "data": base64.b64encode(png).decode("ascii"), "mimeType": "image/png"})
+    out.append({"type": "text", "text": "Write your 1-5 score for each part, then fix every part below 4 with build_step "
+                                        "before save_build."})
+    return out
 
 
 def _extra_call(name, args):
@@ -407,6 +433,8 @@ def _session_call(name, args):
             return out
         if name == "check":
             return session.check_text(s)
+        if name == "review":
+            return _review(s)
         if name == "walk_test":
             return session.walk(s, args.get("path"))
         if name == "undo":
@@ -429,8 +457,21 @@ def _session_call(name, args):
                                 "keep the detail), then call save_build again. accept_problems does not cover the size. "
                                 + ("" if os.environ.get("BLOCKFORGE_UNATTENDED") else "If you are talking with the user, ask them: keep this size or fix it to the target? "
                                    "Only if they say keep it, call save_build with keep_size_user_answer set to their words."))
+            q = quality.score(quality.built_only(s.blocks, s.terrain_blocks), s.size_hint)
+            unattended = bool(os.environ.get("BLOCKFORGE_UNATTENDED"))
+            user_q = bool((args.get("keep_quality_user_answer") or "").strip()) and not unattended
+            if q["building"] and q["total"] < quality.QUALITY_MIN and not user_q:   # a plain box is never waived by the AI itself
+                raise ToolError("Not saved yet: the " + ("town" if q.get("town") else "building") + " looks too plain. "
+                                + quality.gate_text(q) + "\nFix the weakest parts with build_step (pattern() has framed_house, "
+                                "framed_wall, window_with_box, porch, balcony, gable_roof_trim, cross_gable_roof, chimney, fence_garden, "
+                                "farm_plot, road, plaza), call review to look at it, then save_build again. accept_problems does not "
+                                "cover the quality." + ("" if unattended else " If the user asked for a plain building on purpose, ask "
+                                "them; only if they say keep it, call save_build with keep_quality_user_answer set to their words."))
             m, link = session.save(s, args.get("title"))
-            return _summary(m) + link
+            if q["building"]:
+                m = store.update_meta(m["id"], quality={"total": q["total"], "parts": q["parts"], "town": q["town"],
+                                                        "kept_by_user": user_q and q["total"] < quality.QUALITY_MIN})
+            return _summary(m) + ("\nQuality: " + quality.summary(q) if q["building"] else "") + link
     except session.SessionError as e:
         raise ToolError(str(e)) from None
     raise ToolError("Unknown tool " + name)
