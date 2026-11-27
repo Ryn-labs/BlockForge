@@ -48,9 +48,9 @@ def system_prompt(text=None):
     from . import lessons, mcp_server
     out = (mcp_server._skill_text() + "\n\n---\n\nYou have only the BlockForge session tools (and Read for a reference "
            "image). Write build scripts for build_step as described above; the script functions are the same in every step.\n")
-    top = lessons.top(40)
+    top = lessons.for_ai()
     if top:
-        out += "\n## Lessons from earlier builds\n" + "\n".join("- " + ln for ln in top) + "\n"
+        out += "\n## Lessons from earlier builds\n" + "\n".join(top) + "\n"
     style = style_for(text)
     if style:
         out += f"\n## Style sheet: {style}\n" + lessons.for_style(style).strip() + "\n"
