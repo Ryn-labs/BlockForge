@@ -253,3 +253,168 @@ def tree(species, x, y, z, height=6):
     else:
         raise ValueError(f"species must be one of {', '.join(TREES)} (got {species!r})")
     return _code(out)
+
+
+# ------------------------------------------------------------------ spiral stairs
+def _ring_cw(xa, za, xb, zb):
+    """Cells of the rectangle outline, clockwise seen from above (north up), starting at the north-west corner."""
+    out = [(x, za) for x in range(xa, xb)]
+    out += [(xb, z) for z in range(za, zb)]
+    out += [(x, zb) for x in range(xb, xa, -1)]
+    out += [(xa, z) for z in range(zb, za, -1)]
+    return out
+
+
+def _name_of(a, b):
+    return {(1, 0): "east", (-1, 0): "west", (0, 1): "south", (0, -1): "north"}[(b[0] - a[0], b[1] - a[1])]
+
+
+def _rail_for(wall):
+    w = str(wall)
+    if w.endswith("_bricks"):
+        return w[:-7] + "_brick_wall"
+    if w.endswith("_planks"):
+        return w[:-7] + "_fence"
+    if w in ("cobblestone", "mossy_cobblestone", "andesite", "diorite", "granite", "sandstone", "red_sandstone",
+             "blackstone"):
+        return w + "_wall"
+    return "cobblestone_wall"
+
+
+def _spiral_path(ring, y, height):
+    """Walk the ring up: a stair on every cell that is not a corner, a flat landing on every corner (same height as the
+    stair before it). Returns [(x, z, y, kind, facing)] with exactly `height` stairs, the first at y, the last at
+    y + height - 1. One full turn climbs 4 * (side - 1) blocks, at least 4."""
+    xs = [c[0] for c in ring]
+    zs = [c[1] for c in ring]
+    corners = {(a, b) for a in (min(xs), max(xs)) for b in (min(zs), max(zs))}
+    items, cur, i, n = [], y - 1, 0, len(ring)
+    while cur < y + height - 1:
+        c = ring[i % n]
+        if c in corners:
+            items.append((c[0], c[1], cur, "landing", None))
+        else:
+            cur += 1
+            items.append((c[0], c[1], cur, "stair", _name_of(c, ring[(i + 1) % n])))
+        i += 1
+    return items
+
+
+def _spiral_tower(interior, wall_cells, ring, y, height, wall, stair, door, windows, core=()):
+    """Shared by the round and the square tower. interior: floor cells inside the shell, wall_cells: the shell columns,
+    door: (x, z, facing) in the shell, windows: shell cells that get panes every 7 blocks, core: pillar cells."""
+    if height < 6:
+        raise ValueError("height must be at least 6")
+    stairs = _stairs(stair)
+    ytop = y + height - 1                                           # top floor blocks; the feet stand at ytop + 1
+    items = _spiral_path(ring, y, height)
+    final = (items[-1][0], items[-1][1])
+    nxt = ring[(ring.index(final) + 1) % len(ring)]
+    # stairwell: the last turn's cells have no floor over them (3 free blocks over every step)
+    hole = {(it[0], it[1]) for it in items if ytop - 3 <= it[2] <= ytop - 1}
+    interior = set(interior)
+    rails = set()
+    for (hx, hz) in hole:
+        for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            q = (hx + a, hz + b)
+            if q in interior and q not in hole and q not in (final, nxt):
+                rails.add(q)
+    rail = _rail_for(wall)
+    out = [f"# spiral tower: {height} steps, ring of {len(ring)} cells, top floor at y={ytop}"]
+    for (x, z) in sorted(interior | set(wall_cells)):               # ground floor
+        out.append(f"block({x}, {y - 1}, {z}, {wall!r})")
+    dx_, dz_, dfacing = door
+    glass = set()
+    for (wx, wz) in windows:
+        for wy in range(y + 3, ytop - 1, 7):
+            glass.add((wx, wy, wz))
+            glass.add((wx, wy + 1, wz))
+    top = ytop + 2                                                  # parapet: two blocks over the top floor
+    for (x, z) in sorted(wall_cells):
+        ys = [yy for yy in range(y + 2 if (x, z) == (dx_, dz_) else y, top + 1) if (x, yy, z) not in glass]
+        start = prev = None
+        for yy in ys + [None]:
+            if start is not None and (yy is None or yy != prev + 1):
+                out.append(f"fill({x}, {start}, {z}, {x}, {prev}, {z}, {wall!r})")
+                start = None
+            if yy is not None:
+                if start is None:
+                    start = yy
+                prev = yy
+    for (wx, wy, wz) in sorted(glass):
+        out.append(f"block({wx}, {wy}, {wz}, 'glass_pane')")
+    out.append(f"block({dx_}, {y}, {dz_}, {_st('oak_door', facing=dfacing, half='lower', hinge='left', open=False)})")
+    out.append(f"block({dx_}, {y + 1}, {dz_}, {_st('oak_door', facing=dfacing, half='upper', hinge='left', open=False)})")
+    for (x, z) in sorted(core):                                     # central pillar the stairs lean on
+        out.append(f"fill({x}, {y}, {z}, {x}, {ytop - 1}, {z}, {wall!r})")
+    for (x, z, yy, kind, facing) in items:
+        if yy - y >= 1 and yy <= y + 2:                             # low steps sit on solid blocks (no cramped space under them)
+            out.append(f"fill({x}, {y}, {z}, {x}, {yy - 1}, {z}, {wall!r})")
+        if kind == "landing":
+            out.append(f"block({x}, {yy}, {z}, {wall!r})")
+        else:
+            out.append(f"block({x}, {yy}, {z}, {_st(stairs, facing=facing, half='bottom', shape='straight')})")
+    for (x, z) in sorted(interior):                                 # top floor with the stairwell hole
+        if (x, z) in hole or (x, z) == final:
+            continue
+        out.append(f"block({x}, {ytop}, {z}, {(rail if (x, z) in rails else wall)!r})")
+    return _code(out)
+
+
+def round_tower_with_stair(cx, y, cz, radius, height, wall="stone_bricks", stair="stone_brick_stairs", direction="cw"):
+    """A hollow round tower (shell of `wall`, outer radius `radius` >= 3 around cx, cz) with a spiral stair inside: floor
+    at y-1, a door on the north side at y, windows every 7 blocks, a parapet two blocks over the top floor, which sits at
+    y + height - 1 and is reached by the stair (stairwell hole in the floor with a railing). The stair climbs round a
+    central pillar, a flat landing on every corner so turns happen on landings, 3 free blocks over every step."""
+    import math
+    if radius < 3:
+        raise ValueError("radius must be at least 3")
+    if direction not in ("cw", "ccw"):
+        raise ValueError("direction must be cw or ccw")
+    k = max(1, min(int((radius - 1.5) / 1.42), radius - 2))
+    ring = _ring_cw(cx - k, cz - k, cx + k, cz + k)
+    i0 = ring.index((cx, cz - k))
+    ring = ring[i0:] + ring[:i0]                                    # start on the north side, in front of the door
+    if direction == "ccw":
+        ring = [ring[0]] + ring[1:][::-1]
+    interior, wall_cells = [], []
+    for x in range(cx - radius - 1, cx + radius + 2):
+        for z in range(cz - radius - 1, cz + radius + 2):
+            d = math.hypot(x - cx, z - cz)
+            if d < radius - 0.5:
+                interior.append((x, z))
+            elif d < radius + 0.5:
+                wall_cells.append((x, z))
+    core = _ring_cw(cx - k + 1, cz - k + 1, cx + k - 1, cz + k - 1) if k >= 2 else [(cx, cz)]
+    wset = set(wall_cells)
+    if (cx, cz - radius) not in wset:
+        raise ValueError("no wall cell for the door at this radius")
+    off = round(radius * 0.7)
+    wins = [c for c in ((cx + radius, cz), (cx - radius, cz), (cx, cz + radius),
+                        (cx + off, cz + off), (cx - off, cz + off)) if c in wset]
+    return _spiral_tower(interior, wall_cells, ring, y, height, wall, stair, (cx, cz - radius, "north"), wins, core)
+
+
+def spiral_stair(cx, y, cz, radius, height, block="stone_brick_stairs", direction="cw"):
+    """Spiral staircase for a round tower of outer radius `radius` (3 or more) around cx, cz, climbing `height` blocks from
+    y: stairs round a pillar, a flat landing on every corner (turns happen on landings), one full turn climbs 4 or more
+    so every step has 3 free blocks over it. Comes with its round shell, door, windows and top floor so it stands on its
+    own; same as round_tower_with_stair."""
+    return round_tower_with_stair(cx, y, cz, radius, height, "stone_bricks", block, direction)
+
+
+def square_spiral_stair(x1, z1, size, y, height, block="stone_brick_stairs", wall="stone_bricks"):
+    """A square tower (outer `size` x `size`, size 5 or more, north-west corner x1, z1) with a spiral stair along the
+    inside of its walls: a stair on every wall cell, a flat landing in each of the four corners (turns happen on
+    landings), 3 free blocks over every step. Door on the north side at y, windows, top floor at y + height - 1 with a
+    stairwell hole and railing. The first stair is at y."""
+    if size < 5:
+        raise ValueError("size must be at least 5")
+    xa, za, xb, zb = x1 + 1, z1 + 1, x1 + size - 2, z1 + size - 2
+    ring = _ring_cw(xa, za, xb, zb)
+    ring = ring[1:] + ring[:1]                                      # start one cell after the north-west corner
+    interior = [(x, z) for x in range(xa, xb + 1) for z in range(za, zb + 1)]
+    inner = set(interior)
+    wall_cells = [(x, z) for x in range(x1, x1 + size) for z in range(z1, z1 + size) if (x, z) not in inner]
+    wins = [(x1 + size - 1, z1 + size // 2), (x1, z1 + size // 2), (x1 + size // 2, z1 + size - 1)]
+    return _spiral_tower(interior, wall_cells, ring, y, height, wall, block, (xa + 1, z1, "north"), wins)

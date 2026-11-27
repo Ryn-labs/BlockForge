@@ -70,6 +70,43 @@ def size_error(size, dims):
     return 0.0, None
 
 
+def parse_size_hint(hint):
+    """The asked size from a free-text hint: a preset name (tiny...colossal) or 'W x H x L' / 'W x L' numbers as a
+    {'w','h','l','exact'} dict. None when the hint says nothing about size."""
+    t = str(hint or "").lower()
+    m = re.search(r"(\d+)\s*[x*\u00d7]\s*(\d+)(?:\s*[x*\u00d7]\s*(\d+))?", t)
+    if m:
+        a, b, c = int(m.group(1)), int(m.group(2)), m.group(3)
+        d = {"w": a, "h": b, "l": int(c), "exact": True} if c else {"w": a, "l": b, "exact": True}
+        return d if all(v > 0 for k, v in d.items() if k != "exact") else None
+    for name in PRESET_RANGES:
+        if re.search(r"\b" + name + r"\b", t):
+            return name
+    return None
+
+
+def size_problem(hint, dims, tol=0.10):
+    """A message when a finished build is outside the size the hint asked for by more than `tol` (10%), else None.
+    The message names the current size and the target."""
+    size = parse_size_hint(hint)
+    if size is None or not any(dims):
+        return None
+    W, H, L = dims
+    got = f"{W} wide (x) x {H} tall (y) x {L} long (z)"
+    if isinstance(size, dict):
+        bits = []
+        for key, label, val in (("w", "wide", W), ("h", "tall", H), ("l", "long", L)):
+            want = size.get(key)
+            if want and abs(val - want) > max(want * tol, 2):
+                bits.append(f"{want} {label}")
+        return f"The build is {got}, the target is {' and '.join(bits)} (more than 10% off)." if bits else None
+    lo, hi = PRESET_RANGES[size]
+    big = max(W, L)
+    if big < lo * (1 - tol) or big > hi * (1 + tol):
+        return f"The build is {got}, the target is size '{size}': about {lo}-{hi} blocks wide (more than 10% outside that range)."
+    return None
+
+
 def size_fix_message(issue):
     return (issue + " Rework the script so the build matches the requested size: scale the whole design (keep its "
             "proportions and detail, don't just stretch empty space) and reply with the complete corrected script in one "
