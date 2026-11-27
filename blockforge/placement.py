@@ -135,6 +135,19 @@ def _check_block(c, p, st, final):
             b[p] = _with(st, hanging="true")
             c.fix("bracket", "Lanterns on a wall now hang from a small fence bracket (lanterns can't attach to a wall sideways in vanilla)")
             return
+        x, y, z = p
+        for d in range(1, 7):                              # a post down to the ground: keep the light, give it support
+            q = (x, y - d, z)
+            if q in b and _floor_ok(b[q]):
+                for k in range(1, d): b[(x, y - k, z)] = f"minecraft:{c.fence}"
+                b[p] = _with(st, hanging="false"); c.fix("lantern_post", "Lanterns floating in the air now stand on a fence post down to the ground", p); return
+            if q in b: break
+        for d in range(1, 7):                              # or a chain up to something to hang from
+            q = (x, y + d, z)
+            if q in b and _hang_ok(b[q]):
+                for k in range(1, d): b[(x, y + k, z)] = "minecraft:chain[axis=y]"
+                b[p] = _with(st, hanging="true"); c.fix("lantern_chain", "Lanterns floating in the air now hang from a chain", p); return
+            if q in b: break
         if final:
             del b[p]; c.fix("removed", "Removed lanterns with nothing to hang from or stand on", p)
         else:
