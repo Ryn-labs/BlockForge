@@ -15,7 +15,7 @@ from blockforge import engine, store, prompts as P
 sys.path.insert(0, os.path.join(ROOT, "bench"))
 import score as SC, render as RD
 from blockforge import mistake_stats as MS
-MS.PATH = os.environ.get("BENCH_STATS") or os.path.join(REAL_DATA, "mistake_stats.json")   # the app's real stats, not the temp data
+MS.PATH = os.environ.get("BENCH_STATS") or os.path.join(OUT, "mistake_stats.json")   # bench stats stay with the bench; the real app data is never written (set BENCH_STATS to feed an app on purpose)
 
 args = sys.argv[1:]
 ONLY = {int(v) for v in args[args.index("--only") + 1].split(",")} if "--only" in args else None
