@@ -118,10 +118,12 @@ def _spawn(cmd, work, env):
     return proc
 
 
-def newest_build(since):
-    """The newest claude_chat build saved after `since` (fallback when the tool result can't be read)."""
+def newest_build(since, exclude=()):
+    """The newest claude_chat build saved during this run (fallback when the tool result can't be read). Builds that existed
+    before the run started are never picked, so a build made just before can't be mistaken for this one."""
     best = None
     for b in store.list_builds():
+        if b["id"] in exclude: continue
         if b.get("source") == "claude_chat" and b.get("created", 0) >= since - 1 and (not best or b["created"] > best["created"]):
             best = b
     return best
@@ -133,6 +135,7 @@ def run(text, model, usage, exe, log=print, image_path=None, terrain=None, title
     from .engine import EngineError
     work = tempfile.mkdtemp(prefix="blockforge_loop_")
     started = time.time()
+    before = {b["id"] for b in store.list_builds()}
     try:
         pre = None
         if terrain:
@@ -217,7 +220,7 @@ def run(text, model, usage, exe, log=print, image_path=None, terrain=None, title
                 raise EngineError("You've hit your Claude usage limit for now: " + msg[:300])
             raise EngineError("Claude returned an error: " + msg[:800])
         if not saved_id:
-            b = newest_build(started)
+            b = newest_build(started, before)
             saved_id = b and b["id"]
         if not saved_id and sid:                                        # it built but never finished: save what it made, with its check results
             try:

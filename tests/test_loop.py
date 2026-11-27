@@ -147,3 +147,12 @@ class LoopEngine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoBuildMixUp(unittest.TestCase):
+    def test_newest_build_never_returns_an_older_build(self):
+        import time
+        older = {"id": "old-1", "source": "claude_chat", "created": time.time()}
+        with mock.patch.object(store, "list_builds", lambda: [older]):
+            self.assertIsNone(loop.newest_build(time.time(), {"old-1"}))       # made just before this run: never ours
+            self.assertEqual(loop.newest_build(time.time())["id"], "old-1")    # without the list the old rule would pick it
