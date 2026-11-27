@@ -33,10 +33,28 @@ def mcp_config(work):
     return path
 
 
-def system_prompt():
-    from . import mcp_server
-    return (mcp_server._skill_text() + "\n\n---\n\nYou have only the BlockForge session tools (and Read for a reference "
-            "image). Write build scripts for build_step as described above; the script functions are the same in every step.\n")
+def style_for(text):
+    """The style sheet name the request (or its palette line) names first, or None."""
+    from . import lessons
+    best = None
+    for name in lessons.styles():
+        m = re.search(r"\b" + name.replace("_", "[ _-]") + r"\b", text or "", re.I)
+        if m and (best is None or m.start() < best[0]):
+            best = (m.start(), name)
+    return best[1] if best else None
+
+
+def system_prompt(text=None):
+    from . import lessons, mcp_server
+    out = (mcp_server._skill_text() + "\n\n---\n\nYou have only the BlockForge session tools (and Read for a reference "
+           "image). Write build scripts for build_step as described above; the script functions are the same in every step.\n")
+    top = lessons.top(40)
+    if top:
+        out += "\n## Lessons from earlier builds\n" + "\n".join("- " + ln for ln in top) + "\n"
+    style = style_for(text)
+    if style:
+        out += f"\n## Style sheet: {style}\n" + lessons.for_style(style).strip() + "\n"
+    return out
 
 
 def user_text(text):
@@ -107,7 +125,7 @@ def run(text, model, usage, exe, log=print, image_path=None):
                      "use the Read tool to look at it first.")
         allowed = ",".join([PREFIX + t for t in TOOLS] + ["Read"])
         cmd = [exe, "-p", "--output-format", "stream-json", "--verbose", "--model", model,
-               "--system-prompt", system_prompt(), "--mcp-config", mcp_config(work), "--strict-mcp-config",
+               "--system-prompt", system_prompt(text), "--mcp-config", mcp_config(work), "--strict-mcp-config",
                "--tools", "Read", "--allowedTools", allowed, "--max-turns", str(MAX_TURNS), "--no-session-persistence"]
         log("Asking Claude to build it step by step (via Claude Code)...")
         proc = _spawn(cmd, work, dict(os.environ))
