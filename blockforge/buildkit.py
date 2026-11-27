@@ -14,6 +14,10 @@ _entities = []        # mobs in the build: [x, y, z, {"id": ..., ...}] (see test
 _tests = []           # in-game test steps for the test lab (see testkit.py)
 _meta = {"name": None, "description": None}
 random = _random.Random(1337)
+OVERWRITE_EXAMPLES = 20
+_ow = [0, []]         # [count, examples]: a script placed a DIFFERENT block over one it (or the base build) already had
+_ow_skip = set()      # positions of the base build being edited: replacing those is the point of an edit, not an accident
+_track = [True]
 
 
 class BuildError(Exception):
@@ -60,9 +64,29 @@ def block(x, y, z, st):
     if st is None:
         _blocks.pop(p, None)
         return
-    if len(_blocks) >= MAX_BLOCKS and p not in _blocks:
-        raise BuildError(f"build is over {MAX_BLOCKS} blocks")
+    prev = _blocks.get(p)
+    if prev is None:
+        if len(_blocks) >= MAX_BLOCKS:
+            raise BuildError(f"build is over {MAX_BLOCKS} blocks")
+    elif prev != st and _track[0]:                   # slow path only when a different block is replaced
+        if p in _ow_skip:
+            _ow_skip.discard(p)
+        else:
+            _ow[0] += 1
+            if len(_ow[1]) < OVERWRITE_EXAMPLES:
+                _ow[1].append({"at": list(p), "was": prev, "now": st})
     _blocks[p] = st
+
+
+def _reset_overwrites():
+    _ow[0] = 0
+    _ow[1] = []
+    _ow_skip.clear()
+
+
+def overwrites():
+    """What the script overwrote: {"count": n, "examples": [{"at": [x, y, z], "was": ..., "now": ...}, ...up to 20]}."""
+    return {"count": _ow[0], "examples": list(_ow[1])}
 
 
 setblock = place = block
@@ -129,12 +153,16 @@ def replace(x1, y1, z1, x2, y2, z2, old, new):
     """Replace blocks whose name (without properties) matches old (or a list of names)."""
     olds = [old] if isinstance(old, str) else list(old)
     olds = {_norm(o).split("[", 1)[0] for o in olds}
-    for x in _rng(x1, x2):
-        for y in _rng(y1, y2):
-            for z in _rng(z1, z2):
-                cur = _blocks.get((x, y, z))
-                if cur and cur.split("[", 1)[0] in olds:
-                    block(x, y, z, new)
+    _track[0] = False                                # replacing is deliberate, not an accidental overwrite
+    try:
+        for x in _rng(x1, x2):
+            for y in _rng(y1, y2):
+                for z in _rng(z1, z2):
+                    cur = _blocks.get((x, y, z))
+                    if cur and cur.split("[", 1)[0] in olds:
+                        block(x, y, z, new)
+    finally:
+        _track[0] = True
 
 
 def line(x1, y1, z1, x2, y2, z2, st, width=1):

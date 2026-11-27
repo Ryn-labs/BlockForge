@@ -538,6 +538,17 @@ class _Conversation:
         return self.text.split("## Research first (required)")[0]
 
 
+def _overwrite_note(meta):
+    """One line telling the AI which blocks its script placed over different blocks it had already placed."""
+    ow = meta.get("overwrites") or {}
+    if not ow.get("count"):
+        return ""
+    ex = ", ".join(f"({e['at'][0]}, {e['at'][1]}, {e['at'][2]}) {str(e['was']).split(':', 1)[-1]} -> {str(e['now']).split(':', 1)[-1]}"
+                   for e in ow.get("examples") or [])
+    return (f"Note: the script placed a different block over {ow['count']:,} blocks it had already placed (the last one wins). "
+            f"If that was not intended, fix the order or the boxes. Examples: {ex}")
+
+
 def generate(prompt, size="medium", palette="auto", model=None, engine=None, image=None, parent_id=None,
              research=None, redstone=None, use_mods=None, log=print):
     """image: (bytes, mime). Returns the saved build's meta."""
@@ -646,11 +657,14 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
         problems = meta.get("warnings") or []
         for f in meta.get("fixes") or []:
             log("Auto-fixed: " + f)
+        ow_note = _overwrite_note(meta)
+        if ow_note:
+            log(ow_note)
         if problems:
             log("Build check: " + "; ".join(problems)[:300])
             log(f"Asking {who} to fix {'the redstone and ' if redstone else ''}blocks that can't exist...")
             try:
-                _, code2, _ = extract(convo.follow_up(prompts.redstone_fix_message(problems), code))
+                _, code2, _ = extract(convo.follow_up(prompts.redstone_fix_message(problems + ([ow_note] if ow_note else [])), code))
                 code2, blocks2, meta2 = build(code2)
                 if len(meta2.get("warnings") or []) <= len(problems):
                     code, blocks, meta = code2, blocks2, meta2

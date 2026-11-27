@@ -45,6 +45,7 @@ def main():
         for x, y, z, t in b.get("tiles") or []:
             buildkit._tiles[(x, y, z)] = t
         base = dict(buildkit._blocks)
+        buildkit._ow_skip.update(base)               # replacing the old build's blocks is the point of an edit
     try:
         exec(compile(code, "build.py", "exec"), g)
     except Exception as e:
@@ -52,6 +53,7 @@ def main():
         line = next((f.lineno for f in reversed(tb) if f.filename == "build.py"), None)
         err = f"{type(e).__name__}: {e}" + (f" (line {line})" if line else "")
     blocks = buildkit._blocks
+    buildkit._meta["overwrites"] = buildkit.overwrites()
     changed = set()
     if base and not err:
         changed = {p for p in set(base) | set(blocks) if base.get(p) != blocks.get(p)}
