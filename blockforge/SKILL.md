@@ -37,7 +37,7 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 4. check. Fix every problem it lists with another build_step, or undo and redo the part.
 5. Next part. Repeat 2-4.
 6. walk_test the routes people will use (front door to every room, stairs, garden paths). Fix what it finds.
-7. Before save_build: run check and walk_test for every path people will use; fix what they find.
+7. Before save_build: run check and walk_test for every path people will use; fix what they find. Size off target? Fix it. Only the user can keep a wrong size: ask them, then pass their answer as keep_size_user_answer.
 8. save_build and give the user the preview link.
 
 ## Big builds (towns, castles on real land)

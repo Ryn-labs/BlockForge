@@ -24,7 +24,7 @@ def mcp_config(work):
     from . import claudelink
     cmd, args = claudelink.mcp_command()
     entry_args = list(args) if getattr(sys, "frozen", False) else ["-I", *args]
-    env = {"BLOCKFORGE_DATA": store.DATA}
+    env = {"BLOCKFORGE_DATA": store.DATA, "BLOCKFORGE_UNATTENDED": "1"}   # no user to ask: a size miss must be fixed
     if os.environ.get("BLOCKFORGE_PORT"):
         env["BLOCKFORGE_PORT"] = os.environ["BLOCKFORGE_PORT"]
     path = os.path.join(work, "mcp.json")

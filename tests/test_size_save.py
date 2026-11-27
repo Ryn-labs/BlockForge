@@ -1,4 +1,5 @@
-"""save_build refuses a build that is more than 10% outside the asked size, unless accept_problems explains it."""
+"""save_build refuses a build that is more than 10% outside the asked size; only the user's answer (keep_size_user_answer) can keep it, never the AI alone."""
+import os
 import unittest
 
 from tests import _env  # noqa: F401
@@ -42,10 +43,26 @@ class SaveRefusal(unittest.TestCase):
         self.assertIn("7 wide", msg)                    # current size
         self.assertIn("64-96", msg)                     # target
 
-    def test_accept_problems_lets_it_through(self):
+    def test_accept_problems_does_not_waive_size(self):
         sid = start("large tower")
-        out = mcp_server.call("save_build", {"session": sid, "accept_problems": "a tiny model of the tower on purpose"})
+        with self.assertRaises(mcp_server.ToolError) as cm:
+            mcp_server.call("save_build", {"session": sid, "accept_problems": "a tiny model of the tower on purpose"})
+        self.assertIn("accept_problems does not cover the size", str(cm.exception))
+
+    def test_users_answer_waives_size(self):
+        sid = start("large tower")
+        out = mcp_server.call("save_build", {"session": sid, "keep_size_user_answer": "keep it small, it's a model"})
         self.assertIn("size test", out)
+
+    def test_unattended_engine_can_not_waive_size(self):
+        sid = start("large tower")
+        os.environ["BLOCKFORGE_UNATTENDED"] = "1"
+        try:
+            with self.assertRaises(mcp_server.ToolError) as cm:
+                mcp_server.call("save_build", {"session": sid, "keep_size_user_answer": "keep it"})
+            self.assertNotIn("ask them", str(cm.exception))
+        finally:
+            os.environ.pop("BLOCKFORGE_UNATTENDED", None)
 
     def test_right_size_saves(self):
         sid = start("7 x 4 x 7 shed")

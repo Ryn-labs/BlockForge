@@ -180,7 +180,7 @@ TOOLS = [
     {
         "name": "save_build",
         "description": 'Finish: run the final placement pass and save the session as a build in the BlockForge gallery. Returns the build id and the 3D preview link (give it to the user exactly as returned).',
-        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "title": {"type": "string"}, "accept_problems": {"type": "string", "description": "Only when check still finds problems you cannot fix: say why each one is fine. Without it, save_build refuses while check finds problems."}}, "required": ["session"], "additionalProperties": False},
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "title": {"type": "string"}, "accept_problems": {"type": "string", "description": "Only when check still finds problems you cannot fix: say why each one is fine. Without it, save_build refuses while check finds problems."}, "keep_size_user_answer": {"type": "string", "description": "Only after the USER answered that the current size is fine: their words. The AI can not waive a size miss itself."}}, "required": ["session"], "additionalProperties": False},
     },
 ]
 
@@ -423,10 +423,12 @@ def _session_call(name, args):
                                 "then call save_build again. If one can't be fixed or is intended, call save_build with accept_problems "
                                 "explaining why.\n" + session.check_text(s))
             size_msg = prompts.size_problem(s.size_hint, prompts.dims_of(s.blocks))
-            if size_msg and not (args.get("accept_problems") or "").strip():   # same rule for the size that was asked for
+            user_ok = (args.get("keep_size_user_answer") or "").strip() and not os.environ.get("BLOCKFORGE_UNATTENDED")
+            if size_msg and not user_ok:                                     # a size miss is never waived by the AI itself: fix it, or ask the user
                 raise ToolError("Not saved yet: the size is off. " + size_msg + " Resize the build with build_step (scale the whole design, "
-                                "keep the detail), then call save_build again. If this size is intended, call save_build with "
-                                "accept_problems explaining why.")
+                                "keep the detail), then call save_build again. accept_problems does not cover the size. "
+                                + ("" if os.environ.get("BLOCKFORGE_UNATTENDED") else "If you are talking with the user, ask them: keep this size or fix it to the target? "
+                                   "Only if they say keep it, call save_build with keep_size_user_answer set to their words."))
             m, link = session.save(s, args.get("title"))
             return _summary(m) + link
     except session.SessionError as e:
