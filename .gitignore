@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
-blockforge/data/
+blockforge/data/*
+!blockforge/data/ref_palette.json
 blockforge/voice/piper/
 blockforge/voice/*.onnx
 blockforge/voice/*.onnx.json

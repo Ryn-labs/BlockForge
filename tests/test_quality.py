@@ -1,5 +1,6 @@
-"""The building quality score (blockforge/quality.py): calibration builds from a bare box to a pattern-built manor, and
-two bench builds the owner's reviewer found too generously scored (tests/data, round 2 of 27 Nov)."""
+"""The building quality score (blockforge/quality.py): calibration builds from a bare box to a pattern-built manor, the
+bench builds the owner's reviewer found too generously scored (tests/data, rounds 2 and 3 of 27 Nov) and the looks
+measured on the render (round 3: the 1.13.0 manor read near-black but scored 85)."""
 import json
 import os
 import re
@@ -20,7 +21,11 @@ DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 # storey looking, dark wood everywhere, long and low (blocks.json of the bench, kept as fixtures)
 BENCH = {"manor": ("bench_wooden_manor_blocks.json", "large",
                    "A wooden manor with log frames, a layered roof, a balcony, window boxes and a terrace garden."),
-         "cottage": ("bench_small_cottage_blocks.json", "small", "A small cottage.")}
+         "cottage": ("bench_small_cottage_blocks.json", "small", "A small cottage."),
+         # the 1.13.0 manor (owner, 27 Nov: "the whole house reads near-black": dark oak frames, spruce and deepslate,
+         # a black roof) that scored 85
+         "dark": ("bench_dark_manor_1130_blocks.json", "large",
+                  "A wooden manor with log frames, a layered roof, a balcony, window boxes and a terrace garden.")}
 
 
 def blocks_of(code):
@@ -71,8 +76,43 @@ class Calibration(unittest.TestCase):
     def test_reference_like_manor_scores_80_or_more(self):
         r = quality.score(blocks_of(examples.code("light_manor")))
         self.assertGreaterEqual(r["total"], 80, quality.summary(r))
-        for part in ("contrast", "storeys", "balcony", "roof_style"):
+        for part in ("contrast", "looks", "storeys", "balcony", "roof_style"):
             self.assertGreaterEqual(r["parts"][part], 80, (part, quality.summary(r)))
+        self.assertIsNone(r["looks"]["cap"])
+        self.assertGreaterEqual(r["looks"]["wall_lightness"], 50)                # light walls on the render
+        self.assertGreaterEqual(r["looks"]["roof_colour"], 0.8)                  # a teal roof
+
+    def test_dark_1130_manor_is_below_the_gate(self):
+        blocks, size, prompt = bench_build("dark")
+        r = quality.score(blocks, size, prompt)
+        self.assertLess(r["total"], quality.QUALITY_MIN, quality.summary(r))
+        self.assertIsNotNone(r["looks"]["cap"])                                  # held down because it reads dark
+        self.assertLess(r["looks"]["wall_lightness"], 42)
+        self.assertLess(r["looks"]["roof_colour"], 0.2)                          # the near-black deepslate roof
+        self.assertLess(r["parts"]["looks"], 50)
+        self.assertLess(r["parts"]["roof_style"], 60)
+        self.assertTrue(any("reads dark" in f for f in r["findings"]), r["findings"][:3])
+
+    def test_dark_build_asked_for_is_not_penalised_for_darkness(self):
+        blocks, size, _ = bench_build("dark")
+        r = quality.score(blocks, size, "A dark gothic manor with log frames and a terrace garden.")
+        self.assertTrue(r["looks"]["dark_asked"])
+        self.assertIsNone(r["looks"]["cap"])
+        self.assertGreaterEqual(r["total"], 80, quality.summary(r))
+        self.assertEqual(r["parts"]["looks"], 100)
+        self.assertFalse(any("reads dark" in f for f in r["findings"]))
+        for p in ("spooky witch house", "Haunted mansion at night", "a medieval stronghold", "Blackstone fortress"):
+            self.assertTrue(quality.dark_asked(p), p)
+        for p in ("A wooden manor", "a blacksmith's cottage", "A light birch house", None):
+            self.assertFalse(quality.dark_asked(p), p)
+
+    def test_near_black_house_cannot_pass_the_gate(self):
+        """The reference-like manor rebuilt in dark oak, spruce and deepslate: same shape, so only the colours differ."""
+        code = (examples.code("light_manor").replace("birch_planks", "spruce_planks").replace("'oak_log'", "'dark_oak_log'")
+                .replace("prismarine_brick", "deepslate_tile").replace("birch_trapdoor", "dark_oak_trapdoor"))
+        r = quality.score(blocks_of(code))
+        self.assertLess(r["total"], quality.QUALITY_MIN, quality.summary(r))
+        self.assertGreaterEqual(quality.score(blocks_of(code), prompt="a spooky manor")["total"], 80)
 
     def test_bench_manor_dark_long_and_low_is_below_the_gate(self):
         blocks, size, prompt = bench_build("manor")
@@ -83,17 +123,17 @@ class Calibration(unittest.TestCase):
         self.assertLess(r["parts"]["roof_style"], 60)                   # spruce roof on spruce walls
         self.assertTrue(any("long and low" in f for f in r["findings"]), r["findings"])
 
-    def test_bench_cottage_dark_one_storey_lands_50_to_65(self):
+    def test_bench_cottage_dark_one_storey_is_below_the_gate(self):
         blocks, size, prompt = bench_build("cottage")
         r = quality.score(blocks, size, prompt)
-        self.assertGreaterEqual(r["total"], 50, quality.summary(r))
-        self.assertLessEqual(r["total"], 65, quality.summary(r))
+        self.assertGreaterEqual(r["total"], 30, quality.summary(r))
+        self.assertLess(r["total"], quality.QUALITY_MIN, quality.summary(r))      # dark logs, dark oak roof
         self.assertLess(r["parts"]["contrast"], 40)
         self.assertGreaterEqual(r["parts"]["storeys"], 60)               # one storey is fine for a small cottage
 
     def test_order_box_bench_patterns(self):
         box = quality.score(blocks_of(BOX))["total"]
-        manor = quality.score(*bench_build("manor"))["total"]
+        manor = max(quality.score(*bench_build("manor"))["total"], quality.score(*bench_build("dark"))["total"])
         ref = quality.score(blocks_of(examples.code("light_manor")))["total"]
         self.assertLess(box, manor)
         self.assertLess(manor, quality.score(blocks_of(examples.code("good_manor")))["total"])
@@ -111,7 +151,8 @@ class Parts(unittest.TestCase):
     def test_weights_add_up(self):
         self.assertEqual(sum(quality.WEIGHTS.values()), 100)
         self.assertEqual(set(quality.WEIGHTS), {"facade", "roof", "massing", "palette", "detail", "surroundings",
-                                                "contrast", "storeys", "windows", "balcony", "roof_style"})
+                                                "contrast", "looks", "storeys", "windows", "balcony", "roof_style"})
+        self.assertGreaterEqual(quality.WEIGHTS["contrast"] + quality.WEIGHTS["looks"], 30)    # colours on the render
         new = sum(quality.WEIGHTS[k] for k in ("contrast", "storeys", "windows", "balcony", "roof_style"))
         self.assertGreaterEqual(new, 60)                                 # the reference look carries the score
         self.assertEqual(set(quality.LABELS) >= set(quality.WEIGHTS), True)
@@ -153,6 +194,36 @@ class Parts(unittest.TestCase):
         self.assertGreater(small["parts"]["storeys"], big["parts"]["storeys"])
         self.assertEqual(quality.score(blocks_of(one), prompt="a cottage")["parts"]["storeys"], small["parts"]["storeys"])
         self.assertLess(quality.score(blocks_of(BOX), size="small")["total"], 25)
+
+
+class Looks(unittest.TestCase):
+    """The looks are measured on the side views drawn with render.py's block colours, not on block lists."""
+
+    def test_render_measures(self):
+        light_house = patterns.framed_house(0, 0, 15, 10, 1, floors=2, storey=4, spacing=5)
+        dark_house = patterns.framed_house(0, 0, 15, 10, 1, floors=2, storey=4, spacing=5, style="dark")
+        lit = quality.score(blocks_of(light_house + patterns.gable_roof_trim(0, 0, 15, 10, 11, overhang=2)))["looks"]
+        dark = quality.score(blocks_of(dark_house + patterns.gable_roof_trim(0, 0, 15, 10, 11, "gray", "dark_oak",
+                                                                             overhang=2)))["looks"]
+        self.assertGreater(lit["wall_lightness"], dark["wall_lightness"] + 15)
+        self.assertGreater(lit["light_share"], 0.5)
+        self.assertLess(dark["light_share"], 0.2)
+        self.assertGreater(lit["fill_lightness"] - lit["frame_lightness"], 20)    # birch fill, oak log frame
+        self.assertGreater(lit["roof_colour"], 0.8)                               # teal
+        self.assertLess(dark["roof_colour"], 0.1)                                 # deepslate
+        self.assertGreater(lit["closeness"], dark["closeness"])
+
+    def test_reference_palette_is_derived_numbers_only(self):
+        refs = quality.ref_palette()
+        self.assertGreaterEqual(len(refs), 5)                                     # the five photos (refs 6-7 are plans)
+        for name, h in refs.items():
+            self.assertEqual(len(h), quality.HIST_SIZE, name)
+            self.assertAlmostEqual(sum(h), 1.0, places=2)
+        self.assertAlmostEqual(quality.hist_closeness(refs[min(refs)], refs[min(refs)]), 1.0)
+        oak = quality.colour_hist([quality.colour("oak_planks")] * 10)
+        black = quality.colour_hist([quality.colour("blackstone")] * 10)
+        self.assertGreater(max(quality.hist_closeness(oak, h) for h in refs.values()),
+                           max(quality.hist_closeness(black, h) for h in refs.values()))
 
 
 class NewParts(unittest.TestCase):

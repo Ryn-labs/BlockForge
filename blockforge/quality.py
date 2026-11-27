@@ -6,33 +6,40 @@ score(blocks, size=None, prompt=None) -> {"total": 0-100 or None, "building": bo
 Only buildings are scored: something with at least one closed room (walls on all four sides, a roof over it and 2 blocks
 of head room). Bridges, trees, terrain, statues and walls get total None (neutral, never gated).
 
-The eleven parts and their weights (docs/QUALITY.md has the rules behind the numbers):
-  contrast 16   the walls seen from outside: a light wall fill (oak, birch, stripped logs, plaster) against a dark log
-                frame; one dark material everywhere is low
-  storeys 15    2+ floors (a small house, hut or cottage may have 1), height against length: long and low is low
-  windows 12    glass share of every facade, framed (shutters, box, sill), big windows (4+ panes together)
-  balcony 11    outdoor floors above the ground floor with a railing (balconies, terraces), an outside stair up
-  roof_style 11 a roof colour that stands out from the walls (teal, green, gray, red ...), roof planes at several heights
-  facade 7      wall depth: posts, frames and beams sticking out 1+ from the wall plane; flat runs longer than 5 = penalty
-  roof 7        pitched stair/slab roof, eaves overhanging 1+, a trim or ridge in a second material; flat = big penalty
-  massing 6     main volume + wings/porch/balcony/annex, more than one roof height; a single box is low
-  palette 4     3-6 materials with roles: frame (logs), wall fill, a different roof, accents; 1 material or 10 random = low
-  detail 6      windows per facade metre, framed windows, shutters/boxes/lanterns/fences/pots, a chimney
-  surroundings 5   a path to the door, garden/fence/farm/terrace/light around the house
+The twelve parts and their weights (docs/QUALITY.md has the rules behind the numbers):
+  contrast 16   on the render: a light wall fill (oak, birch, stripped logs, plaster) against the log frame, most of the
+                wall seen from outside light; one dark material everywhere is low
+  looks 14      on the render: light walls, a coloured (not near-black or grey) roof, a colour histogram close to the
+                nearest reference house (blockforge/data/ref_palette.json)
+  storeys 14    2+ floors (a small house, hut or cottage may have 1), height against length: long and low is low
+  windows 11    glass share of every facade, framed (shutters, box, sill), big windows (4+ panes together)
+  balcony 10    outdoor floors above the ground floor with a railing (balconies, terraces), an outside stair up
+  roof_style 10 a roof colour that stands out from the walls (teal, green, red ...), roof planes at several heights
+  facade 5      wall depth: posts, frames and beams sticking out 1+ from the wall plane; flat runs longer than 5 = penalty
+  roof 5        pitched stair/slab roof, eaves overhanging 1+, a trim or ridge in a second material; flat = big penalty
+  massing 4     main volume + wings/porch/balcony/annex, more than one roof height; a single box is low
+  palette 3     3-6 materials with roles: frame (logs), wall fill, a different roof, accents; 1 material or 10 random = low
+  detail 4      windows per facade metre, framed windows, shutters/boxes/lanterns/fences/pots, a chimney
+  surroundings 4   a path to the door, garden/fence/farm/terrace/light around the house
+"Render" = the four side views drawn with render.py's block colours (render.nearest), house cells only. A house that
+reads dark there is held below the gate (DARK_CAP) unless the prompt asks for a dark look (dark_asked).
 """
 import bisect
 import collections
 import colorsys
+import json
+import math
+import os
 
 from .checks import PATH_BLOCKS, THIN_NAMES, THIN_SUFFIXES, name as _name, props as _props
-from .render import block_color
+from .render import block_color, nearest
 
 QUALITY_MIN = 60                     # save_build and the script engine refuse/fix a building below this (one place)
-WEIGHTS = {"contrast": 16, "storeys": 15, "windows": 12, "balcony": 11, "roof_style": 11,
-           "facade": 7, "roof": 7, "massing": 6, "palette": 4, "detail": 6, "surroundings": 5}
+WEIGHTS = {"contrast": 16, "looks": 14, "storeys": 14, "windows": 11, "balcony": 10, "roof_style": 10,
+           "facade": 5, "roof": 5, "massing": 4, "palette": 3, "detail": 4, "surroundings": 4}
 LABELS = {"facade": "Facade depth", "roof": "Roof", "massing": "Massing", "palette": "Palette", "detail": "Detail",
           "surroundings": "Surroundings", "contrast": "Wall contrast", "storeys": "Storeys", "windows": "Windows",
-          "balcony": "Balconies", "roof_style": "Roof colour and layers"}
+          "balcony": "Balconies", "roof_style": "Roof colour and layers", "looks": "Looks (colours)"}
 SMALL_WORDS = ("tiny", "small", "little", "hut", "cottage", "cabin", "shed")
 SMALL_ROOMS = 36                     # a building with this many room columns or fewer is small whatever the prompt says
 MIN_ROOM_COLUMNS = 4                 # a 2 x 2 room with 2 blocks of head room is the smallest building
@@ -443,8 +450,8 @@ def _roof(m):
         fix.append("Let the roof stick out 1 block past every wall (overhang=1, barge boards on the gable ends).")
     if not trim:
         find.append("Roof: one material only, no trim or ridge in a second material.")
-        fix.append("Add a roof trim: the gable edges (barge boards) and the ridge in a second material, e.g. dark oak "
-                   "stairs on a spruce roof (pattern gable_roof_trim).")
+        fix.append("Add a roof trim: the gable edges (barge boards) and the ridge in a second material, e.g. oak "
+                   "stairs on a teal roof (pattern gable_roof_trim, trim='oak').")
     if penalty > 0:
         find.append(f"Roof: one roof plane of {big} blocks facing {big_at[0]} near x {big_at[1][0]}, z {big_at[1][1]} "
                     f"is very large and plain.")
@@ -576,8 +583,8 @@ def _palette(m):
                    f"wood than the wall fill (pattern framed_wall).")
     if not distinct_roof:
         find.append(f"Palette: the roof is the same material as the walls ({fill or roof_mat}).")
-        fix.append("Make the roof a different material from the walls (e.g. spruce or dark oak stairs over oak planks or "
-                   "plaster walls).")
+        fix.append("Make the roof a different material from the walls (e.g. teal prismarine brick stairs with an "
+                   "oak trim over birch or oak walls).")
     if len(accents) < 3:
         fix.append("Add accents: glass panes, trapdoor shutters, lanterns, fences.")
     return max(0, min(100, score)), find, fix
@@ -721,6 +728,8 @@ def _surroundings(m):
 # ------------------------------------------------------------------ colour, storeys, windows, balconies, roof style
 WALL_KINDS = ("full", "frame", "stairs", "slab", "trapdoor", "fence")
 LIGHT_L = 45                         # CIE lightness from here up reads as a light wall (oak, birch, stripped logs, plaster)
+LOOK_CLOSE = (0.35, 0.6)             # histogram closeness to the nearest reference: 0 points at the first, full at the second
+DARK_CAP = (35, 65)                  # a house that reads dark (not asked for) scores at most 35 + 65 x brightness (_bright)
 
 
 def _clamp(v):
@@ -737,6 +746,98 @@ def lightness(n):
     lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in (v / 255 for v in colour(n))]
     yy = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
     return 116 * yy ** (1 / 3) - 16 if yy > 0.008856 else 903.3 * yy
+
+
+def lab(rgb):
+    """CIE L*a*b* (D65) of an sRGB colour (0-255 each)."""
+    lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in (v / 255 for v in rgb)]
+    xyz = (0.4124 * lin[0] + 0.3576 * lin[1] + 0.1805 * lin[2], 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2],
+           0.0193 * lin[0] + 0.1192 * lin[1] + 0.9505 * lin[2])
+    f = [t ** (1 / 3) if t > 0.008856 else 7.787 * t + 16 / 116
+         for t in (xyz[0] / 0.95047, xyz[1], xyz[2] / 1.08883)]
+    return 116 * f[1] - 16, 500 * (f[0] - f[1]), 200 * (f[1] - f[2])
+
+
+# Colour histograms: 4 lightness bands x 16 colour bins (grey + 15 hue sectors of 24 degrees) = 64 numbers. A colour is
+# shared between the two nearest bands and hue sectors (and grey for pale colours), so a texture a little lighter or a
+# hue a little off lands in the same bins. tools/ref_palette.py stores the histograms of the reference houses with this.
+HIST_BANDS, HIST_HUES = 4, 15
+HIST_SIZE = HIST_BANDS * (HIST_HUES + 1)
+_hist_cache = {}
+
+
+def _hist_bins(rgb):
+    got = _hist_cache.get(rgb)
+    if got is not None:
+        return got
+    L, a, b = lab(rgb)
+    u = _clamp(L / 100) * HIST_BANDS - 0.5
+    lo = int(max(0, min(HIST_BANDS - 1, u // 1)))
+    hi = min(HIST_BANDS - 1, lo + 1)
+    t = _clamp(u - lo) if hi != lo else 0.0
+    bands = [(lo, 1 - t), (hi, t)] if hi != lo else [(lo, 1.0)]
+    C = (a * a + b * b) ** 0.5
+    g = _clamp((14 - C) / 8)                                         # grey share: all grey below chroma 6, none above 14
+    hue = (math.degrees(math.atan2(b, a)) % 360) / (360 / HIST_HUES) - 0.5
+    h0 = int(hue // 1) % HIST_HUES
+    th = hue - hue // 1
+    cols = [(0, g)] + ([(1 + h0, (1 - g) * (1 - th)), (1 + (h0 + 1) % HIST_HUES, (1 - g) * th)] if g < 1 else [])
+    out = {}
+    for band, wb in bands:
+        for col, wc in cols:
+            if wb * wc > 0:
+                k = band * (HIST_HUES + 1) + col
+                out[k] = out.get(k, 0.0) + wb * wc
+    _hist_cache[rgb] = out
+    return out
+
+
+def colour_hist(colours):
+    """Normalised 64-number colour histogram of an iterable of RGB tuples, or of a {rgb: count} dict."""
+    items = colours.items() if isinstance(colours, dict) else ((c, 1) for c in colours)
+    h = [0.0] * HIST_SIZE
+    for rgb, n in items:
+        for k, w in _hist_bins(tuple(rgb)).items():
+            h[k] += w * n
+    s = sum(h)
+    return [v / s for v in h] if s else h
+
+
+def hist_closeness(a, b):
+    """1 - total variation distance: 1 = the same colour mix, 0 = nothing in common."""
+    return 1 - 0.5 * sum(abs(x - y) for x, y in zip(a, b))
+
+
+_refs = None
+
+
+def ref_palette():
+    """{name: 64-number histogram} of the reference house photos (blockforge/data/ref_palette.json, made by
+    tools/ref_palette.py). The two drawn plans (refs 6 and 7) are stored too but not scored against: their flat tile
+    colours, grid lines and paper are not what a house looks like."""
+    global _refs
+    if _refs is None:
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "ref_palette.json")
+        try:
+            with open(path, encoding="utf-8") as f:
+                _refs = {k: v["hist"] for k, v in json.load(f)["refs"].items()
+                         if len(v["hist"]) == HIST_SIZE and v.get("kind", "photo") == "photo"}
+        except (OSError, ValueError, KeyError):
+            _refs = {}
+    return _refs
+
+
+DARK_WORDS = ("dark", "gothic", "spooky", "haunted", "night", "midnight", "shadow", "sinister", "evil", "vampire", "witch",
+              "necromancer", "cursed", "horror", "creepy", "grim", "stronghold", "fortress", "nether", "blackstone",
+              "deepslate", "obsidian", "black", "ominous", "dracula", "villain", "crypt", "dungeon")
+NOT_DARK = ("blacksmith", "blacksmiths", "nightingale")
+
+
+def dark_asked(prompt=None, size=None):
+    """True when the request asks for a dark look (dark, gothic, spooky, night, haunted, stronghold, blackstone ...): a
+    dark house is then what was wanted, so the look parts do not ask for light walls or a coloured roof."""
+    words = "".join(ch if ch.isalnum() else " " for ch in f"{prompt or ''} {size or ''}".lower()).split()
+    return any(w.startswith(DARK_WORDS) and w not in NOT_DARK for w in words)
 
 
 def _cdist(a, b):
@@ -781,38 +882,138 @@ def _seen(m):
     return vis
 
 
+def _pct(vals, q):
+    """The q-quantile (0..1) of [(value, count)] sorted by value."""
+    tot = sum(n for _, n in vals)
+    acc = 0
+    for v, n in vals:
+        acc += n
+        if acc >= q * tot:
+            return v
+    return vals[-1][0] if vals else 0.0
+
+
+def _view(m):
+    """What the eye sees: the four side views of the house drawn with render.py's block colours (render.nearest: the
+    nearest block in every cell; the building's columns and 2 round them, above the foundation, so no sky, ground,
+    garden or trees). Each cell is roof (stairs/slabs, the top of a column 3+ up), window (glass) or wall (the rest).
+    Returns a dict: wall_l (mean CIE lightness of the walls), light (share of wall cells with lightness 45+),
+    frame_l / fill_l / dl (frame vs fill lightness), roof_l, roof_colour (0..1, a coloured roof; near-black or grey
+    is 0), hist (64-bin colour histogram of the whole house), ref / closeness (the nearest reference house)."""
+    if getattr(m, "view", None) is not None:
+        return m.view
+    house = {p: m.S[p] for p in m.ST if (p[0], p[2]) in m.F2 and p[1] > m.g}
+    wall, roof, allc = collections.Counter(), collections.Counter(), collections.Counter()
+    frame_l, fill_l = [], []
+    for side in ("north", "east", "south", "west"):
+        for near, p, st in nearest(house, side).values():
+            k = m.K[p]
+            rgb = block_color(st)
+            allc[rgb] += 1
+            if k == "glass":
+                continue
+            low = "half=top" not in st and "type=top" not in st
+            if (k in ("stairs", "slab") and low) or (k in ("full", "frame") and p[1] >= m.g + 3
+                                                    and m.T.get((p[0], p[2])) == p[1]):
+                roof[rgb] += 1
+                continue
+            if k in ("door", "light", "pot", "banner", "sign", "prop", "other"):
+                continue
+            wall[rgb] += 1
+            post = k == "frame" and not m.N[p].startswith("stripped_")   # a stripped log reads as fill, not frame
+            (frame_l if post else fill_l if k in ("full", "frame") else []).append(lab(rgb)[0])
+    v = {"cells": sum(allc.values()), "wall_cells": sum(wall.values()), "roof_cells": sum(roof.values())}
+    wl = sorted((lab(c)[0], n) for c, n in wall.items())
+    nw = max(1, v["wall_cells"])
+    v["wall_l"] = sum(L * n for L, n in wl) / nw
+    v["light"] = sum(n for L, n in wl if L >= LIGHT_L) / nw
+    if len(frame_l) >= 0.05 * nw and len(fill_l) >= 0.05 * nw:
+        v["frame_l"], v["fill_l"] = sum(frame_l) / len(frame_l), sum(fill_l) / len(fill_l)
+    elif wl:
+        v["frame_l"], v["fill_l"] = _pct(wl, 0.2), _pct(wl, 0.8)           # no log frame: the dark and light ends
+    else:
+        v["frame_l"] = v["fill_l"] = 0.0
+    v["dl"] = abs(v["fill_l"] - v["frame_l"])
+    rc = rl = 0.0
+    for c, n in roof.items():
+        L, a, b = lab(c)
+        rc += n * _clamp(((a * a + b * b) ** 0.5 - 5) / 15) * _clamp((L - 22) / 18)
+        rl += n * L
+    nr = max(1, v["roof_cells"])
+    v["roof_colour"], v["roof_l"] = rc / nr, rl / nr
+    v["roof_mat"] = max(roof, key=roof.get) if roof else None
+    v["hist"] = colour_hist(allc)
+    refs = ref_palette()
+    best = max(((hist_closeness(v["hist"], h), name) for name, h in refs.items()), default=(0.0, None))
+    v["closeness"], v["ref"] = best
+    m.view = v
+    return v
+
+
 def _contrast(m):
-    vis = _seen(m)
-    total = sum(vis.values())
+    """Frame against fill, measured on the render (_view): the lightness gap between the log frame and the wall fill and
+    the share of the wall the eye sees as light."""
+    v = _view(m)
     x1, z1, x2, z2 = m.box
     find, fix = [], []
-    if total < 10:
+    if v["wall_cells"] < 10:
         return 0, ["Wall contrast: almost no wall surface seen from outside."], [
-            f"Build walls round x {x1}..{x2}, z {z1}..{z2}: a light fill (birch or oak planks) in a dark log frame "
-            f"(pattern framed_house with style='light')."]
-    frames = [(n, mat) for mat, n in vis.items() if kind(mat) == "frame" and n >= 0.08 * total]
-    fills = [(n, mat) for mat, n in vis.items() if kind(mat) != "frame" and n >= 0.08 * total]
-    frame = max(frames)[1] if frames else None
-    fill = max(fills)[1] if fills else None
-    dl = abs(lightness(fill) - lightness(frame)) if frame and fill else 0.0
-    light = sum(n for mat, n in vis.items() if lightness(mat) >= LIGHT_L) / total
-    c1 = _clamp((dl - 5) / 20)
-    c3 = _clamp((light - 0.2) / 0.4)
+            f"Build walls round x {x1}..{x2}, z {z1}..{z2}: a light fill (birch or oak planks) in an oak or spruce log "
+            f"frame (pattern framed_house, style='light')."]
+    dl, light = v["dl"], v["light"]
+    c1 = _clamp((dl - 5) / 15)
+    c3 = 1.0 if m.dark else _clamp((light - 0.2) / 0.4)
     score = 100 * c1 * (0.15 + 0.85 * c3)
-    seen = ", ".join(f"{mat} {round(100 * n / total)}%" for mat, n in vis.most_common(4))
     if c1 < 0.75:
-        find.append(f"Wall contrast: the walls round x {x1}..{x2}, z {z1}..{z2} read as one tone ({seen}); the frame and "
-                    f"the fill differ by only {round(dl)} in lightness (frame {frame or 'none'}, fill {fill or 'none'}; "
-                    f"good: 25 or more).")
-        fix.append(f"Fill the walls round x {x1}..{x2}, z {z1}..{z2} with a light material (birch planks, oak planks, "
-                   f"stripped birch/oak logs, white terracotta) between dark log posts and beams (dark oak or spruce log): "
-                   f"pattern framed_house(..., style='light').")
+        find.append(f"Wall contrast: the walls round x {x1}..{x2}, z {z1}..{z2} read as one tone on the render: frame "
+                    f"lightness {round(v['frame_l'])}, fill {round(v['fill_l'])}, {round(dl)} apart (good: 20 or more).")
+        fix.append(f"Fill the walls round x {x1}..{x2}, z {z1}..{z2} with a light material (birch or oak planks, stripped "
+                   f"birch/oak logs, white terracotta) between oak or spruce log posts and beams: pattern "
+                   f"framed_house(..., style='light').")
     if c3 < 0.75:
-        find.append(f"Wall contrast: only {round(100 * light)}% of the wall surface seen from outside is light "
-                    f"({seen}); good houses show 60% or more light fill.")
-        if c1 >= 0.75:
-            fix.append(f"Show more of the light fill round x {x1}..{x2}, z {z1}..{z2}: posts every 4-5 blocks instead of "
-                       f"every 2, a light fill (birch or oak planks) instead of dark planks or logs.")
+        find.append(f"Wall contrast: only {round(100 * light)}% of the wall seen from outside is light (lightness 45+); "
+                    f"the reference houses show 60% or more light wood.")
+        fix.append(f"Show more light wall round x {x1}..{x2}, z {z1}..{z2}: a light fill (birch or oak planks, stripped "
+                   f"birch/oak logs) instead of spruce or dark oak, posts every 4-6 blocks, not every 2.")
+    return score, find, fix
+
+
+def _bright(v):
+    """0..1: how far the walls are from reading dark (mean lightness 35 -> 0, 50 -> 1) and how much of them is light."""
+    return min(_clamp((v["wall_l"] - 35) / 15), _clamp((v["light"] - 0.15) / 0.4))
+
+
+def _looks(m):
+    """The colours on the render against the reference houses: wall brightness, a coloured (not near-black or grey)
+    roof, and how close the colour histogram of the house is to the nearest reference picture. A dark look asked for
+    (dark_asked) is not penalised."""
+    v = _view(m)
+    x1, z1, x2, z2 = m.box
+    find, fix = [], []
+    hs = _clamp((v["closeness"] - LOOK_CLOSE[0]) / (LOOK_CLOSE[1] - LOOK_CLOSE[0])) if v["ref"] else 0.5
+    if m.dark:
+        return 100.0, [], []
+    bright = _clamp((v["wall_l"] - 35) / 15)
+    rc = v["roof_colour"] if v["roof_cells"] else 0.0
+    score = 100 * (0.4 * bright + 0.25 * rc + 0.35 * hs)
+    if bright < 0.75:
+        find.append(f"Looks: the house reads dark on the render: mean wall lightness {round(v['wall_l'])} (the reference "
+                    f"houses: 50 or more), {round(100 * v['light'])}% of the wall light.")
+        fix.append(f"Lighten the walls round x {x1}..{x2}, z {z1}..{z2}: birch or oak planks or stripped birch/oak logs "
+                   f"for the fill, oak or spruce logs for the frame; no dark oak, deepslate or blackstone walls unless "
+                   f"the user asked for a dark build.")
+    if v["roof_cells"] and rc < 0.6:
+        find.append(f"Looks: the roof reads {'near-black' if v['roof_l'] < 30 else 'grey or dull'} (lightness "
+                    f"{round(v['roof_l'])}); the reference roofs are teal or warm wood.")
+        fix.append(f"Give the roof over x {x1}..{x2}, z {z1}..{z2} a colour: teal (prismarine_brick_stairs, "
+                   f"stairs='teal'), green (oxidized_cut_copper_stairs) or warm oak, with an oak trim - "
+                   f"gable_roof_trim(..., stairs='teal', trim='oak').")
+    if hs < 0.6:
+        find.append(f"Looks: the colour mix of the house is far from the reference houses (closeness "
+                    f"{v['closeness']:.2f} to {v['ref'] or 'none'}; good: {LOOK_CLOSE[1]:.2f}+).")
+        if not fix:
+            fix.append("Use the reference palette: light oak/birch walls in an oak or spruce log frame, a teal roof with "
+                       "an oak trim, white-framed windows; fewer grey and black blocks.")
     return score, find, fix
 
 
@@ -1086,6 +1287,8 @@ def _roof_style(m):
     if rm and walls:
         near = min(walls, key=lambda w: _cdist(rm, w))
         col = 0.5 * _clamp(_cdist(rm, near) / 50) + 0.5 * min(_hue_gap(rm, w) for w in walls)
+        if not m.dark:
+            col *= 0.3 + 0.7 * _view(m)["roof_colour"]               # a near-black or grey roof is no colour of its own
     levels = []
     for y, comp in sorted(_roof_planes(m)):
         if not levels or y - levels[-1] >= 2:
@@ -1096,8 +1299,8 @@ def _roof_style(m):
         find.append(f"Roof colour: the roof over x {x1}..{x2}, z {z1}..{z2} ({rm or 'none'}) is the same colour family as "
                     f"the walls ({near or ', '.join(walls) or 'none'}).")
         fix.append(f"Give the roof over x {x1}..{x2}, z {z1}..{z2} its own colour: teal (prismarine_brick_stairs), green "
-                   f"(oxidized_cut_copper_stairs), gray (deepslate_tile_stairs) or red (red_nether_brick_stairs) with a wood "
-                   f"trim - gable_roof_trim(..., stairs='teal', trim='oak').")
+                   f"(oxidized_cut_copper_stairs), red (red_nether_brick_stairs) or brick with an oak trim - "
+                   f"gable_roof_trim(..., stairs='teal', trim='oak'); grey or near-black only for a dark build.")
     if lay < 1:
         find.append(f"Roof layers: roof planes at {len(levels)} height{'s' if len(levels) != 1 else ''} "
                     f"({', '.join(f'y {y}' for y in levels) or 'none'}); the reference houses layer 3 or more.")
@@ -1106,7 +1309,7 @@ def _roof_style(m):
     return score, find, fix
 
 
-PARTS = (("contrast", _contrast), ("storeys", _storeys), ("windows", _windows), ("balcony", _balcony),
+PARTS = (("contrast", _contrast), ("looks", _looks), ("storeys", _storeys), ("windows", _windows), ("balcony", _balcony),
          ("roof_style", _roof_style), ("facade", _facade), ("roof", _roof), ("massing", _massing), ("palette", _palette),
          ("detail", _detail), ("surroundings", _surroundings))
 
@@ -1260,6 +1463,7 @@ def score(blocks, size=None, prompt=None):
     houses, open space, a landmark, density)."""
     m = _Model(blocks or {})
     m.small = is_small(size, prompt)
+    m.dark = dark_asked(prompt, size)
     if not m.building:
         return {"total": None, "building": False, "town": False, "buildings": 0, "parts": {}, "fixes": {}, "weights": {},
                 "findings": ["Not a building (no closed room with 2 blocks of head room), so its quality is not scored."]}
@@ -1280,8 +1484,21 @@ def score(blocks, size=None, prompt=None):
         weights = {k: v / 2 for k, v in WEIGHTS.items()}
         weights.update({k: v / 2 for k, v in TOWN_WEIGHTS.items()})
     total = int(round(sum(parts[k] * w for k, w in weights.items()) / sum(weights.values())))
+    v = _view(m)
+    looks = {"wall_lightness": round(v["wall_l"], 1), "light_share": round(v["light"], 2), "frame_lightness":
+             round(v["frame_l"], 1), "fill_lightness": round(v["fill_l"], 1), "roof_lightness": round(v["roof_l"], 1),
+             "roof_colour": round(v["roof_colour"], 2), "closeness": round(v["closeness"], 2), "nearest_ref": v["ref"],
+             "dark_asked": m.dark, "cap": None}
+    if not m.dark:
+        cap = int(round(DARK_CAP[0] + DARK_CAP[1] * _bright(v)))
+        if cap < total:
+            looks["cap"] = cap
+            findings.insert(0, f"Looks: the house reads dark (mean wall lightness {round(v['wall_l'])}, "
+                               f"{round(100 * v['light'])}% light), so the total is held at {cap} (it would be {total}). "
+                               f"Light walls and a coloured roof lift the cap; a dark look is fine only when asked.")
+            total = cap
     return {"total": total, "building": True, "town": town, "buildings": len(bs), "parts": parts,
-            "findings": findings, "fixes": fixes, "weights": weights}
+            "findings": findings, "fixes": fixes, "weights": weights, "looks": looks}
 
 
 def weakest(result, n=3):
@@ -1316,15 +1533,17 @@ def built_only(blocks, land):
 
 
 RUBRIC = """Score your build 1-5 on each part (5 = like the reference survival manors):
-1. Wall contrast - a light wall fill (birch, oak, stripped logs, plaster) between dark log posts and beams; most of the
-   wall seen from outside is light. 5 = light fill in a dark frame, 1 = one dark wood everywhere.
+1. Wall contrast and colours - a light wall fill (birch, oak, stripped logs, plaster) between oak or spruce log posts
+   and beams; most of the wall seen from outside is light; a teal or coloured roof, white-framed windows (dark oak,
+   deepslate, blackstone only when the user asked for a dark build). 5 = light warm wood like the reference manors,
+   1 = the house reads near-black.
 2. Storeys - 2-3 floors (a small hut or cottage may have 1), as tall as it is long, not a long low bar.
    5 = 2-3 storeys with a storey band between them, 1 = one long low floor.
 3. Windows - big 2 x 2 windows in every bay of every facade with shutters and a flower box. 5 = 12-20% glass on each
    side, 1 = a few small panes.
 4. Balconies - balconies and terraces with railings on the upper floors, an outside stair with landings up to one.
    5 = two or more and a stair, 1 = none.
-5. Roof colour and layers - a roof colour of its own (teal, green, gray, red) with a wood trim, roofs at 3+ heights
+5. Roof colour and layers - a roof colour of its own (teal, green, red) with an oak trim, roofs at 3+ heights
    (storey bands, wing and porch roofs, the main roof). 5 = colored layered roofs, 1 = one roof in the wall wood.
 6. Facade depth - log posts and beams stick out 1 block from the wall; no flat wall longer than 5 blocks without a post,
    window or step. 5 = framed walls on every side, 1 = flat plank or stone walls.
