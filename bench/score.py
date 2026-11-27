@@ -11,6 +11,8 @@ Works on a build folder in the (temp) data dir: blocks.json, meta.json, code.py.
   size_off       how far the largest side is outside the asked size range (blocks)
   terrain_floating / terrain_buried   (builds on a terrain) floating groups with ground under them, and path blocks / steps with
                  untouched terrain on top of them. They are counted INSTEAD of floating / buried_path, never twice.
+  quality        blockforge.quality.score total 0-100 (HIGHER is better; buildings and towns only, null for a bridge, tree,
+                 terrain...). On terrain only what was built is scored. Not a mistake count: it is never added to the totals.
 python bench/score.py <build dir> [target_lo target_hi] [--terrain file.schem]   -> one JSON line"""
 import sys, os, json, collections, re
 
@@ -167,7 +169,16 @@ def score(d, lo=None, hi=None, terrain=None):
     keys = ["floating", "removed", "buried_path", "jump_steps", "corner_turns", "blocked_doors", "wrong_facing", "size_off"]
     if T:
         keys += ["terrain_floating", "terrain_buried"]
-    return {k: r.get(k, 0) for k in keys}
+    out = {k: r.get(k, 0) for k in keys}
+    out["quality"] = quality_total(C, T)
+    return out
+
+
+def quality_total(C, T=None):
+    """blockforge.quality total of the build (what was built on a terrain), or None when it is not a building."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    from blockforge import quality
+    return quality.score(quality.built_only(C, T or None))["total"]
 
 
 def overwritten(code):

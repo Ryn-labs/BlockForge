@@ -76,11 +76,13 @@ for p in PROMPTS:
     with open(res_path, "w", encoding="utf-8") as f:
         for k in sorted(done): f.write(json.dumps(done[k]) + "\n")
     print("BENCH_BUILD", p["id"], p["key"], "mistakes", r["mistakes"], {k: r.get(k) for k in KEYS if r.get(k)}, "time", r["time_s"], r.get("error", ""), flush=True)
-cols = ["id", "key"] + list(KEYS) + ["mistakes", "time_s", "cost"]
+cols = ["id", "key"] + list(KEYS) + ["mistakes", "quality", "time_s", "cost"]
 rows = [done[k] for k in sorted(done)]
 tab = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
-for r in rows: tab.append("| " + " | ".join(str(r.get(c, "")) for c in cols) + " |")
+for r in rows: tab.append("| " + " | ".join("" if r.get(c) is None else str(r.get(c, "")) for c in cols) + " |")
 tot = {c: sum(max(0, r.get(c, 0) or 0) for r in rows) for c in cols[2:]}
+qs = [r["quality"] for r in rows if r.get("quality") is not None]
+tot["quality"] = round(sum(qs) / len(qs)) if qs else 0                   # the average, not a sum: higher is better
 tab.append("| total | | " + " | ".join(str(round(tot[c], 2)) for c in cols[2:]) + " |")
 open(os.path.join(OUT, "table.md"), "w", encoding="utf-8").write(f"# BlockForge {VERSION} benchmark\n\n" + "\n".join(tab) + "\n")
 print("BENCH_OK", VERSION, "builds", len(rows), "total", tot["mistakes"], "time", tot["time_s"], "cost", tot["cost"])
