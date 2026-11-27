@@ -138,6 +138,34 @@ def _floating(C):
     return out
 
 
+def _free(C, p):
+    """Nothing there at all (air, or no block)."""
+    return name(C.get(p)) in ("air", "cave_air", "void_air")
+
+
+def _walkable_like(C, x, y, z):
+    s = C.get((x, y, z))
+    return shape(s) in ("bottom_stair", "bottom_slab") or name(s) in PATH_BLOCKS
+
+
+def _is_ground_path(C, x, y, z):
+    """A path-material block is path only when it sits on something solid, is the highest block of its column within
+    3 blocks (nothing above: not a wall or roof top), and a neighbour at the same height or one up or down is walkable too."""
+    if not is_solid(C.get((x, y - 1, z))):
+        return False
+    if not all(_free(C, (x, y + h, z)) for h in (1, 2, 3)):
+        return False
+    return any(_walkable_like(C, x + a, y + dy, z + c) for a, c in DV.values() for dy in (-1, 0, 1))
+
+
+def _is_roof_step(C, x, y, z):
+    """The single ridge stair of an odd-width gable roof: stairs one block lower on both opposite sides of it (a roof
+    peak). A climb on a road never has lower stairs on both sides of one stair."""
+    def low(a, c):
+        return name(C.get((x + a, y - 1, z + c))).endswith("_stairs")
+    return (low(1, 0) and low(-1, 0)) or (low(0, 1) and low(0, -1))
+
+
 def run(blocks, size=None):
     """All findings for a build, capped per check. `size` is accepted for callers that have it; no check needs it yet."""
     C = blocks
@@ -158,8 +186,10 @@ def run(blocks, size=None):
         n, sh = name(s), shape(s)
         if sh not in ("bottom_stair", "bottom_slab") and n not in PATH_BLOCKS:
             continue
-        if n in PATH_BLOCKS and not any(is_step(g((x + a, y + h, z + c))) for a, c in DV.values() for h in (-1, 0, 1)):
-            continue                                              # a path material counts only next to steps
+        if n in PATH_BLOCKS and not _is_ground_path(C, x, y, z):
+            continue                                              # wall and roof tops are not paths
+        if sh in ("bottom_stair", "bottom_slab") and _is_roof_step(C, x, y, z):
+            continue                                              # the ridge stair of a roof is not a path
         walk[(x, y, z)] = s
         here = (x, y, z)
         for h in (1, 2):

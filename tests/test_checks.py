@@ -174,3 +174,55 @@ class FixMessage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RoofIsNotPath(unittest.TestCase):
+    PATH_CHECKS = ("buried_path", "headroom", "jump_step", "corner_turn", "wrong_facing")
+
+    def house(self, w, ridge):
+        from blockforge import buildkit as bk
+        bk._blocks.clear()
+        bk.fill(0, 0, 0, w + 4, 0, 10, "stone")
+        bk.fill(2, 1, 2, 2 + w, 4, 8, "stone_bricks", hollow=True)
+        bk.gable_roof(2, 2, 2 + w, 8, 5, "stone_brick_stairs", fill_block="stone_bricks", ridge=ridge)
+        return dict(bk._blocks)
+
+    def test_stone_brick_house_with_stair_roof_has_no_path_findings(self):
+        for w in (4, 5, 6):                                   # odd and even ridge widths
+            for ridge in "xz":
+                found = [f for f in checks.run(self.house(w, ridge)) if f["check"] in self.PATH_CHECKS]
+                self.assertEqual(found, [], (w, ridge))
+
+    def test_wall_top_beside_a_stair_is_not_path(self):
+        b = floor()
+        b[(2, 1, 2)] = M + "stone_bricks"
+        b[(2, 2, 2)] = M + "stone_bricks"                     # a wall, 2 high
+        b[(3, 2, 2)] = stair("east")
+        b[(2, 3, 2)] = M + "stone_bricks"
+        b[(2, 4, 2)] = M + "stone"                            # something solid right above: would be 'buried' as a path
+        self.assertEqual(of(b, "buried_path"), [])
+
+    def test_real_stair_road_still_reports(self):
+        b = floor()
+        for i in range(3):                                    # a road climbing east, one stair facing the wrong way
+            b[(1 + i, 1 + i, 1)] = stair("east")
+        b[(2, 2, 1)] = stair("west")
+        b[(3, 4, 1)] = M + "stone"                            # a beam low over the top step
+        self.assertTrue(of(b, "wrong_facing") or of(b, "jump_step") or of(b, "buried_path"))
+        c = floor()
+        c[(1, 1, 1)] = stair("east")
+        c[(2, 2, 1)] = stair("east")
+        c[(2, 3, 1)] = M + "stone"                            # solid right above a stair of the road
+        self.assertEqual(len(of(c, "buried_path")), 1)
+
+    def test_ground_path_block_next_to_stairs_counts(self):
+        b = floor()
+        b[(1, 1, 1)] = stair("east")
+        b[(2, 1, 1)] = M + "stone_bricks"
+        b[(2, 2, 1)] = M + "stone"                            # solid above a road block
+        self.assertEqual(len(of(b, "buried_path")), 0)        # not the highest block of its column: it is a wall top
+        b2 = floor()
+        b2[(2, 1, 1)] = M + "stone_bricks"
+        b2[(3, 1, 1)] = stair("east")
+        b2[(3, 2, 1)] = M + "stone"
+        self.assertEqual(len(of(b2, "buried_path")), 1)       # the stair at (3,1,1) is buried: still reported
