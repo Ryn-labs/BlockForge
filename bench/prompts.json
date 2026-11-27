@@ -1,0 +1,12 @@
+[
+  {"id": 1, "key": "cottage", "size": "small", "prompt": "A small stone and oak cottage with a front door, glass windows on every side and a lantern by the door."},
+  {"id": 2, "key": "machiya", "size": "small", "prompt": "A Japanese machiya shop house: narrow two-storey wooden town house with a shop front, lattice windows and a tiled roof."},
+  {"id": 3, "key": "stair_road", "size": "medium", "prompt": "A stone stair road climbing a 20 block high natural slope, with 2 turns on the way up, railings where it drops off, and lanterns."},
+  {"id": 4, "key": "hill_castle", "size": "large", "prompt": "A castle on a hill with stone walls, corner towers, a gatehouse with a gate, and a path up the hill to the gate."},
+  {"id": 5, "key": "arch_bridge", "size": "medium", "prompt": "A stone arch bridge over a small stream, with railings and a lantern at each end."},
+  {"id": 6, "key": "round_tower", "size": "small", "prompt": "A round stone tower with a spiral staircase inside from the ground floor to the roof, windows on the way up."},
+  {"id": 7, "key": "village_street", "size": "medium", "prompt": "A village street with lanterns, hanging signs and flower planters, lined with three small shop fronts."},
+  {"id": 8, "key": "grove", "size": "medium", "prompt": "A natural grove of 12 trees of mixed species (oak, birch, spruce, dark oak) on grass, with bushes and flowers."},
+  {"id": 9, "key": "furnished_room", "size": "small", "prompt": "One furnished room: a bed, a table with chairs, two chests, a carpet, a bookshelf and a lamp, inside four walls with a door."},
+  {"id": 10, "key": "cottage_edit", "size": "small", "edit_of": 1, "prompt": "Add a second floor and a balcony to this cottage."}
+]
