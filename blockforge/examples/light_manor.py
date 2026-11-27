@@ -1,101 +1,37 @@
-"""A manor in the look of the owner's reference houses (refs 2 and 5), made only from patterns with their default
-palette: a three-storey main house with a light birch fill in an oak log frame, spruce storey bands between the floors, a
-teal cross-gable roof with an oak trim, big 2 x 2 white-framed windows (birch shutters and lintels) with a flower box
-directly under each, a porch with a balcony over it, a back balcony on the top floor, a west
-wing whose roof is a terrace garden reached by an outside stair with a landing, an east wing with its own teal roof, a
-chimney, a front garden with a path, lantern posts, trees and farm plots behind. Quality >= 80 (tests/test_quality.py)."""
+"""A manor in the look and shape of the owner's reference houses (refs 2 and 5), made only from patterns with their
+default palette: pattern manor_layout - a taller central block of three storeys (birch fill in an oak log frame) with a
+big teal gable facing the front, a three-storey entrance bay with its own lower gable in front of it and a stair bay at
+the back, two two-storey wings set back on both sides with their own lower front gables and a balcony each, a porch at
+the door and a grand stair in two flights with landings up the stone terrace, 2 x 2 white-framed windows with flower
+boxes, storey bands and a chimney. No straight wall is longer than 9 blocks. Round it: a path from the stair, lantern
+posts, two flower gardens, trees and farm plots behind. Quality >= 85 (tests/test_quality.py)."""
 from .. import patterns as P
 
 TITLE = "Light timber manor (pattern example)"
 SOURCE = "Made in this project from blockforge/patterns.py (no outside files)"
 LICENCE = "Owned by the BlockForge project (same licence as the code)"
 
-Y = 2                                   # ground floor walls start here; the grass is at y 1
-S = 5                                   # storey: 5 free blocks, floor lines at Y+5 and Y+11
-W = dict(width=2, height=2)                 # the pattern defaults: birch shutters and lintel, oak box, poppies
-FLOWERS = ("poppy", "cornflower", "dandelion", "allium", "azure_bluet", "red_tulip")     # the terrace garden
-
-
-def _windows(spots):
-    return [P.window_with_box(x, y, z, facing, **W) for (x, y, z, facing) in spots]
-
-
-def _terrace():
-    """The west wing's roof (planks at y Y+5, level with the main house's middle floor) as a terrace garden: a fence
-    railing with a gap where the outside stair arrives, planters with flowers and bushes, lantern posts, and a door
-    from the main house."""
-    t = Y + S + 1
-    out = ["# terrace garden on the west wing",
-           f"fill(-13, {t}, 2, -13, {t}, 5, 'oak_fence')",            # west edge, open at z 6..7 for the stair
-           f"fill(-13, {t}, 8, -13, {t}, 16, 'oak_fence')",
-           f"fill(-12, {t}, 2, -2, {t}, 2, 'oak_fence')",             # north edge
-           f"fill(-12, {t}, 16, -2, {t}, 16, 'oak_fence')",           # south edge
-           f"fill(-11, {t}, 11, -8, {t}, 14, 'grass_block')",         # planters
-           f"fill(-5, {t}, 11, -2, {t}, 14, 'grass_block')"]
-    i = 0
-    for x in (-11, -10, -9, -8, -5, -4, -3, -2):
-        for z in (11, 12, 13, 14):
-            if (x + z) % 3 == 0:
-                out.append(f"block({x}, {t + 1}, {z}, B('oak_leaves', persistent=True))")
-            else:
-                out.append(f"block({x}, {t + 1}, {z}, {FLOWERS[i % len(FLOWERS)]!r})")
-                i += 1
-    for (x, z) in ((-13, 2), (-13, 16), (-2, 16)):                   # corner posts with lanterns
-        out += [f"block({x}, {t}, {z}, B('oak_log', axis='y'))", f"block({x}, {t + 1}, {z}, B('lantern', hanging=False))"]
-    out += [f"block(0, {t}, 4, B('oak_door', facing='west', half='lower', hinge='left', open=False))",
-            f"block(0, {t + 1}, 4, B('oak_door', facing='west', half='upper', hinge='left', open=False))"]
-    return "\n".join(out) + "\n"
+Y = 2                                   # ground level: the grass is at y 1
 
 
 def code():
-    floors = (Y + 1, Y + S + 2, Y + 2 * S + 3)                       # window sills of the three floors
-    parts = [P.site(-24, -20, 48, 40, Y - 1),
-             # main house 25 x 19, three floors of 5, posts every 6 (5-block bays round 2-wide windows)
-             P.framed_house(0, 0, 24, 18, Y, floors=3, storey=S, style="light", spacing=6),
-             # wings: west (its roof is the terrace), east (a teal gable roof), one floor each
-             P.framed_house(-12, 3, 0, 15, Y, floors=1, storey=S, style="light", spacing=6, skip=["east"], clear=True),
-             P.framed_house(24, 3, 36, 15, Y, floors=1, storey=4, style="light", spacing=6, skip=["west"], clear=True)]
-    spots = []
-    for fy in floors:
-        for x in (2, 8, 14, 20):
-            if not (fy == floors[1] and x == 14):                    # the front balcony door
-                spots.append((x, fy, 18, "south"))
-            if not (fy == floors[2] and x == 14):                    # the back balcony door
-                spots.append((x, fy, 0, "north"))
-    spots = [s for s in spots if not (s[1] == floors[0] and s[2] == 18 and s[0] == 14)]     # the porch
-    spots += [(0, floors[1], 8, "west"), (0, floors[1], 14, "west"),
-              (0, floors[2], 2, "west"), (0, floors[2], 8, "west"), (0, floors[2], 14, "west"),
-              (24, floors[2], 2, "east"), (24, floors[2], 14, "east"),
-              (-10, floors[0], 3, "north"), (-4, floors[0], 3, "north"), (-10, floors[0], 15, "south"),
-              (-4, floors[0], 15, "south"),
-              (26, floors[0], 3, "north"), (32, floors[0], 3, "north"), (26, floors[0], 15, "south"),
-              (32, floors[0], 15, "south"), (36, floors[0], 5, "east"), (36, floors[0], 11, "east")]
-    parts += _windows(spots)
-    parts += [
-        # storey bands between the floors (north and south), open where the porch, balconies and chimney are
-        P.storey_band(0, 0, 24, 18, Y + S, skip=["west", "east"], gaps=[[12, 19, 18, 22]]),
-        P.storey_band(0, 0, 24, 18, Y + 2 * S + 1, skip=["west", "east"],
-                      gaps=[[12, -4, 18, -1], [21, -3, 21, -1]]),
-        # roofs: the east wing's under the main eaves, then the main layered roof
-        P.gable_roof_trim(24, 3, 36, 15, Y + 5, ridge="x", overhang=2, fill="birch_planks", open_end="west"),
-        P.cross_gable_roof(0, 0, 24, 18, Y + 3 * S + 3, fill="birch_planks", front="south", overhang=2),
-        P.chimney(21, Y - 1, -2, height=31, block="bricks"),
-        # front door with a porch, the balcony over it (door from the middle floor), the top floor's back balcony
-        P.porch(15, Y, 18, "south", width=5, depth=3, path=3),
-        P.balcony(13, Y + S, 19, "south", length=5, depth=2, door=True),
-        P.balcony(13, Y + 2 * S + 1, -1, "north", length=5, depth=3, door=True),
-        # the terrace garden on the west wing, reached by an outside stair with a landing
-        _terrace(),
-        P.external_stair(-15, Y, 15, "north", S + 1, width=2, flight=3, landing=2, rails="left"),
-        # garden, lanterns, trees, farm plots behind
-        P.lantern_post(12, Y, 24, "medieval"),
-        P.lantern_post(18, Y, 24, "medieval"),
-        P.fence_garden(-2, 27, 32, 37, Y, gates=("north",)),
-        P.tree("oak", -12, Y, 26, 7),
-        P.tree("birch", 40, Y, 26, 7),
-        P.tree("oak", 42, Y, 2, 6),
-        P.farm_plot(-10, Y, -17, 9, 7, "wheat"),
-        P.farm_plot(6, Y, -17, 9, 7, "carrots"),
-        P.farm_plot(26, Y, -17, 9, 7, "potatoes"),
-    ]
+    parts = [P.site(-30, -26, 30, 34, Y - 1),
+             P.manor_layout(0, Y, 0, "south", raised=4),
+             # a path from the foot of the grand stair (z 19) to the lane, lantern posts beside it
+             P.road([[0, 20], [0, 33]], Y - 1, width=3),
+             P.lantern_post(-3, Y, 22, "medieval"),
+             P.lantern_post(3, Y, 22, "medieval"),
+             P.lantern_post(-3, Y, 30, "medieval"),
+             P.lantern_post(3, Y, 30, "medieval"),
+             # flower gardens left and right of the path, in front of the wings
+             P.fence_garden(-18, 14, -6, 25, Y, gates=("east",)),
+             P.fence_garden(6, 14, 18, 25, Y, gates=("west",)),
+             P.tree("oak", -24, Y, 12, 7),
+             P.tree("birch", 24, Y, 12, 7),
+             P.tree("oak", -24, Y, -14, 6),
+             P.tree("birch", 25, Y, -16, 6),
+             # farm plots behind the house
+             P.farm_plot(-17, Y, -23, 9, 7, "wheat"),
+             P.farm_plot(-4, Y, -23, 9, 7, "carrots"),
+             P.farm_plot(9, Y, -23, 9, 7, "potatoes")]
     return "".join(parts)

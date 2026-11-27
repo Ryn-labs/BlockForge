@@ -1,7 +1,9 @@
-"""A good cottage made only from patterns: a two-storey timber-framed house (light birch fill in an oak log frame) with a
-storey band, a lower wing (L plan), green gable roofs with an oak trim and 2-block overhang, 2 x 2 white-framed windows
-with birch shutters and a box of poppies under each, a covered porch with a balcony over it, a side balcony, a chimney, a fenced front garden with a path,
-a farm plot and a lantern post. Quality >= 70 (tests/test_quality.py)."""
+"""A good cottage made only from patterns: a compact two-storey timber-framed house (light birch fill in an oak log
+frame, 11 x 9) whose green gable faces the front, a lower one-storey wing set back 2 (L plan, its own lower roof), a
+storey band, 2 x 2 white-framed windows with birch shutters and a box of poppies under each, a covered porch under the
+front gable with a balcony over it, a back balcony, a chimney, a fenced front garden with a path, a farm plot and a lantern post.
+Small enough that it needs no wings: short walls, a gable and a porch at the front. Quality >= 80
+(tests/test_quality.py)."""
 from .. import patterns as P
 
 TITLE = "Good cottage (pattern example)"
@@ -12,45 +14,40 @@ Y = 2                                   # ground floor walls start here; the gra
 
 
 def code():
-    w = dict(width=2, height=2)                 # pattern defaults: birch shutters and lintel, oak box, poppies
+    w = dict(width=2, height=2, box="birch_trapdoor")      # birch shutters, lintel and box (a pale wall), poppies
     w1 = dict(w, width=1)
     parts = [
-        P.site(-8, -6, 32, 28, Y - 1),
-        # main house 16 x 11, two floors (posts every 5: 4-block bays) and a lower wing to the east, 9 x 7
-        P.framed_house(0, 0, 15, 10, Y, floors=2, storey=4, style="light", spacing=5),
-        P.framed_house(15, 2, 23, 8, Y, floors=1, storey=3, style="light", skip=["west"], clear=True),
-        # windows: front (south), back (north), west end, wing
-        P.window_with_box(2, Y + 1, 10, "south", **w),
-        P.window_with_box(12, Y + 1, 10, "south", **w),
-        P.window_with_box(2, Y + 6, 10, "south", **w),
-        P.window_with_box(12, Y + 6, 10, "south", **w),
+        P.site(-8, -8, 28, 28, Y - 1),
+        # main house 11 x 9, two floors (posts on the corners, beams on the floor lines); a wing to the east, 7 x 6
+        P.framed_house(0, 0, 10, 8, Y, floors=2, storey=4, style="light", spacing=10),
+        P.framed_house(10, 1, 16, 6, Y, floors=1, storey=3, style="light", spacing=6, skip=["west"], clear=True),
+        # windows: front (south) beside the porch, back (north), west end, wing
+        P.window_with_box(2, Y + 1, 8, "south", **w1),
+        P.window_with_box(8, Y + 1, 8, "south", **w1),
+        P.window_with_box(2, Y + 6, 8, "south", **w1),
+        P.window_with_box(8, Y + 6, 8, "south", **w1),
         P.window_with_box(2, Y + 1, 0, "north", **w),
         P.window_with_box(7, Y + 1, 0, "north", **w),
-        P.window_with_box(12, Y + 1, 0, "north", **w),
-        P.window_with_box(2, Y + 6, 0, "north", **w),
-        P.window_with_box(7, Y + 6, 0, "north", **w),
-        P.window_with_box(12, Y + 6, 0, "north", **w),
         P.window_with_box(0, Y + 1, 2, "west", **w),
-        P.window_with_box(0, Y + 1, 7, "west", **w),
-        P.window_with_box(0, Y + 6, 7, "west", **w),
-        P.window_with_box(17, Y + 1, 8, "south", **w1),
-        P.window_with_box(21, Y + 1, 8, "south", **w1),
-        P.window_with_box(17, Y + 1, 2, "north", **w1),
-        P.window_with_box(21, Y + 1, 2, "north", **w1),
-        P.window_with_box(23, Y + 1, 4, "east", **w1),
-        # a storey band between the floors, front and back (open at the porch)
-        P.storey_band(0, 0, 15, 10, Y + 4, skip=["west", "east"], gaps=[[4, 11, 10, 13]]),
-        # roofs: the wing tucks under the main roof's gable overhang
-        P.gable_roof_trim(15, 2, 23, 8, Y + 4, "green", "oak", "x", overhang=2, open_end="west"),
-        P.gable_roof_trim(0, 0, 15, 10, Y + 10, "green", "oak", "x", overhang=2),
-        P.chimney(-2, Y - 1, 8, height=20, block="bricks"),
-        # front door with a porch, a balcony over it and one on the west end (doors from the upper floor)
-        P.porch(7, Y, 10, "south", width=3, depth=3, path=2),
-        P.balcony(5, Y + 4, 11, "south", length=5, depth=2, door=True),
-        P.balcony(-1, Y + 4, 1, "west", length=5, depth=2, ground_y=Y - 1, door=True),
-        P.lantern_post(3, Y, 15, "medieval"),
-        P.fence_garden(-4, 17, 18, 25, Y, gates=("north", "south")),
-        P.tree("oak", -6, Y, 13, 6),
-        P.farm_plot(21, Y, 12, 7, 7, "wheat"),
+        P.window_with_box(0, Y + 1, 5, "west", **w),
+        P.window_with_box(0, Y + 6, 2, "west", **w),
+        P.window_with_box(0, Y + 6, 5, "west", **w),
+        P.window_with_box(12, Y + 1, 6, "south", **w),
+        P.window_with_box(12, Y + 1, 1, "north", **w),
+        P.window_with_box(16, Y + 1, 3, "east", **w),
+        # a storey band between the floors, front and back (open at the porch and its balcony)
+        P.storey_band(0, 0, 10, 8, Y + 4, skip=["west", "east"], gaps=[[3, 9, 7, 12], [2, -4, 8, -1]]),
+        # roofs: the wing's lower roof tucks under the main roof's eaves; the main gable faces the front
+        P.gable_roof_trim(10, 1, 16, 6, Y + 4, "green", "oak", "x", overhang=1, fill="birch_planks", open_end="west"),
+        P.gable_roof_trim(0, 0, 10, 8, Y + 10, "green", "oak", "z", overhang=2, fill="birch_planks"),
+        P.chimney(-3, Y - 1, 4, height=20, block="bricks"),
+        # front door with a porch under the gable and a balcony over it (door from the upper floor)
+        P.porch(5, Y, 8, "south", width=3, depth=3, path=2),
+        P.balcony(4, Y + 4, 9, "south", length=3, depth=2, door=True),
+        P.balcony(3, Y + 4, -1, "north", length=5, depth=2, door=True),
+        P.lantern_post(2, Y, 14, "medieval"),
+        P.fence_garden(-6, 16, 16, 25, Y, gates=("north", "south")),
+        P.tree("oak", -6, Y, 12, 6),
+        P.farm_plot(19, Y, 10, 7, 7, "wheat"),
     ]
     return "".join(parts)
