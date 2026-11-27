@@ -273,7 +273,7 @@ export class Viewer {
     this.dirty = true;
   }
 
-  load(data) {
+  load(data, { keepCamera = false } = {}) {
     this.stopBuild();
     this.data = data;
     const [W, H, L] = data.size;
@@ -321,7 +321,8 @@ export class Viewer {
     this.rebuild();
     this.setCut(H - 1);
     this.buildGrid();
-    this.frame();
+    if (!keepCamera) this.frame();
+    else this.dirty = true;
   }
 
   /** Palette index + 1 at a cell, or 0 for air / outside. Ignores the layer cut. */
@@ -557,6 +558,19 @@ export class Viewer {
     this.camera.position.set(r * 1.05, this.H * 0.4 + r * 0.8, r * 1.25);
     this.camera.far = r * 20 + 500;
     this.camera.updateProjectionMatrix();
+    this.controls.update();
+    this.dirty = true;
+  }
+
+  /** Look at the build from one side: north, east, south, west or top (same names as the AI's view tool). */
+  lookFrom(side) {
+    if (!this.data) return;
+    const r = Math.max(this.W, this.H, this.L) * 1.7 + 6;
+    const d = { north: [0, 0.3, -1], south: [0, 0.3, 1], east: [1, 0.3, 0], west: [-1, 0.3, 0], top: [0.001, 1, 0.001] }[side];
+    if (!d) return;
+    const len = Math.hypot(...d);
+    this.controls.target.set(0, this.H * 0.4, 0);
+    this.camera.position.set(d[0] / len * r, this.H * 0.4 + d[1] / len * r, d[2] / len * r);
     this.controls.update();
     this.dirty = true;
   }
