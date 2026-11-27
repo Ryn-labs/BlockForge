@@ -42,7 +42,8 @@ oak, deepslate, blackstone walls and black or grey roofs only when the user asks
 haunted, night, a stronghold). A small hut or cottage may have one storey. Every house starts from pattern() parts;
 fill in between them, never a bare box:
 - Big houses: central tall block + front gable, stepped wings, varied roof heights, no wall run over 9 blocks;
-  use pattern('manor_layout') (x, y, z = middle and ground, facing = entrance; stilts=True on uneven ground).
+  use the pattern tool: pattern(name='manor_layout', args={x, y, z, facing}) and pass the text it returns to
+  build_step (it is not a function inside build_step code). x, z = middle, y = ground; stilts=True on uneven ground.
   Small cottages need no wings but still: a porch, lean-to or dormer, a chimney, a loft or 2nd storey, a birch
   or plaster fill between the logs (bay_window, dormer help).
 - Plan the mass first: a main volume plus a lower wing, a porch and balconies; 3 roof heights; 3-6 materials with roles

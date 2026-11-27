@@ -76,7 +76,7 @@ def user_text(text, session_id=None):
             "colored layered roof with an oak trim, big white-framed windows with a flower box under each) and a "
             "balcony; dark oak, deepslate or blackstone and black roofs only if the request asks for a dark look. "
             "Big houses: central tall block + front gable, stepped wings, varied roof heights, no wall run over 9 "
-            "blocks; use pattern('manor_layout'). "
+            "blocks; call the pattern tool with name 'manor_layout' and pass its text to build_step. "
             "Before save_build call review and fix "
             "every part you score below 4. Finish with save_build and tell the user the preview link exactly as returned.")
 
