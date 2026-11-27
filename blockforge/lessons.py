@@ -34,3 +34,29 @@ def for_style(name):
     if key not in styles():
         return ""
     return _read(os.path.join(STYLES_DIR, key + ".md"))
+
+
+BUDGET = 3500
+HEADER = "Your most common mistakes lately"
+
+
+def for_ai(budget=BUDGET, n=40):
+    """Lesson lines for the building AI: the most common recent mistakes first (mistake_stats), then the static
+    lessons, trimmed to fit `budget` bytes. Lines start with '- '; the stats block has a heading line."""
+    from . import mistake_stats
+    out, used = [], 0
+    mine = mistake_stats.lesson_lines(5)
+    if mine:
+        out.append(HEADER + ":")
+        used += len(HEADER) + 2
+        for ln in mine:
+            out.append("- " + ln)
+            used += len(ln) + 3
+        out.append("Other lessons:")
+        used += 15
+    for ln in top(n):
+        if used + len(ln) + 3 > budget:
+            break
+        out.append("- " + ln)
+        used += len(ln) + 3
+    return out

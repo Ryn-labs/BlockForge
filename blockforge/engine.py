@@ -558,16 +558,21 @@ def _iter_blocks(d):
         yield (flat[i], flat[i + 1], flat[i + 2]), pal[flat[i + 3]]
 
 
+def _record_mistakes(found, build_id=None):
+    """Feed a saved build's check counts into the rolling mistake stats (they come back as lessons). Never fails a build."""
+    try:
+        from . import mistake_stats
+        mistake_stats.record_findings(found, "app", build_id=build_id)
+    except Exception:
+        pass
+
+
 def _with_lessons(learned, engine):
     """The one-shot script path also gets the top build lessons (short; the step loop has them in its system prompt)."""
     if engine == "claude_loop":
         return learned
     from . import lessons
-    text = ""
-    for ln in lessons.top(40):
-        if len(text) + len(ln) > 2900:
-            break
-        text += "- " + ln + "\n"
+    text = "\n".join(lessons.for_ai(2900))
     if not text:
         return learned
     section = "## Lessons from earlier builds (get these right in the script)\n" + text.rstrip()
@@ -582,6 +587,7 @@ def _generate_loop(text, size, model, usage, prompt, image_path, log):
     found = checks.run(blocks, size)
     checks_meta = {"total": checks.total(found), "by_check": checks.counts(found)}
     log("Checks: " + (checks.summary(found) if found else "no problems"))
+    _record_mistakes(found, bid)
     rec = usage.record()
     cost = f" (about ${rec['cost_usd']:.2f})" if rec["cost_usd"] else ""
     log(f"Done: {len(blocks):,} blocks. {engine_label('claude_loop')} used {rec['total_tokens']:,} tokens{cost}.")
@@ -830,6 +836,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
         if found:
             log("Checks: " + checks.summary(found))
         title = meta.get("name") or title or prompt[:60] or "Build"
+        _record_mistakes(found)
         rec = usage.record()
         cost = f" (about ${rec['cost_usd']:.2f})" if rec["cost_usd"] else ""
         log(f"Done: {len(blocks):,} blocks. {who} used {rec['total_tokens']:,} tokens{cost}.")
