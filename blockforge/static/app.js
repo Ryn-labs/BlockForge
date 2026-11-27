@@ -1537,6 +1537,7 @@ function renderChat() {
           (c.kept === true ? ' <span class="kept">Kept</span>' : '') +
           (isHead && c.kept !== true ? `<div class="row-btns"><button type="button" class="btn small primary" data-keep="${esc(c.version)}">Keep</button><button type="button" class="btn small" data-undo="1">Undo</button></div>` : '') + '</div>';
       }
+      if (m.keep_improving && m === lastAi && !chat.busy) extra += '<div class="row-btns"><button type="button" class="btn small primary" data-improve="1">Keep improving</button></div>';
       return `<div class="msg ${m.role} ${m.error ? 'error' : ''}">${scope}${esc(m.text)}${extra}</div>`;
     }).join('');
   const last = chat.log[chat.log.length - 1];
@@ -1545,6 +1546,7 @@ function renderChat() {
   th.querySelectorAll('.choice:not(:disabled)').forEach(b => b.onclick = () => chatAnswer(b.dataset.q, b.dataset.c));
   th.querySelectorAll('[data-keep]').forEach(b => b.onclick = () => chatAct('keep', { version: b.dataset.keep }));
   th.querySelectorAll('[data-undo]').forEach(b => b.onclick = () => chatAct('undo', {}, true));
+  th.querySelectorAll('[data-improve]').forEach(b => b.onclick = () => chatImprove());
   // plan card
   const plan = d?.plan || [];
   $('#chat-plan').hidden = !plan.length;
@@ -1659,6 +1661,9 @@ async function chatAnswer(question_id, choice) {
     await chatLoad(chat.id);
     if (r.job) watchChat(r.job);
   } catch (e) { toast(e.message, true); }
+}
+async function chatImprove() {
+  try { const r = await post(`chat/${chat.id}/improve`, {}); await chatLoad(chat.id); watchChat(r.job); } catch (e) { toast(e.message, true); }
 }
 async function chatAct(act, body, camera = false) {
   try { await post(`chat/${chat.id}/${act}`, body); await chatLoad(chat.id, { camera }); } catch (e) { toast(e.message, true); }

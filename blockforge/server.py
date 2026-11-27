@@ -444,6 +444,9 @@ class H(BaseHTTPRequestHandler):
                     text = chat.answer(cid, b.get("question_id"), b.get("choice"))
                     job = start_job(chat.run_turn, cid=cid, text=text, add_user=False) if text else None
                     return self.send(200, {"job": job and job["id"]})
+                if act == "improve":
+                    chat.load(cid)
+                    return self.send(200, {"job": start_job(chat.improve, cid=cid)["id"]})
                 if act == "undo":
                     return self.send(200, chat.undo(cid))
                 if act == "pause":
