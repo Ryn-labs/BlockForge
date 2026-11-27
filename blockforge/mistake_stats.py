@@ -11,6 +11,7 @@ import time
 from . import store
 
 WINDOW = 50
+PER_BUILD_CAP = 10          # one build with hundreds of one kind must not drown the other types
 EXAMPLES = 3
 PATH = os.path.join(store.DATA, "mistake_stats.json")
 
@@ -59,7 +60,7 @@ def _counts_of(src):
         except (TypeError, ValueError):
             continue
         if t and n > 0:
-            out[t] = out.get(t, 0) + n
+            out[t] = min(PER_BUILD_CAP, out.get(t, 0) + n)
     return out
 
 
