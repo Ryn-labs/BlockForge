@@ -11,6 +11,7 @@ Works on a build folder in the (temp) data dir: blocks.json, meta.json, code.py.
   size_off       how far the largest side is outside the asked size range (blocks)
   terrain_floating / terrain_buried   (builds on a terrain) floating groups with ground under them, and path blocks / steps with
                  untouched terrain on top of them. They are counted INSTEAD of floating / buried_path, never twice.
+  terrain_score  blockforge.terrain_quality total 0-100 of AI-made land (HIGHER is better; null when the build is not mostly land)
   quality        blockforge.quality.score total 0-100 (HIGHER is better; buildings and towns only, null for a bridge, tree,
                  terrain...). On terrain only what was built is scored. Not a mistake count: it is never added to the totals.
 python bench/score.py <build dir> [target_lo target_hi] [--terrain file.schem]   -> one JSON line"""
@@ -171,6 +172,7 @@ def score(d, lo=None, hi=None, terrain=None):
         keys += ["terrain_floating", "terrain_buried"]
     out = {k: r.get(k, 0) for k in keys}
     out["quality"] = quality_total(C, T, meta.get("prompt"))
+    out["terrain_score"] = terrain_total(C, T)
     return out
 
 
@@ -180,6 +182,15 @@ def quality_total(C, T=None, prompt=None):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     from blockforge import quality
     return quality.score(quality.built_only(C, T or None), prompt=prompt)["total"]
+
+
+def terrain_total(C, T=None):
+    """blockforge.terrain_quality total 0-100 of the land the AI made (HIGHER is better), or None when the build is not
+    mostly natural land. Not a mistake count: never added to the totals."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    from blockforge import quality, terrain_quality
+    built = quality.built_only(C, T or None)
+    return terrain_quality.score(built)["total"] if terrain_quality.is_terrain(built) else None
 
 
 def overwritten(code):

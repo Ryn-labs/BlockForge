@@ -56,7 +56,9 @@ class BenchQuality(unittest.TestCase):
         self.assertEqual(prompts[13], {"id": 13, "key": "farmhouse_fields", "size": "medium",
                                        "prompt": "A farmhouse with fields, a fenced yard and a small barn."})
         self.assertEqual(prompts[14], {"id": 14, "key": "small_cottage", "size": "small", "prompt": "A small cottage."})
-        self.assertEqual(len(prompts), 14)
+        self.assertEqual([prompts[i]["key"] for i in (15, 16, 17)],                # natural terrain prompts
+                         ["snowy_mountain", "mountain_valley_river", "hill_town_mountain"])
+        self.assertEqual(len(prompts), 17)
 
     def test_table_shows_the_average_quality(self):
         label = "unit-test-quality"
