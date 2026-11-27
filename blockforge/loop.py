@@ -71,7 +71,9 @@ def user_text(text, session_id=None):
             "each part: build_step it (about 10-40 lines), view it, and check it. Fix every problem the check lists with "
             "another build_step (or undo and redo the part). When paths, stairs or doors exist, walk_test the routes people "
             "will use and fix what it finds. Keep the overall size asked for. For a house, building or town start from "
-            "the proven pattern() parts (see 'Houses and towns'), never a bare box. Before save_build call review and fix "
+            "the proven pattern() parts (see 'Houses and towns'), never a bare box; a house by default has 2+ storeys, "
+            "a light wall fill with a dark frame, a colored layered roof, big framed windows with boxes and a balcony. "
+            "Before save_build call review and fix "
             "every part you score below 4. Finish with save_build and tell the user the preview link exactly as returned.")
 
 

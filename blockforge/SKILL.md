@@ -32,13 +32,20 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 - Unsure about a block (needs support? stairs facing? properties)? Call block_info before you place it.
 
 ## Houses and towns: start from the proven parts (default)
-Every house or building starts from pattern() parts; fill in between them, never a bare box:
-- Plan the mass first: a main volume plus a lower wing, a porch or a balcony; 2+ roof heights; 3-6 materials with roles
-  (logs for the frame, one wall fill, a different roof, accents).
-- framed_house (or framed_wall) for the walls: log posts and beams stick out 1 block, no flat wall over 5 blocks.
-- gable_roof_trim / hip_roof_trim / cross_gable_roof: overhang 2 over framed walls, trim on the edges and ridge.
-- window_with_box every 3-4 blocks, porch at the door (or balcony), chimney, then fence_garden, farm_plot, a road to
-  the door and lantern_post.
+House default (unless the user asks otherwise): 2+ storeys, light wall fill with a dark frame, a colored layered roof,
+big framed windows with boxes, a balcony. A small hut or cottage may have one storey. Every house starts from
+pattern() parts; fill in between them, never a bare box:
+- Plan the mass first: a main volume plus a lower wing, a porch and balconies; 3 roof heights; 3-6 materials with roles
+  (dark logs for the frame, a light wall fill, a roof in its own colour, accents).
+- framed_house(..., floors=2, style='light') (or framed_wall; birch fill in dark oak logs, also 'oak', 'stripped',
+  'plaster'): posts and beams stick out 1 block, no flat wall over 5 blocks; spacing=5 or 6 leaves bays for 2-wide windows.
+- storey_band between the floors; gable_roof_trim / hip_roof_trim / cross_gable_roof with stairs='teal', 'green',
+  'gray' or 'red' and a wood trim, overhang 2 over framed walls; lower wings get their own lower roof.
+- window_with_box(..., width=2, height=2) in every bay, porch at the door with a balcony over it (balcony door=True),
+  a terrace or second balcony reached by external_stair (straight flights with landings), chimney, then fence_garden,
+  farm_plot, a road to the door and lantern_post.
+- Stairs and steps only from patterns: straight_stair_run, external_stair, switchback_landing, porch(steps=...),
+  balcony(gap=...) with external_stair; they have no jump steps and no corner turns.
 Towns: plan_layout first, then houses of different sizes, storeys and ridge directions along streets that bend and
 follow the ground (road with several points, stair runs on slopes), a plaza with a well, trees and gardens between the
 houses, one landmark (a hall, temple or castle clearly bigger or taller). Never one straight row of equal houses.
