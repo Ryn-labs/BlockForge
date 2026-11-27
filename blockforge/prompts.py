@@ -422,7 +422,9 @@ def quality_fix_message(result):
     for k, v, fixes in quality.weakest(result, 3):
         lines.append(f"- {quality.LABELS[k]} {v}/100: " + " ".join(fixes[:2]))
     lines += ["", "Other findings:"] + ["- " + f for f in result.get("findings", [])[:10]]
-    return ("\n".join(lines) + "\n\nImprove these parts in place: 2+ storeys, a light wall fill (birch, oak or "
+    return ("\n".join(lines) + "\n\nImprove these parts in place: a big house as a taller central block with a front "
+            "gable and stepped lower wings, varied roof heights, no straight wall over 9 blocks; 2+ storeys, a light "
+            "wall fill (birch, oak or "
             "stripped wood) in an oak or spruce log frame that sticks out of the walls (no dark oak or deepslate walls "
             "unless the request asks for a dark look), a pitched roof in its own colour (teal, green, red) with an oak "
             "trim, overhang and lower roofs at other heights, big 2 x 2 white-framed windows with a flower box directly "
