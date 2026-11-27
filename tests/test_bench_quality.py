@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
 from tests import _env  # noqa: F401
@@ -20,6 +21,22 @@ class BenchQuality(unittest.TestCase):
         out = S.score(build(blocks))
         self.assertGreaterEqual(out["quality"], 70)
         self.assertEqual(out["floating"], 0)
+
+    def test_quality_column_uses_the_prompt_for_bench_builds(self):
+        for name, prompt, lo, hi in (("bench_wooden_manor_blocks.json", "A wooden manor with log frames, a layered roof, "
+                                      "a balcony, window boxes and a terrace garden.", 0, 59),
+                                     ("bench_small_cottage_blocks.json", "A small cottage.", 50, 65)):
+            with self.subTest(name):
+                d = tempfile.mkdtemp(prefix="bf-quality-bench-")
+                try:
+                    shutil.copy(os.path.join(ROOT, "tests", "data", name), os.path.join(d, "blocks.json"))
+                    with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as f:
+                        json.dump({"title": "t", "prompt": prompt, "fixes": []}, f)
+                    q = S.score(d)["quality"]
+                finally:
+                    shutil.rmtree(d, ignore_errors=True)
+                self.assertGreaterEqual(q, lo)
+                self.assertLessEqual(q, hi)
 
     def test_no_quality_for_a_bridge(self):
         blocks, _ = sandbox.run_safe(patterns.stone_arch_bridge(2, 6, 2, 11, 3))

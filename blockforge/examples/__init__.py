@@ -2,9 +2,10 @@
 
 EXAMPLES = {name: module}; every module has TITLE, SOURCE, LICENCE and code() -> build script text.
 """
-from . import good_cottage, good_manor, good_village
+from . import good_cottage, good_manor, good_village, light_manor
 
-EXAMPLES = {"good_cottage": good_cottage, "good_manor": good_manor, "good_village": good_village}
+EXAMPLES = {"good_cottage": good_cottage, "good_manor": good_manor, "good_village": good_village,
+            "light_manor": light_manor}
 
 
 def code(name):

@@ -1,29 +1,40 @@
 """Building quality score: is this a good-looking house, or a blocky box?
 
-score(blocks, size=None) -> {"total": 0-100 or None, "building": bool, "parts": {part: 0-100},
+score(blocks, size=None, prompt=None) -> {"total": 0-100 or None, "building": bool, "parts": {part: 0-100},
                              "findings": [plain sentences with coordinates], "fixes": {part: [what to do, with coordinates]}}
 
 Only buildings are scored: something with at least one closed room (walls on all four sides, a roof over it and 2 blocks
 of head room). Bridges, trees, terrain, statues and walls get total None (neutral, never gated).
 
-The six parts and their weights (docs/QUALITY.md has the rules behind the numbers):
-  facade 20     wall depth: posts, frames and beams sticking out 1+ from the wall plane (shutters and boxes count less);
-                flat runs longer than 5 = penalty
-  roof 20       pitched stair/slab roof, eaves overhanging 1+, a trim or ridge in a second material; flat = big penalty
-  massing 15    main volume + wings/porch/balcony/annex, more than one roof height; a single box is low
-  palette 15    3-6 materials with roles: frame (logs), wall fill, a different roof, accents; 1 material or 10 random = low
-  detail 20     windows per facade metre, framed windows, shutters/boxes/lanterns/fences/pots, a chimney
-  surroundings 10   a path to the door, garden/fence/farm/terrace/light around the house
+The eleven parts and their weights (docs/QUALITY.md has the rules behind the numbers):
+  contrast 16   the walls seen from outside: a light wall fill (oak, birch, stripped logs, plaster) against a dark log
+                frame; one dark material everywhere is low
+  storeys 15    2+ floors (a small house, hut or cottage may have 1), height against length: long and low is low
+  windows 12    glass share of every facade, framed (shutters, box, sill), big windows (4+ panes together)
+  balcony 11    outdoor floors above the ground floor with a railing (balconies, terraces), an outside stair up
+  roof_style 11 a roof colour that stands out from the walls (teal, green, gray, red ...), roof planes at several heights
+  facade 7      wall depth: posts, frames and beams sticking out 1+ from the wall plane; flat runs longer than 5 = penalty
+  roof 7        pitched stair/slab roof, eaves overhanging 1+, a trim or ridge in a second material; flat = big penalty
+  massing 6     main volume + wings/porch/balcony/annex, more than one roof height; a single box is low
+  palette 4     3-6 materials with roles: frame (logs), wall fill, a different roof, accents; 1 material or 10 random = low
+  detail 6      windows per facade metre, framed windows, shutters/boxes/lanterns/fences/pots, a chimney
+  surroundings 5   a path to the door, garden/fence/farm/terrace/light around the house
 """
 import bisect
 import collections
+import colorsys
 
 from .checks import PATH_BLOCKS, THIN_NAMES, THIN_SUFFIXES, name as _name, props as _props
+from .render import block_color
 
 QUALITY_MIN = 60                     # save_build and the script engine refuse/fix a building below this (one place)
-WEIGHTS = {"facade": 20, "roof": 20, "massing": 15, "palette": 15, "detail": 20, "surroundings": 10}
+WEIGHTS = {"contrast": 16, "storeys": 15, "windows": 12, "balcony": 11, "roof_style": 11,
+           "facade": 7, "roof": 7, "massing": 6, "palette": 4, "detail": 6, "surroundings": 5}
 LABELS = {"facade": "Facade depth", "roof": "Roof", "massing": "Massing", "palette": "Palette", "detail": "Detail",
-          "surroundings": "Surroundings"}
+          "surroundings": "Surroundings", "contrast": "Wall contrast", "storeys": "Storeys", "windows": "Windows",
+          "balcony": "Balconies", "roof_style": "Roof colour and layers"}
+SMALL_WORDS = ("tiny", "small", "little", "hut", "cottage", "cabin", "shed")
+SMALL_ROOMS = 36                     # a building with this many room columns or fewer is small whatever the prompt says
 MIN_ROOM_COLUMNS = 4                 # a 2 x 2 room with 2 blocks of head room is the smallest building
 REACH = 40                           # a wall or roof further away than this does not close a room
 
@@ -271,7 +282,11 @@ class _Model:
 
 
 # ------------------------------------------------------------------ parts
-def _facade(m):
+def _faces(m):
+    """Every outside face of the rooms: [direction, first cell outside, open/window/wall, material, depth, is frame,
+    flower box]. Depth = how many blocks deep the wall is there, counted outward. Worked out once per model."""
+    if getattr(m, "faces", None) is not None:
+        return m.faces
     faces = []
     for (x, y, z) in m.IN:
         for d in DIRS4:
@@ -296,7 +311,13 @@ def _facade(m):
                     break                                            # a roof eave in front is not wall depth
                 t += 1
             box = t <= 1 and m.N.get((q[0] + d[0], y, q[2] + d[1])) in GROUND and y > m.g + 1   # a flower box
-            faces.append([d, q, fk, mkey(m.N[q]) if q in m.N else "", t, k == "frame", box])
+            faces.append((d, q, fk, mkey(m.N[q]) if q in m.N else "", t, k == "frame", box))
+    m.faces = faces
+    return faces
+
+
+def _facade(m):
+    faces = [list(f) for f in _faces(m)]
     total = len(faces)
     if not total:
         return 0, [], []
@@ -697,8 +718,397 @@ def _surroundings(m):
     return min(100, score), find, fix
 
 
-PARTS = (("facade", _facade), ("roof", _roof), ("massing", _massing), ("palette", _palette), ("detail", _detail),
-         ("surroundings", _surroundings))
+# ------------------------------------------------------------------ colour, storeys, windows, balconies, roof style
+WALL_KINDS = ("full", "frame", "stairs", "slab", "trapdoor", "fence")
+LIGHT_L = 45                         # CIE lightness from here up reads as a light wall (oak, birch, stripped logs, plaster)
+
+
+def _clamp(v):
+    return max(0.0, min(1.0, v))
+
+
+def colour(n):
+    """RGB of a material (oak_stairs -> oak planks), from the colour table of render.py."""
+    return block_color(mkey(n))
+
+
+def lightness(n):
+    """CIE L* (0 black .. 100 white) of a material: spruce log 18, spruce planks 38, oak planks 57, birch planks 72."""
+    lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in (v / 255 for v in colour(n))]
+    yy = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    return 116 * yy ** (1 / 3) - 16 if yy > 0.008856 else 903.3 * yy
+
+
+def _cdist(a, b):
+    ca, cb = colour(a), colour(b)
+    return sum((u - v) ** 2 for u, v in zip(ca, cb)) ** 0.5
+
+
+def _hue_gap(a, b):
+    """How different two materials are in hue, 0..1 (1 = 60 degrees or more apart, or one grey and one coloured)."""
+    ha, sa, _ = colorsys.rgb_to_hsv(*[v / 255 for v in colour(a)])
+    hb, sb, _ = colorsys.rgb_to_hsv(*[v / 255 for v in colour(b)])
+    if (sa < 0.15) != (sb < 0.15):
+        return 1.0
+    if sa < 0.15:
+        return 0.0
+    d = abs(ha - hb) * 360
+    return _clamp(min(d, 360 - d) / 60)
+
+
+def _seen(m):
+    """{material: count} of the wall surface seen from outside: the four side views of the building (its columns and 2
+    round them, from the ground floor to the top of the rooms), the nearest block in every cell. Posts and beams that
+    stick out hide the fill behind them. Glass, doors, lights and roof slopes are left out."""
+    if getattr(m, "seen", None) is not None:
+        return m.seen
+    top = max(m.room_top.values())
+    cells = [p for p in m.ST if (p[0], p[2]) in m.F2 and m.g < p[1] <= top]
+    vis = collections.Counter()
+    for axis, sign in ((0, 1), (0, -1), (2, 1), (2, -1)):
+        near = {}
+        for p in cells:
+            key = (p[2 - axis], p[1])
+            if key not in near or p[axis] * sign > near[key][axis] * sign:
+                near[key] = p
+        for p in near.values():
+            k = m.K[p]
+            if k in ("stairs", "slab") and "half=top" not in m.S[p] and "type=top" not in m.S[p]:
+                continue                                             # a roof slope in front of the wall
+            if k in WALL_KINDS:
+                vis[mkey(m.N[p])] += 1
+    m.seen = vis
+    return vis
+
+
+def _contrast(m):
+    vis = _seen(m)
+    total = sum(vis.values())
+    x1, z1, x2, z2 = m.box
+    find, fix = [], []
+    if total < 10:
+        return 0, ["Wall contrast: almost no wall surface seen from outside."], [
+            f"Build walls round x {x1}..{x2}, z {z1}..{z2}: a light fill (birch or oak planks) in a dark log frame "
+            f"(pattern framed_house with style='light')."]
+    frames = [(n, mat) for mat, n in vis.items() if kind(mat) == "frame" and n >= 0.08 * total]
+    fills = [(n, mat) for mat, n in vis.items() if kind(mat) != "frame" and n >= 0.08 * total]
+    frame = max(frames)[1] if frames else None
+    fill = max(fills)[1] if fills else None
+    dl = abs(lightness(fill) - lightness(frame)) if frame and fill else 0.0
+    light = sum(n for mat, n in vis.items() if lightness(mat) >= LIGHT_L) / total
+    c1 = _clamp((dl - 5) / 20)
+    c3 = _clamp((light - 0.2) / 0.4)
+    score = 100 * c1 * (0.15 + 0.85 * c3)
+    seen = ", ".join(f"{mat} {round(100 * n / total)}%" for mat, n in vis.most_common(4))
+    if c1 < 0.75:
+        find.append(f"Wall contrast: the walls round x {x1}..{x2}, z {z1}..{z2} read as one tone ({seen}); the frame and "
+                    f"the fill differ by only {round(dl)} in lightness (frame {frame or 'none'}, fill {fill or 'none'}; "
+                    f"good: 25 or more).")
+        fix.append(f"Fill the walls round x {x1}..{x2}, z {z1}..{z2} with a light material (birch planks, oak planks, "
+                   f"stripped birch/oak logs, white terracotta) between dark log posts and beams (dark oak or spruce log): "
+                   f"pattern framed_house(..., style='light').")
+    if c3 < 0.75:
+        find.append(f"Wall contrast: only {round(100 * light)}% of the wall surface seen from outside is light "
+                    f"({seen}); good houses show 60% or more light fill.")
+        if c1 >= 0.75:
+            fix.append(f"Show more of the light fill round x {x1}..{x2}, z {z1}..{z2}: posts every 4-5 blocks instead of "
+                       f"every 2, a light fill (birch or oak planks) instead of dark planks or logs.")
+    return score, find, fix
+
+
+def is_small(size=None, prompt=None):
+    """A small house by its size hint or prompt (tiny, small, hut, cottage ...): one storey is then fine."""
+    text = f" {size or ''} {prompt or ''} ".lower().replace("-", " ")
+    return any(f" {w}" in text for w in SMALL_WORDS)
+
+
+def _levels(m, cols):
+    """The storeys of a building: [(floor y, room cells, ceiling y)], low to high. A level counts as a storey when its
+    rooms cover a fifth of the building and have walls (not roof slopes) round them at head height and a flat ceiling;
+    the rooms under a pitched roof are an attic, not a storey."""
+    bottoms = collections.defaultdict(list)
+    for p in m.IN:
+        if (p[0], p[2]) in cols and (p[0], p[1] - 1, p[2]) not in m.IN:
+            bottoms[p[1]].append(p)
+    need = max(MIN_ROOM_COLUMNS, 0.2 * len(cols))
+    out = []
+    for y in sorted(bottoms):
+        good, ceils = [], []
+        for comp in _components([(p[0], p[2]) for p in bottoms[y]]):
+            if len(comp) < max(MIN_ROOM_COLUMNS, 0.1 * len(cols)):
+                continue
+            wall = roof = 0
+            for (x, z) in comp:
+                for d in DIRS4:
+                    q = (x + d[0], y + 1, z + d[1])
+                    if q in m.IN or q not in m.ST:
+                        continue
+                    if m.K[q] in ("stairs", "slab"):
+                        roof += 1
+                    else:
+                        wall += 1
+            tops = sorted(next(yy for yy in range(y, y + 64) if (x, yy + 1, z) not in m.IN) + 1 for (x, z) in comp)
+            ceil = tops[len(tops) // 2]
+            if roof > wall or sum(1 for t in tops if abs(t - ceil) <= 1) < 0.6 * len(tops):
+                continue                                             # an attic under the roof slopes
+            good += [(x, y, z) for (x, z) in comp]
+            ceils += tops
+        if len(good) < need:
+            continue
+        if out and y - out[-1][0] < 3:
+            continue                                                 # a split level, not a new storey
+        out.append((y, good, sorted(ceils)[len(ceils) // 2]))
+    return out
+
+
+def _storeys(m):
+    parts, find, fix = [], [], []
+    for b in _buildings(m) or [{"cols": m.F1, "rooms": list(m.I)}]:
+        cols = set(b["rooms"])
+        levels = _levels(m, cols)
+        if not levels:
+            continue
+        g = min((m.cy[c][0] for c in b["cols"] if c in m.cy), default=m.g)
+        floors = len(levels)
+        tiny = m.small or len(cols) <= SMALL_ROOMS
+        fl = 1.0 if floors >= 3 or (tiny and floors >= 1) else 0.8 if floors == 2 else 0.0
+        xs = [c[0] for c in cols]
+        zs = [c[1] for c in cols]
+        tx = [p[0] for p in levels[-1][1]]                           # the main volume: the rooms of the top storey
+        tz = [p[2] for p in levels[-1][1]]
+        length = max(max(tx) - min(tx), max(tz) - min(tz)) + 3
+        height = levels[-1][2] - g
+        ratio = height / length
+        rp = _clamp((ratio - 0.2) / 0.25)
+        parts.append((len(cols), 100 * fl * (0.4 + 0.6 * rp)))
+        where = f"x {min(xs) - 1}..{max(xs) + 1}, z {min(zs) - 1}..{max(zs) + 1}"
+        if fl < 0.8:
+            find.append(f"Storeys: the building at {where} has {floors} floor{'s' if floors != 1 else ''} (good houses: 2-3 "
+                        f"floors unless it is a small hut or cottage).")
+            fix.append(f"Raise the building at {where} to 2 floors (framed_house floors=2 with a storey band between the "
+                       f"floors at y {levels[-1][2]}, pattern storey_band) and put the roof on top.")
+        if rp < 0.6:
+            find.append(f"Storeys: the building at {where} is long and low: {height} blocks to the top of the walls for "
+                        f"{length} blocks of length (height/length {ratio:.2f}, good: 0.45 or more).")
+            fix.append(f"Make the building at {where} taller and shorter: another floor on the main part, or split the "
+                       f"{length}-block length into a taller main house and lower wings.")
+    if not parts:
+        return 0, ["Storeys: no floor with walls round it found."], [
+            f"Give the building at x {m.box[0]}..{m.box[2]}, z {m.box[1]}..{m.box[3]} real walls and 2 floors."]
+    area = sum(a for a, _ in parts)
+    return sum(a * v for a, v in parts) / area, find[:4], fix[:4]
+
+
+def _windows(m):
+    side = collections.defaultdict(lambda: [0, 0])
+    glass = {}
+    for d, q, fk, mat, t, fr, box in _faces(m):
+        if fk == "open":
+            continue
+        side[d][0] += 1
+        if m.K.get(q) == "glass" and q not in glass:
+            side[d][1] += 1
+            glass[q] = d
+    sides = {d: v for d, v in side.items() if v[0] >= 8}
+    if not sides:
+        return 0, [], []
+    x1, z1, x2, z2 = m.box
+    shares = {d: g / n for d, (n, g) in sides.items()}
+    per = sum(_clamp(s / 0.15) for s in shares.values()) / max(4, len(shares))     # a side with no wall counts as blank
+    big = 0
+    left = set(glass)
+    while left:
+        start = left.pop()
+        d = glass[start]
+        ax, az = abs(d[1]), abs(d[0])                                # along the wall
+        comp, todo = [start], [start]
+        while todo:
+            x, y, z = todo.pop()
+            for q in ((x + ax, y, z + az), (x - ax, y, z - az), (x, y + 1, z), (x, y - 1, z)):
+                if q in left and glass[q] == d:
+                    left.remove(q)
+                    comp.append(q)
+                    todo.append(q)
+        if len(comp) >= 4:
+            big += len(comp)
+    framed = 0
+    for p in glass:
+        near = [(p[0] + a, p[1] + b, p[2] + c) for a, b, c in
+                ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1),
+                 (1, -1, 0), (-1, -1, 0), (0, -1, 1), (0, -1, -1))]
+        if any(m.K.get(q) in ("trapdoor", "slab", "stairs", "frame", "fence", "nature", "pot") for q in near):
+            framed += 1
+    n = len(glass)
+    score = 55 * per + 20 * (framed / n if n else 0) + 25 * (big / n if n else 0)
+    find, fix = [], []
+    worst = min(shares, key=lambda d: shares[d])
+    if shares[worst] < 0.12 or len(shares) < 4:
+        find.append("Windows: glass on each facade: " + ", ".join(f"{SIDE[d]} {round(100 * shares[d])}%" for d in sorted(
+            shares, key=lambda d: SIDE[d])) + " (good: 12-20% of every facade).")
+        wx = {(0, -1): f"z {z1 - 1}", (0, 1): f"z {z2 + 1}", (1, 0): f"x {x2 + 1}", (-1, 0): f"x {x1 - 1}"}[worst]
+        fix.append(f"Put big windows on the {SIDE[worst]} wall ({wx}): 2 x 2 panes in every bay between the posts, with "
+                   f"shutters and a flower box (window_with_box(..., width=2, height=2)).")
+    if n and big / n < 0.5:
+        find.append(f"Windows: {n - big} of {n} panes are in small windows (fewer than 4 panes together).")
+        fix.append(f"Make the windows round x {x1}..{x2}, z {z1}..{z2} 2 wide and 2 high (window_with_box width=2, "
+                   f"height=2), framed with shutters, a log lintel and a flower box.")
+    return score, find, fix
+
+
+def _balcony(m):
+    zone = _dilate(m.F1, 4)
+    low = m.g + 3
+    free = ("air", "soft", "light")
+
+    def open_above(p, h):
+        q = (p[0], p[1] + h, p[2])
+        return q not in m.N or m.K[q] in free
+
+    floor = {}
+    for p, k in m.K.items():
+        if k not in ("full", "frame", "slab") or p[1] < low or (p[0], p[2]) not in zone:
+            continue
+        if (p[0], p[1] + 1, p[2]) in m.IN or p in m.chimneys:
+            continue
+        up = (p[0], p[1] + 1, p[2])
+        rail = up in m.K and m.K[up] in ("fence", "frame")
+        if open_above(p, 2) and (rail or open_above(p, 1)):
+            floor[p] = rail
+    groups = []
+    left = set(floor)
+    while left:
+        s = left.pop()
+        comp, todo = [s], [s]
+        while todo:
+            x, y, z = todo.pop()
+            for a, b in DIRS4:
+                q = (x + a, y, z + b)
+                if q in left:
+                    left.remove(q)
+                    comp.append(q)
+                    todo.append(q)
+        walk = [p for p in comp if not floor[p]]
+        rails = sum(1 for p in comp if floor[p]) + sum(
+            1 for (x, y, z) in walk for a, b in DIRS4 if m.K.get((x + a, y + 1, z + b)) == "fence")
+        if len(walk) >= 3 and rails >= 3:
+            groups.append(comp)
+    cells = sum(len(c) for c in groups)
+    stair = _outside_stair(m)
+    score = 35 * bool(groups) + 25 * (len(groups) >= 2) + 25 * _clamp(cells / 24) + 15 * bool(stair)
+    x1, z1, x2, z2 = m.box
+    find, fix = [], []
+    if not groups:
+        find.append(f"Balconies: no balcony or terrace (an outdoor floor above the ground floor with a railing) on the "
+                    f"building at x {x1}..{x2}, z {z1}..{z2}.")
+        fix.append(f"Add a balcony on the upper floor of the front wall (pattern balcony with door=True, floor at y "
+                   f"{m.g + 5}) and a terrace with a fence railing on a lower wing, reached by an outside stair "
+                   f"(pattern external_stair).")
+    elif len(groups) < 2:
+        p = min(groups[0])
+        find.append(f"Balconies: one balcony or terrace ({len(groups[0])} cells at {_fmt(p)}); the reference houses "
+                    f"have two or more.")
+        fix.append(f"Add a second balcony or a roof terrace with a railing on another side of x {x1}..{x2}, "
+                   f"z {z1}..{z2} (patterns balcony, external_stair).")
+    if groups and not stair:
+        fix.append("Lead an outside stair with landings up to the terrace or balcony (pattern external_stair).")
+    return score, find, fix
+
+
+def _outside_stair(m):
+    """A flight of 3+ bottom stairs outside the rooms climbing from near the ground to an upper floor or terrace
+    (flat landings of up to 3 cells between the flights are fine)."""
+    for p, k in m.K.items():
+        if k != "stairs" or p[1] > m.g + 2 or (p[0], p[2]) in m.I or "half=top" in m.S[p]:
+            continue
+        facing = _props(m.S[p]).get("facing")
+        f = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}.get(facing)
+        if not f:
+            continue
+        x, y, z = p
+        steps = 1
+        while steps < 60:
+            q = (x + f[0], y + 1, z + f[1])
+            k2 = 0
+            while m.K.get(q) != "stairs" and k2 < 3 and (q[0], q[1] - 1, q[2]) in m.ST:
+                q = (q[0] + f[0], q[1], q[2] + f[1])                 # walk over a landing
+                k2 += 1
+            if m.K.get(q) != "stairs" or "half=top" in m.S[q] or _props(m.S[q]).get("facing") != facing:
+                break
+            x, y, z = q
+            steps += 1
+        if steps >= 4 and y >= m.g + 4:
+            return p
+    return None
+
+
+def _roof_planes(m):
+    """Roof planes: bottom stairs open to the sky over and round the building, grouped by facing -> [(eave y, cells)]."""
+    zone = _dilate(m.F1, 3)
+    by = collections.defaultdict(set)
+    for p, k in m.K.items():
+        if k != "stairs" or (p[0], p[2]) not in zone or p[1] < m.g + 3 or "half=top" in m.S[p]:
+            continue
+        if m.K.get((p[0], p[1] + 1, p[2])) in ("full", "frame", "stairs", "slab"):
+            continue                                                 # covered: under another roof or a wall
+        by[_props(m.S[p]).get("facing", "?")].add(p)
+    out = []
+    for facing, cells in by.items():
+        left = set(cells)
+        while left:
+            s = left.pop()
+            comp, todo = [s], [s]
+            while todo:
+                x, y, z = todo.pop()
+                for a, b in DIRS4:
+                    for dy in (-1, 0, 1):
+                        q = (x + a, y + dy, z + b)
+                        if q in left:
+                            left.remove(q)
+                            comp.append(q)
+                            todo.append(q)
+            if len(comp) >= 6:
+                out.append((min(q[1] for q in comp), comp))
+    return out
+
+
+def _roof_style(m):
+    roof = collections.Counter()
+    for c in m.F1:
+        p = m.top_state(c)
+        if p is not None and p not in m.chimneys and m.K[p] in ("stairs", "slab", "full") and p[1] >= m.g + 3:
+            roof[mkey(m.N[p])] += 1
+    vis = _seen(m)
+    walls = [mat for mat, n in vis.most_common(3) if n >= 0.1 * max(1, sum(vis.values()))]
+    x1, z1, x2, z2 = m.box
+    find, fix = [], []
+    rm = roof.most_common(1)[0][0] if roof else None
+    near, col = None, 0.0
+    if rm and walls:
+        near = min(walls, key=lambda w: _cdist(rm, w))
+        col = 0.5 * _clamp(_cdist(rm, near) / 50) + 0.5 * min(_hue_gap(rm, w) for w in walls)
+    levels = []
+    for y, comp in sorted(_roof_planes(m)):
+        if not levels or y - levels[-1] >= 2:
+            levels.append(y)
+    lay = 0.0 if len(levels) <= 1 else 0.6 if len(levels) == 2 else 1.0
+    score = 60 * col + 40 * lay
+    if col < 0.75:
+        find.append(f"Roof colour: the roof over x {x1}..{x2}, z {z1}..{z2} ({rm or 'none'}) is the same colour family as "
+                    f"the walls ({near or ', '.join(walls) or 'none'}).")
+        fix.append(f"Give the roof over x {x1}..{x2}, z {z1}..{z2} its own colour: teal (prismarine_brick_stairs), green "
+                   f"(oxidized_cut_copper_stairs), gray (deepslate_tile_stairs) or red (red_nether_brick_stairs) with a wood "
+                   f"trim - gable_roof_trim(..., stairs='teal', trim='oak').")
+    if lay < 1:
+        find.append(f"Roof layers: roof planes at {len(levels)} height{'s' if len(levels) != 1 else ''} "
+                    f"({', '.join(f'y {y}' for y in levels) or 'none'}); the reference houses layer 3 or more.")
+        fix.append(f"Layer the roofs: a storey band (pattern storey_band) round x {x1}..{x2}, z {z1}..{z2} between the "
+                   f"floors, lower wing and porch roofs below the main eaves, a cross gable (pattern cross_gable_roof).")
+    return score, find, fix
+
+
+PARTS = (("contrast", _contrast), ("storeys", _storeys), ("windows", _windows), ("balcony", _balcony),
+         ("roof_style", _roof_style), ("facade", _facade), ("roof", _roof), ("massing", _massing), ("palette", _palette),
+         ("detail", _detail), ("surroundings", _surroundings))
 
 
 # ------------------------------------------------------------------ towns (3+ buildings)
@@ -843,11 +1253,13 @@ LABELS.update({"roads": "Streets", "variety": "Variety", "open_space": "Open spa
                "density": "Density"})
 
 
-def score(blocks, size=None):
-    """Quality of a building, see the module text. `size` (the size hint) is accepted for callers that have it.
-    Three or more separate buildings are a town: the total is half the house parts, half the town parts
-    (TOWN_WEIGHTS: winding streets that reach the doors, varied houses, open space, a landmark, density)."""
+def score(blocks, size=None, prompt=None):
+    """Quality of a building, see the module text. `size` (the size hint) and `prompt` (what was asked) only tell a
+    small house (tiny, small, hut, cottage ...), which may have one storey. Three or more separate buildings are a town:
+    the total is half the house parts, half the town parts (TOWN_WEIGHTS: winding streets that reach the doors, varied
+    houses, open space, a landmark, density)."""
     m = _Model(blocks or {})
+    m.small = is_small(size, prompt)
     if not m.building:
         return {"total": None, "building": False, "town": False, "buildings": 0, "parts": {}, "fixes": {}, "weights": {},
                 "findings": ["Not a building (no closed room with 2 blocks of head room), so its quality is not scored."]}
@@ -903,17 +1315,26 @@ def built_only(blocks, land):
     return {p: s for p, s in blocks.items() if land.get(p) != s}
 
 
-RUBRIC = """Score your build 1-5 on each part (5 = like a good survival-showcase house):
-1. Facade depth - log posts and beams stick out 1 block from the wall; no flat wall longer than 5 blocks without a post,
+RUBRIC = """Score your build 1-5 on each part (5 = like the reference survival manors):
+1. Wall contrast - a light wall fill (birch, oak, stripped logs, plaster) between dark log posts and beams; most of the
+   wall seen from outside is light. 5 = light fill in a dark frame, 1 = one dark wood everywhere.
+2. Storeys - 2-3 floors (a small hut or cottage may have 1), as tall as it is long, not a long low bar.
+   5 = 2-3 storeys with a storey band between them, 1 = one long low floor.
+3. Windows - big 2 x 2 windows in every bay of every facade with shutters and a flower box. 5 = 12-20% glass on each
+   side, 1 = a few small panes.
+4. Balconies - balconies and terraces with railings on the upper floors, an outside stair with landings up to one.
+   5 = two or more and a stair, 1 = none.
+5. Roof colour and layers - a roof colour of its own (teal, green, gray, red) with a wood trim, roofs at 3+ heights
+   (storey bands, wing and porch roofs, the main roof). 5 = colored layered roofs, 1 = one roof in the wall wood.
+6. Facade depth - log posts and beams stick out 1 block from the wall; no flat wall longer than 5 blocks without a post,
    window or step. 5 = framed walls on every side, 1 = flat plank or stone walls.
-2. Roof - pitched stair roof, eaves overhang the walls by 1+, barge boards and ridge in a second material, big roofs
+7. Roof - pitched stair roof, eaves overhang the walls by 1+, barge boards and ridge in a second material, big roofs
    broken by cross gables or dormers. 5 = layered roof with trims, 1 = flat box top.
-3. Massing - a main volume plus a wing, porch, balcony or annex, more than one roof height. 5 = L/T plan with porch and
+8. Massing - a main volume plus a wing, porch, balcony or annex, more than one roof height. 5 = L/T plan with porch and
    balcony, 1 = one box.
-4. Palette - 3-6 materials with roles: logs for the frame, one wall fill, a different roof, accents (glass, trapdoors,
+9. Palette - 3-6 materials with roles: logs for the frame, one wall fill, a different roof, accents (glass, trapdoors,
    lanterns, fences). 5 = clear roles, 1 = one material or a random mix.
-5. Detail - a window every 3-4 blocks with shutters or a flower box, lanterns, pots, a chimney. 5 = every wall has
-   framed windows and lights, 1 = bare walls.
-6. Surroundings - a path to the door, a fenced garden, flowers, a farm plot or terrace, lantern posts. 5 = the house sits
-   in a yard, 1 = it stands on nothing.
+10. Detail - lanterns, pots, shutters, fences, a chimney. 5 = every wall has framed windows and lights, 1 = bare walls.
+11. Surroundings - a path to the door, a fenced garden, flowers, a farm plot or terrace, lantern posts. 5 = the house
+   sits in a yard, 1 = it stands on nothing.
 Fix every part you score below 4 with build_step (pattern() has the proven parts), then call save_build."""

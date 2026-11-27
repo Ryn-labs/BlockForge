@@ -170,15 +170,16 @@ def score(d, lo=None, hi=None, terrain=None):
     if T:
         keys += ["terrain_floating", "terrain_buried"]
     out = {k: r.get(k, 0) for k in keys}
-    out["quality"] = quality_total(C, T)
+    out["quality"] = quality_total(C, T, meta.get("prompt"))
     return out
 
 
-def quality_total(C, T=None):
-    """blockforge.quality total of the build (what was built on a terrain), or None when it is not a building."""
+def quality_total(C, T=None, prompt=None):
+    """blockforge.quality total of the build (what was built on a terrain), or None when it is not a building. The prompt
+    tells a small house (hut, cottage, small ...), which may have one storey."""
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     from blockforge import quality
-    return quality.score(quality.built_only(C, T or None))["total"]
+    return quality.score(quality.built_only(C, T or None), prompt=prompt)["total"]
 
 
 def overwritten(code):

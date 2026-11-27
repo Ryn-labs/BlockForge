@@ -418,10 +418,11 @@ def quality_fix_message(result):
     for k, v, fixes in quality.weakest(result, 3):
         lines.append(f"- {quality.LABELS[k]} {v}/100: " + " ".join(fixes[:2]))
     lines += ["", "Other findings:"] + ["- " + f for f in result.get("findings", [])[:10]]
-    return ("\n".join(lines) + "\n\nImprove these parts in place: log frames that stick out of the walls, a pitched roof "
-            "with overhang and trim, framed windows with shutters and flower boxes, a porch or balcony, a chimney, a path "
-            "and a garden. Keep the size and keep the paths, doors and stairs working. Reply with the complete improved "
-            "script in one ```python block.")
+    return ("\n".join(lines) + "\n\nImprove these parts in place: 2+ storeys, a light wall fill in a dark log frame "
+            "that sticks out of the walls, a pitched roof in its own colour (teal, green, gray, red) with overhang, trim "
+            "and lower roofs at other heights, big 2 x 2 framed windows with shutters and flower boxes, a porch and "
+            "balconies, a chimney, a path and a garden. Keep the size and keep the paths, doors and stairs working. Reply "
+            "with the complete improved script in one ```python block.")
 
 
 def redstone_fix_message(problems):
