@@ -194,6 +194,7 @@ async function loadStatus() {
     : cc.logged_in ? `Signed in${cc.account ? ' as ' + cc.account : ''} (${cc.method || 'Claude account'}).`
     : 'Found Claude Code, but it isn’t signed in yet. Click “Sign in to Claude”, finish in the window that opens, then “Check again”.';
   $('#api-key').value = s.settings.api_key || '';
+  $('#build-mode').value = s.settings.build_mode === 'script' ? 'script' : 'step_by_step';
 }
 
 function openSettings(tab = 'claude') {
@@ -298,7 +299,7 @@ $('#save-settings').onclick = async e => {
     name: r.querySelector('.pn').value.trim(), description: r.querySelector('.pd').value.trim() })).filter(p => p.name && p.description);
   const research = $('#set-research').checked;
   if ($('#g-style').value === 'eleven') { try { await saveElevenChoice(); } catch (e) { toast(e.message, true); } }
-  await post('settings', { ...modsSettings(), ...learnSettings(), engine, api_key: $('#api-key').value.trim(), model: $('#default-model').value,
+  await post('settings', { ...modsSettings(), ...learnSettings(), engine, build_mode: $('#build-mode').value, api_key: $('#api-key').value.trim(), model: $('#default-model').value,
     research, research_sites: sites, default_size: $('#default-size').value, default_palette: $('#default-palette').value,
     custom_palettes, ui, guide: stripLive(gcfg = readGuideForm()), providers: provEdits });
   provEdits = {};

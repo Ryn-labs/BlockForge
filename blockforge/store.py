@@ -32,7 +32,7 @@ _migrate_old_data()
 os.makedirs(BUILDS, exist_ok=True)
 
 DEFAULT_SETTINGS = {
-    "engine": "claude_code", "build_mode": "script", "api_key": "", "model": "claude-opus-5-5", "author": "",
+    "engine": "claude_code", "build_mode": "step_by_step", "api_key": "", "model": "claude-opus-5-5", "author": "",
     "research": True, "research_sites": None,             # None = the built-in list in prompts.DEFAULT_SITES
     "default_size": "medium", "default_palette": "auto",
     "custom_palettes": [],                                 # [{"name": ..., "description": ...}]
@@ -77,6 +77,17 @@ def _read_stored():
     return None
 
 
+BUILD_MODES = ("step_by_step", "script")
+
+
+def normalize_build_mode(v):
+    """'loop' was the old name of step_by_step. Anything unknown means the default."""
+    v = str(v or "").strip().lower()
+    if v == "loop":
+        return "step_by_step"
+    return v if v in BUILD_MODES else "step_by_step"
+
+
 def load_settings():
     s = dict(DEFAULT_SETTINGS)
     with _settings_lock:
@@ -86,6 +97,7 @@ def load_settings():
             stored = None
     if stored:
         s.update(stored)
+    s["build_mode"] = normalize_build_mode(s.get("build_mode"))
     return s
 
 
@@ -101,6 +113,7 @@ def save_settings(new):
                 s[k] = {**s[k], **v}
             else:
                 s[k] = v
+        s["build_mode"] = normalize_build_mode(s.get("build_mode"))
         data = json.dumps(s, indent=2)
         tmp = SETTINGS + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:

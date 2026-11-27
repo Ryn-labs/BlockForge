@@ -230,6 +230,12 @@
         <button type="button" class="btn small" id="p-load">Load models</button></div></div>
       <div class="status" id="p-status" hidden></div>
     </div></div>
+    <h3>Build mode</h3>
+    <select id="build-mode" class="engine-select">
+      <option value="step_by_step">Step by step: looks at and checks each part</option>
+      <option value="script">Script: one script, faster</option>
+    </select>
+    <p class="muted small">Step by step needs Claude (your account). Edits, the API key and other AIs use a script automatically.</p>
     <h3>About &amp; updates</h3>
     <div class="about-row"><span>BlockForge <b id="about-version"></b></span><span id="about-update" class="muted small"></span>
       <button type="button" class="btn small" id="check-update">Check for updates</button></div>

@@ -25,7 +25,7 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
   pass the text it returns to build_step and change the arguments, not the proven shape.
 - Unsure about a block (needs support? stairs facing? properties)? Call block_info before you place it.
 
-## THE BUILD LOOP
+## HOW TO BUILD, PART BY PART
 1. Plan in parts first: footprint and size, floor, walls, doors and windows, roof, inside, paths and decoration.
 2. build_step ONE part (about 10-40 lines of script).
 3. view it. Compare with what you meant: proportions, gaps, wrong materials, things on the wrong side.

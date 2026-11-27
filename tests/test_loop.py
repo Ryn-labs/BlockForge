@@ -91,8 +91,57 @@ class LoopEngine(unittest.TestCase):
             meta = engine.generate("A well", size="tiny", engine="claude_loop", research=False, log=lambda s: None)
             self.assertTrue(meta.get("id"))
 
-    def test_default_mode_is_script(self):
-        self.assertEqual(store.DEFAULT_SETTINGS["build_mode"], "script")
+    def setUp(self):
+        if os.path.isfile(store.SETTINGS):
+            os.remove(store.SETTINGS)
+
+    def tearDown(self):
+        self.setUp()
+
+    def test_default_mode_is_step_by_step(self):
+        self.assertEqual(store.DEFAULT_SETTINGS["build_mode"], "step_by_step")
+        self.assertEqual(store.load_settings()["build_mode"], "step_by_step")
+
+    def test_old_loop_value_is_an_alias(self):
+        store.save_settings({"build_mode": "loop"})
+        self.assertEqual(store.load_settings()["build_mode"], "step_by_step")
+        with open(store.SETTINGS, encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["build_mode"], "step_by_step")
+        with open(store.SETTINGS, "w", encoding="utf-8") as f:
+            json.dump({"build_mode": "loop"}, f)
+        self.assertEqual(store.load_settings()["build_mode"], "step_by_step")
+        store.save_settings({"build_mode": "script"})
+        self.assertEqual(store.load_settings()["build_mode"], "script")
+
+    def _which(self, **kw):
+        """Run generate() with both paths stubbed; return which one ran and the log."""
+        lines = []
+        with mock.patch.object(engine, "find_claude", return_value="claude"),                 mock.patch.object(engine, "_generate_loop", lambda *a: {"id": "loop"}),                 mock.patch.object(engine, "_Conversation", side_effect=RuntimeError("script")):
+            try:
+                r = engine.generate("A well", size="tiny", research=False, log=lines.append, **kw)
+                return r["id"], lines
+            except Exception as e:
+                return str(e), lines
+
+    def test_default_uses_step_by_step(self):
+        self.assertEqual(self._which()[0], "loop")
+
+    def test_script_setting_uses_script(self):
+        store.save_settings({"build_mode": "script"})
+        self.assertEqual(self._which()[0], "script")
+        self.assertEqual(self._which(build_mode="step_by_step")[0], "loop")
+
+    def test_api_engine_falls_back_to_script(self):
+        who, lines = self._which(engine="api")
+        self.assertEqual(who, "script")
+        self.assertTrue(any("one-script" in l for l in lines))
+        self.assertEqual(self._which(engine="openai")[0], "script")
+
+    def test_edit_falls_back_to_script(self):
+        with mock.patch.object(store, "get_code", return_value="x"), mock.patch.object(store, "edit_base", return_value=(None, None)):
+            who, lines = self._which(parent_id="abcd1234")
+        self.assertEqual(who, "script")
+        self.assertTrue(any("edit" in l for l in lines))
 
 
 if __name__ == "__main__":

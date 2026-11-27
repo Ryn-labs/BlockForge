@@ -91,7 +91,7 @@ class SessionTools(unittest.TestCase):
             mcp_server.call("check", {"session": "nope"})
         guide = mcp_server.call("get_build_guide", {})
         self.assertTrue(guide.startswith("# BlockForge"))
-        self.assertLess(guide.index("THE BUILD LOOP"), guide.index("The build script"))
+        self.assertLess(guide.index("HOW TO BUILD, PART BY PART"), guide.index("The build script"))
 
 
 class McpStdio(unittest.TestCase):
