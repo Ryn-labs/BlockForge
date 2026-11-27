@@ -353,7 +353,7 @@ def _review(s):
     """review(session): the side views and the top, the quality score with what to fix, and the rubric."""
     if not s.blocks:
         raise ToolError("The build is empty, there is nothing to review yet.")
-    q = quality.score(quality.built_only(s.blocks, s.terrain_blocks), s.size_hint)
+    q = quality.score(quality.built_only(s.blocks, s.terrain_blocks), s.size_hint, s.title)
     if q["building"]:
         head = (f"Quality {quality.summary(q)}; save_build needs {quality.QUALITY_MIN} or more.\n"
                 + "\n".join("- " + f for f in q["findings"][:12]))
@@ -457,14 +457,14 @@ def _session_call(name, args):
                                 "keep the detail), then call save_build again. accept_problems does not cover the size. "
                                 + ("" if os.environ.get("BLOCKFORGE_UNATTENDED") else "If you are talking with the user, ask them: keep this size or fix it to the target? "
                                    "Only if they say keep it, call save_build with keep_size_user_answer set to their words."))
-            q = quality.score(quality.built_only(s.blocks, s.terrain_blocks), s.size_hint)
+            q = quality.score(quality.built_only(s.blocks, s.terrain_blocks), s.size_hint, s.title)
             unattended = bool(os.environ.get("BLOCKFORGE_UNATTENDED"))
             user_q = bool((args.get("keep_quality_user_answer") or "").strip()) and not unattended
             if q["building"] and q["total"] < quality.QUALITY_MIN and not user_q:   # a plain box is never waived by the AI itself
                 raise ToolError("Not saved yet: the " + ("town" if q.get("town") else "building") + " looks too plain. "
                                 + quality.gate_text(q) + "\nFix the weakest parts with build_step (pattern() has framed_house, "
-                                "framed_wall, window_with_box, porch, balcony, gable_roof_trim, cross_gable_roof, chimney, fence_garden, "
-                                "farm_plot, road, plaza), call review to look at it, then save_build again. accept_problems does not "
+                                "framed_wall, window_with_box, porch, balcony, storey_band, external_stair, gable_roof_trim, cross_gable_roof, "
+                                "chimney, fence_garden, farm_plot, road, plaza), call review to look at it, then save_build again. accept_problems does not "
                                 "cover the quality." + ("" if unattended else " If the user asked for a plain building on purpose, ask "
                                 "them; only if they say keep it, call save_build with keep_quality_user_answer set to their words."))
             m, link = session.save(s, args.get("title"))

@@ -18,9 +18,39 @@ def _dir(name):
     return DIRS[name]
 
 
+# Roof colours by name: gable_roof_trim(..., stairs="teal") and the other roofs take these as well as a block name.
+ROOF_COLOURS = {"teal": "prismarine_brick_stairs", "green": "oxidized_cut_copper_stairs",
+                "copper": "cut_copper_stairs", "gray": "deepslate_tile_stairs", "grey": "deepslate_tile_stairs",
+                "red": "red_nether_brick_stairs", "brick": "brick_stairs", "blue": "warped_stairs",
+                "dark": "dark_oak_stairs", "brown": "spruce_stairs", "mud": "mud_brick_stairs"}
+# Wall styles for framed_house / framed_wall: (fill, frame). "light" is the reference look: a light fill in a dark frame.
+WALL_STYLES = {"light": ("birch_planks", "dark_oak_log"), "oak": ("oak_planks", "dark_oak_log"),
+               "stripped": ("stripped_birch_log", "dark_oak_log"), "plaster": ("white_terracotta", "spruce_log"),
+               "classic": ("oak_planks", "spruce_log")}
+
+
 def _stairs(name):
-    name = str(name)
+    name = ROOF_COLOURS.get(str(name), str(name))
     return name if name.endswith("_stairs") else name + "_stairs"
+
+
+def _full(stairs):
+    """The full block of a stair material: oak_stairs -> oak_planks, prismarine_brick_stairs -> prismarine_bricks."""
+    base = _stairs(stairs)[:-7]
+    if base in WOOD_NAMES:
+        return base + "_planks"
+    if base.endswith(("_brick", "_tile")) or base == "brick":
+        return base + "s"
+    return base
+
+
+def _style(style, fill, frame):
+    if style is None:
+        return fill or "oak_planks", frame or "spruce_log"
+    if style not in WALL_STYLES:
+        raise ValueError(f"style must be one of {', '.join(sorted(WALL_STYLES))} (got {style!r})")
+    f, r = WALL_STYLES[style]
+    return fill or f, frame or r
 
 
 def _st(name, **props):
@@ -443,10 +473,12 @@ def _posts(cells, spacing):
     return [c for i, c in enumerate(cells) if i % max(2, int(spacing)) == 0 or i == len(cells) - 1]
 
 
-def framed_wall(x1, z1, x2, z2, y, h, facing, fill="oak_planks", frame="spruce_log", spacing=4):
+def framed_wall(x1, z1, x2, z2, y, h, facing, fill=None, frame=None, spacing=4, style=None):
     """A timber-framed wall: `fill` infill from y to y+h-1 on the straight line (x1, z1)-(x2, z2), log posts in the wall
     at both ends and every `spacing` blocks, and a frame that sticks out 1 block on the `facing` side: posts from y-1 to
-    the top and log beams along the bottom (y-1) and top (y+h-1) rows. Leave the cells between posts for windows/doors."""
+    the top and log beams along the bottom (y-1) and top (y+h-1) rows. Leave the cells between posts for windows/doors.
+    style = a WALL_STYLES name ('light': birch planks in a dark oak frame) for fill and frame not given."""
+    fill, frame = _style(style, fill, frame)
     cells, (dx, dz) = _wall_cells(x1, z1, x2, z2, facing)
     along = _AXIS[facing]
     top = y + max(2, int(h)) - 1
@@ -461,15 +493,19 @@ def framed_wall(x1, z1, x2, z2, y, h, facing, fill="oak_planks", frame="spruce_l
     return _code(out)
 
 
-def framed_house(x1, z1, x2, z2, y, floors=1, storey=4, fill="oak_planks", frame="spruce_log", floor="spruce_planks",
-                 foundation="cobblestone", spacing=4, skip=(), clear=False, flat=()):
+def framed_house(x1, z1, x2, z2, y, floors=1, storey=4, fill=None, frame=None, floor="spruce_planks",
+                 foundation="cobblestone", spacing=4, skip=(), clear=False, flat=(), style=None):
     """The body of a timber-framed house: foundation at y-1, `floors` storeys of `storey` free blocks (walls on the
     outline x1..x2, z1..z2), plank floors between storeys and a ceiling on top, log posts in the walls every `spacing`
     blocks and a frame sticking out 1 block (posts, a beam on every floor line, thick corners). The ceiling is at
     y + floors * (storey + 1) - 1: the roof's eaves go one higher. skip = sides without a wall (a wing joined to another
     building, e.g. ['east']); flat = sides whose frame stays in the wall (where a lower wing and its roof join);
     clear=True empties the rooms first. Then add windows, a porch or door, and the roof.
-    Tip: a side of 4k+1 blocks with spacing 4 leaves 3-block bays, a window or door in the middle of each."""
+    style = a WALL_STYLES name for fill and frame not given: 'light' (birch planks in dark oak logs, the reference
+    look), 'oak', 'stripped', 'plaster', 'classic' (oak planks in spruce logs, the default).
+    Tip: a side of 4k+1 blocks with spacing 4 leaves 3-block bays, a window or door in the middle of each; 5k+1 blocks
+    with spacing 5 leaves 4-block bays for 2-wide windows."""
+    fill, frame = _style(style, fill, frame)
     x1, x2 = sorted((x1, x2))
     z1, z2 = sorted((z1, z2))
     if x2 - x1 < 3 or z2 - z1 < 3:
@@ -617,11 +653,15 @@ def porch(x, y, z, facing, width=5, depth=3, wood="spruce", post="spruce_log", r
     return _code(out)
 
 
-def balcony(x, y, z, facing, length=5, depth=2, wood="spruce", post="spruce_log", ground_y=None, door=False):
+def balcony(x, y, z, facing, length=5, depth=2, wood="spruce", post="spruce_log", ground_y=None, door=False, gap=None):
     """A balcony: a plank floor at height y sticking out `depth` blocks on the `facing` side of a wall, `length` blocks
     along it from (x, z) (the floor cell next to the wall; length runs east or south). A fence railing round the open
     edges, log posts with lanterns on the outer corners, upside-down stair brackets under the floor at both ends, and
-    posts down to ground_y (the top block of the ground) when given. door=True puts a door in the wall behind the middle."""
+    posts down to ground_y (the top block of the ground) when given. door=True puts a door in the wall behind the middle.
+    gap = 'start' or 'end' leaves the railing open at that end (w = 0 or the last cell) for an external_stair whose top
+    landing (at height y) ends next to it: the balcony access."""
+    if gap not in (None, "start", "end"):
+        raise ValueError("gap must be None, 'start' or 'end'")
     dx, dz = _dir(facing)
     px, pz = (1, 0) if _AXIS[facing] == "x" else (0, 1)
     length, depth = max(3, int(length)), max(1, int(depth))
@@ -638,6 +678,8 @@ def balcony(x, y, z, facing, length=5, depth=2, wood="spruce", post="spruce_log"
                 out.append(f"block({cx}, {y + 1}, {cz}, {_st(post, axis='y')})")
                 out.append(f"block({cx}, {y + 2}, {cz}, {_st('lantern', hanging=False)})")
             elif k == depth - 1 or w in (0, length - 1):
+                if k < depth - 1 and ((gap == "start" and w == 0) or (gap == "end" and w == length - 1)):
+                    continue                                         # the opening for the stair
                 out.append(f"block({cx}, {y + 1}, {cz}, {fence!r})")
     for w in (0, length - 1):
         for k in range(depth):
@@ -651,6 +693,93 @@ def balcony(x, y, z, facing, length=5, depth=2, wood="spruce", post="spruce_log"
         out.append(f"block({cx}, {y + 1}, {cz}, {_st(wood + '_door', facing=facing, half='lower', hinge='left', open=False)})")
         out.append(f"block({cx}, {y + 2}, {cz}, {_st(wood + '_door', facing=facing, half='upper', hinge='left', open=False)})")
     return _code(out)
+
+
+def external_stair(x, y, z, dir, height, width=2, flight=4, landing=2, block="oak_stairs", support="oak_planks",
+                   rail="oak_fence", rails="both"):
+    """An outside stair up to a terrace, balcony or upper door: straight flights of `flight` bottom stairs facing uphill
+    (1 up per cell), a flat landing of `landing` cells after every flight, climbing `height` steps in all. The first step
+    is at (x, y, z) on ground at y-1; `width` cells wide to the right-hand side of `dir`. The top landing's blocks are at
+    y + height - 1, so a terrace or balcony floor at that height continues it (balcony(..., gap=...) leaves the railing
+    open). Solid `support` under every step and landing down to y-1; a stringer wall with a `rail` fence on top along
+    the sides in `rails` ('both', 'left', 'right' or 'none'; left = the side opposite the width; use one side when the
+    stair runs along a wall). Never turns on a stair, so no jump steps and no corner turns."""
+    dx, dz = _dir(dir)
+    px, pz = -dz, dx
+    height, width = max(1, int(height)), max(1, int(width))
+    flight, landing = max(1, int(flight)), max(1, int(landing))
+    if rails not in ("both", "left", "right", "none"):
+        raise ValueError("rails must be 'both', 'left', 'right' or 'none'")
+    stairs = _stairs(block)
+    sides = {"both": (-1, width), "left": (-1,), "right": (width,), "none": ()}[rails]
+    out = [f"# external stair {dir}, {height} steps in flights of {flight} with landings of {landing}"]
+    off, top, done = 0, y - 1, 0
+    while done < height:
+        n = min(flight, height - done)
+        for i in range(n):
+            top += 1
+            for w in range(width):
+                cx, cz = x + dx * off + px * w, z + dz * off + pz * w
+                if top > y:
+                    out.append(f"fill({cx}, {y - 1}, {cz}, {cx}, {top - 1}, {cz}, {support!r})")
+                else:
+                    out.append(f"block({cx}, {y - 1}, {cz}, {support!r})")
+                out.append(f"block({cx}, {top}, {cz}, {_st(stairs, facing=dir, half='bottom', shape='straight')})")
+            for w in sides:
+                sx, sz = x + dx * off + px * w, z + dz * off + pz * w
+                out.append(f"fill({sx}, {y - 1}, {sz}, {sx}, {top}, {sz}, {support!r})")
+                out.append(f"block({sx}, {top + 1}, {sz}, {rail!r})")
+            off += 1
+        done += n
+        for j in range(landing):                                     # flat landing, the same height as the last step
+            for w in range(width):
+                cx, cz = x + dx * off + px * w, z + dz * off + pz * w
+                out.append(f"fill({cx}, {y - 1}, {cz}, {cx}, {top}, {cz}, {support!r})")
+            last = done >= height and j == landing - 1
+            for w in sides:
+                sx, sz = x + dx * off + px * w, z + dz * off + pz * w
+                out.append(f"fill({sx}, {y - 1}, {sz}, {sx}, {top}, {sz}, {support!r})")
+                if not last:
+                    out.append(f"block({sx}, {top + 1}, {sz}, {rail!r})")
+            off += 1
+    return _code(out)
+
+
+def storey_band(x1, z1, x2, z2, y, stairs="dark_oak_stairs", out=2, skip=(), gaps=()):
+    """A storey band (pent roof, jetty skirt) round the walls x1..x2, z1..z2: a row of stairs at height y, `out` blocks
+    outside the walls (2 for a framed_house, whose frame sticks out 1), the high side against the wall, slabs on the
+    corners. Put it at or 1 below a floor line between two storeys: it splits a tall facade into layers like the reference
+    manors and gives the roof a second height. skip = sides without a band (where a wing joins); gaps = [[x1, z1, x2,
+    z2], ...] columns to leave open (a porch roof or a balcony over it, a wing roof)."""
+    x1, x2 = sorted((x1, x2))
+    z1, z2 = sorted((z1, z2))
+    o = max(1, int(out))
+    skip = {str(s).lower() for s in (skip or ())}
+    if skip - set(DIRS):
+        raise ValueError("skip takes north, south, east, west")
+    st = _stairs(stairs)
+    slab = _st(st[:-7] + "_slab", type="bottom")
+    lo_x, hi_x, lo_z, hi_z = x1 - o, x2 + o, z1 - o, z2 + o
+    cells = {}
+    for side, facing in (("north", "south"), ("south", "north"), ("west", "east"), ("east", "west")):
+        if side in skip:
+            continue
+        if side in ("north", "south"):
+            zz = lo_z if side == "north" else hi_z
+            for xx in range(lo_x, hi_x + 1):
+                cells[(xx, y, zz)] = _st(st, facing=facing, half="bottom")
+        else:
+            xx = lo_x if side == "west" else hi_x
+            for zz in range(lo_z, hi_z + 1):
+                cells[(xx, y, zz)] = _st(st, facing=facing, half="bottom")
+    for (cx, cz) in ((lo_x, lo_z), (hi_x, lo_z), (lo_x, hi_z), (hi_x, hi_z)):
+        if (cx, y, cz) in cells:
+            cells[(cx, y, cz)] = slab                                # no stair turns on one block
+    for g in gaps or ():
+        gx1, gz1, gx2, gz2 = (int(v) for v in g)
+        for key in [k for k in cells if min(gx1, gx2) <= k[0] <= max(gx1, gx2) and min(gz1, gz2) <= k[2] <= max(gz1, gz2)]:
+            del cells[key]
+    return _code([f"# storey band round x {x1}..{x2}, z {z1}..{z2} at y={y}, {o} out"] + _emit(cells))
 
 
 def _emit(cells):
@@ -757,7 +886,7 @@ def _gable_cells(x1, z1, x2, z2, y, stairs, trim, ridge, o, fill, ends, rafter=T
     if rafter and len(ends) < 2:                                     # the joint with the taller building: a rafter
         v = run[0] if "lo" not in ends else run[-1]
         for key in [p for p in cells if (p[0] if ridge == "x" else p[2]) == v]:
-            cells[key] = repr(trim[:-7] + "_planks" if trim[:-7] in WOOD_NAMES else trim[:-7])
+            cells[key] = repr(_full(trim))
     return cells
 
 
@@ -869,7 +998,7 @@ def cross_gable_roof(x1, z1, x2, z2, y, stairs="spruce_stairs", trim="dark_oak",
                 del cells[(cx, yy, cz)]
             cells[(cx, cy, cz)] = s
     return _code([f"# layered roof: gable over x {x1}..{x2}, z {z1}..{z2} with a cross gable to the {front}, eaves at y={y}"]
-                 + _emit(_settle(cells, tr[:-7] + "_planks" if tr[:-7] in WOOD_NAMES else tr[:-7])))
+                 + _emit(_settle(cells, _full(tr))))
 
 
 def chimney(x, y, z, height=8, block="bricks", cap="campfire"):

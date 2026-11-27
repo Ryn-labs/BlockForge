@@ -268,9 +268,10 @@ def _check_lines(blocks, limit, ground=None):
     found = checks.run(blocks, ground=ground)
     if not found:
         return ["Checks: no problems found."]
-    out = ["Checks: " + checks.summary(found) + "."]
-    out += ["- " + f["text"] for f in found[:limit - 2]]
-    more = len(found) - (limit - 2)
+    tips = checks.advice(found)
+    shown = max(0, limit - 2 - len(tips))
+    out = ["Checks: " + checks.summary(found) + "."] + tips + ["- " + f["text"] for f in found[:shown]]
+    more = len(found) - shown
     if more > 0:
         out.append(f"...and {more} more (use check to see them all).")
     return out[:limit]
@@ -282,7 +283,7 @@ def check_text(s):
     found = checks.run(s.blocks, ground=s.ground())
     if not found:
         return "No problems found: no floating parts, buried or jumpy paths, wrong stairs or blocked doors."
-    return "Checks: " + checks.summary(found) + ".\n" + "\n".join("- " + f["text"] for f in found)
+    return "\n".join(["Checks: " + checks.summary(found) + "."] + checks.advice(found) + ["- " + f["text"] for f in found])
 
 
 def ground_text(s, x1=None, z1=None, x2=None, z2=None, step=None):

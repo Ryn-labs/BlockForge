@@ -19,6 +19,17 @@ COL = [("red_maple", (170, 50, 30)), ("orange_maple", (215, 120, 30)), ("leaves"
 
 
 def col(n):
+    """The colour of a block: the maples by name, everything else from blockforge/render.py (the 3D preview's table), so
+    white terracotta is pale, not brick red, and prismarine or copper roofs show their own colour."""
+    if "maple" in n:
+        for k, c in COL:
+            if k in n: return c
+    try:
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+        from blockforge.render import block_color
+        return block_color(n)
+    except Exception as e:                                                  # report, never hide
+        print(f"bench render: no colour table ({e}), using the short list", file=sys.stderr)
     for k, c in COL:
         if k in n: return c
     h = zlib.crc32(n.encode()); return (90 + h % 120, 90 + (h >> 8) % 120, 90 + (h >> 16) % 120)

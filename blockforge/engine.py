@@ -596,7 +596,7 @@ def _generate_loop(text, size, model, usage, prompt, image_path, log, terrain=No
             land = terr.load(terrain)
         except terr.TerrainError:
             land = None
-    q = quality.score(quality.built_only(blocks, land), size)
+    q = quality.score(quality.built_only(blocks, land), size, prompt)
     if q["building"]:
         log("Quality: " + quality.summary(q))
     rec = usage.record()
@@ -822,7 +822,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
         from . import quality
 
         def _quality(b):
-            return quality.score(quality.built_only(b, land), size)
+            return quality.score(quality.built_only(b, land), size, prompt)
         q = _quality(blocks)
         if q["building"] and q["total"] < quality.QUALITY_MIN:
             log(f"Quality: {quality.summary(q)}, below {quality.QUALITY_MIN}.")

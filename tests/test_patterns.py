@@ -1,7 +1,8 @@
 import unittest
 
 from tests import _env  # noqa: F401
-from blockforge import checks, patterns, sandbox
+from tests.test_bench_score import S, build
+from blockforge import checks, examples, patterns, sandbox
 
 KINDS = ("buried_path", "jump_step", "door_blocked", "floating", "headroom", "wrong_facing", "corner_turn")
 
@@ -54,7 +55,24 @@ CASES = {
     "site": lambda: patterns.site(0, 0, 5, 5, 1),
     "road": lambda: patterns.road([[0, 0], [8, 0], [12, 6], [12, 12]], 1),
     "plaza": lambda: patterns.plaza(0, 0, 8, 8, 1),
+    "external_stair": lambda: patterns.external_stair(0, 1, 0, "east", 9, 2, 4, 2),
+    "external_stair_north": lambda: patterns.external_stair(5, 1, 20, "north", 6, 2, 3, 2, rails="left"),
+    "external_stair_narrow": lambda: patterns.external_stair(0, 1, 0, "south", 3, 1, 4, 1, rails="none"),
+    "balcony_access": lambda: (patterns.framed_wall(0, 2, 10, 2, 1, 10, "south")
+                               + patterns.balcony(4, 6, 3, "south", 5, 3, ground_y=0, door=True, gap="start")
+                               + patterns.external_stair(-4, 1, 4, "east", 6, 2, 3, 1, rails="right")),
+    "storey_band": lambda: (patterns.framed_house(0, 0, 15, 10, 1, floors=2, storey=4, spacing=5, style="light")
+                            + patterns.storey_band(0, 0, 15, 10, 5)),
+    "storey_band_gaps": lambda: (patterns.framed_house(0, 0, 15, 10, 1, floors=2, storey=4, spacing=5)
+                                 + patterns.storey_band(0, 0, 15, 10, 4, "teal", skip=["east"], gaps=[[5, 11, 9, 13]])),
+    "gable_roof_teal": lambda: patterns.gable_roof_trim(0, 0, 10, 6, 1, "teal", "oak", overhang=2),
+    "cross_gable_green": lambda: patterns.cross_gable_roof(0, 0, 16, 10, 1, "green", "spruce", front="south", overhang=2),
+    "hip_roof_gray": lambda: patterns.hip_roof_trim(0, 0, 8, 6, 1, "gray", "dark_oak"),
 }
+# every pattern that people walk up: 0 jump steps and 0 corner turns by checks.run AND by bench/score.py
+STAIRS = ("stair_run_east", "stair_run_north", "stair_run_west", "switchback", "switchback_east", "porch_steps",
+          "external_stair", "external_stair_north", "external_stair_narrow", "balcony_access", "storey_band",
+          "storey_band_gaps")
 
 
 class Patterns(unittest.TestCase):
@@ -67,6 +85,51 @@ class Patterns(unittest.TestCase):
                 self.assertEqual(found, [], [f["text"] for f in found])
                 self.assertEqual(meta.get("warnings"), [])
                 self.assertEqual(meta.get("fixes"), [])
+
+    def test_stair_patterns_have_no_jumps_or_corner_turns_by_the_bench(self):
+        for name in STAIRS:
+            with self.subTest(name):
+                blocks, _ = sandbox.run_safe(CASES[name]())
+                found = [f["text"] for f in checks.run(blocks) if f["check"] in ("jump_step", "corner_turn", "wrong_facing")]
+                self.assertEqual(found, [])
+                out = S.score(build(blocks))
+                self.assertEqual((out["jump_steps"], out["corner_turns"], out["wrong_facing"], out["buried_path"]),
+                                 (0, 0, 0, 0), out)
+
+    def test_examples_have_no_jumps_or_corner_turns_by_the_bench(self):
+        for name in examples.EXAMPLES:
+            with self.subTest(name):
+                out = S.score(build(sandbox.run_safe(examples.code(name))[0]))
+                self.assertEqual((out["jump_steps"], out["corner_turns"]), (0, 0), out)
+
+    def test_external_stair_climbs_in_flights_with_landings(self):
+        blocks, _ = sandbox.run_safe(patterns.external_stair(0, 1, 0, "east", 6, 1, 3, 2, rails="none"))
+        tops = {}
+        for (x, y, z), s in blocks.items():
+            tops[x] = max(tops.get(x, -1), y)
+        self.assertEqual([tops[x] for x in range(10)], [1, 2, 3, 3, 3, 4, 5, 6, 6, 6])   # 3 steps, landing, 3, landing
+        for x in (0, 1, 2, 5, 6, 7):
+            self.assertIn("facing=east", blocks[(x, tops[x], 0)])
+            self.assertIn("half=bottom", blocks[(x, tops[x], 0)])
+        self.assertNotIn("stairs", blocks[(3, 3, 0)])
+
+    def test_colours_and_styles(self):
+        self.assertIn("prismarine_brick_stairs", patterns.gable_roof_trim(0, 0, 6, 4, 1, "teal", "oak"))
+        self.assertIn("oxidized_cut_copper_stairs", patterns.hip_roof_trim(0, 0, 6, 4, 1, "green"))
+        self.assertEqual(patterns._full("prismarine_brick_stairs"), "prismarine_bricks")
+        self.assertEqual(patterns._full("dark_oak"), "dark_oak_planks")
+        house = patterns.framed_house(0, 0, 8, 8, 1, style="light")
+        self.assertIn("birch_planks", house)
+        self.assertIn("dark_oak_log", house)
+        self.assertIn("oak_planks", patterns.framed_house(0, 0, 8, 8, 1))              # the default is unchanged
+        self.assertIn("spruce_log", patterns.framed_house(0, 0, 8, 8, 1))
+        self.assertIn("white_terracotta", patterns.framed_wall(0, 0, 8, 0, 1, 4, "north", style="plaster"))
+        with self.assertRaises(ValueError):
+            patterns.framed_house(0, 0, 8, 8, 1, style="neon")
+        with self.assertRaises(ValueError):
+            patterns.external_stair(0, 1, 0, "east", 4, rails="top")
+        with self.assertRaises(ValueError):
+            patterns.balcony(0, 5, 0, "south", gap="middle")
 
     def test_stairs_face_uphill(self):
         blocks, _ = sandbox.run_safe(patterns.straight_stair_run(0, 1, 0, "east", 4, 1))
