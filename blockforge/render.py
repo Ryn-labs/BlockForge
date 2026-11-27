@@ -221,6 +221,22 @@ def _view_axes(side):
     }[side]
 
 
+def nearest(blocks, side):
+    """One elevation as data: {(across, up): (nearness, (x, y, z), state)}, the block seen in each cell of the view
+    from `side` (nearness grows towards the viewer). render_side draws it; quality.py measures the colours on it."""
+    if side not in SIDES:
+        raise ValueError("side must be one of " + ", ".join(SIDES))
+    ha, hflip, va, vflip, da, dsign = _view_axes(side)
+    best = {}
+    for p, st in blocks.items():
+        key = (p[ha], p[va])
+        near = p[da] * dsign
+        cur = best.get(key)
+        if cur is None or near > cur[0]:
+            best[key] = (near, p, st)
+    return best
+
+
 def render_side(blocks, side):
     """PNG bytes of one flat elevation: the nearest block in each column, darker the further back it is."""
     if side not in SIDES:
@@ -230,13 +246,7 @@ def render_side(blocks, side):
     hi = [max(p[i] for p in blocks) for i in range(3)]
     w, h = hi[ha] - lo[ha] + 1, hi[va] - lo[va] + 1
     depth = hi[da] - lo[da] + 1
-    best = {}
-    for p, st in blocks.items():
-        key = (p[ha], p[va])
-        near = p[da] * dsign
-        cur = best.get(key)
-        if cur is None or near > cur[0]:
-            best[key] = (near, st)
+    best = {k: (v[0], v[2]) for k, v in nearest(blocks, side).items()}
     cell = max(1, min(32, (MAX_PX - 2) // max(w, h)))
     while cell > 1 and (w * cell + 2 > MAX_PX or h * cell + 2 > MAX_PX):
         cell -= 1
@@ -246,7 +256,7 @@ def render_side(blocks, side):
     cw, ch = (w + scale - 1) // scale * cell, (h + scale - 1) // scale * cell
     W, H = cw + 2, ch + 2
     pix = bytearray(BG * (W * H))
-    nearest = max((v[0] for v in best.values()), default=0)
+    front = max((v[0] for v in best.values()), default=0)
     for (a, b), (near, st) in best.items():
         cx = a - lo[ha]
         cy = b - lo[va]
@@ -259,7 +269,7 @@ def render_side(blocks, side):
         cx //= scale
         cy //= scale
         r, g, bl = block_color(st)
-        fade = 1.0 - 0.45 * min(1.0, (nearest - near) / max(1, depth))      # farther back = darker
+        fade = 1.0 - 0.45 * min(1.0, (front - near) / max(1, depth))      # farther back = darker
         col = bytes((int(r * fade), int(g * fade), int(bl * fade)))
         edge = bytes((int(r * fade * 0.8), int(g * fade * 0.8), int(bl * fade * 0.8)))
         for yy in range(cell):
