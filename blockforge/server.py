@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import eleven, engine, share, exporters, learn, mods, pixelart, placement, prompts, testlab, sandbox, store, tts, updater, voices  # noqa: E402
+from blockforge import chat, eleven, engine, share, exporters, learn, mods, pixelart, placement, prompts, testlab, sandbox, store, tts, updater, voices  # noqa: E402
 from blockforge.version import VERSION  # noqa: E402
 
 PORT = int(os.environ.get("BLOCKFORGE_PORT", "8765"))
@@ -342,6 +342,19 @@ class H(BaseHTTPRequestHandler):
                     q = parse_qs(urlparse(self.path).query)
                     idx = mods.load_index(q.get("pack", [s.get("active_pack") or ""])[0])
                     return self.send(200, {"blocks": mods.search(idx, q.get("q", [""])[0]) if idx else []})
+            if parts[1:] == ["chats"]:
+                return self.send(200, chat.list_chats())
+            if parts[1] == "chat" and len(parts) >= 3:
+                cid, sub = parts[2], parts[3:]
+                if not sub:
+                    return self.send(200, chat.view(cid))
+                if sub == ["history"]:
+                    return self.send(200, chat.history(cid))
+                if sub == ["blocks"]:
+                    return self.send(200, chat.blocks_for_viewer(cid))
+                if sub == ["compare"]:
+                    v = parse_qs(urlparse(self.path).query).get("version", [""])[0]
+                    return self.send(200, chat.compare(cid, v))
             if parts[1] == "jobs" and len(parts) == 3:
                 job = JOBS.get(parts[2])
                 return self.send(200, job) if job else self.err(404, "no such job")
@@ -415,6 +428,30 @@ class H(BaseHTTPRequestHandler):
                     return self.send(200, claudelink.connect(b.get("targets") or ["code", "desktop"]))
                 if route[2:] == ["disconnect"]:
                     return self.send(200, claudelink.disconnect(b.get("targets") or ["code", "desktop"]))
+            if route == ["chat", "start"]:
+                b = self.json_body()
+                c = chat.create(b.get("prompt"), b.get("size"), b.get("terrain_build_id") or None)
+                job = start_job(chat.run_turn, cid=c["id"], text=c["messages"][0]["text"], add_user=False)
+                return self.send(200, {"chat_id": c["id"], "job": job["id"]})
+            if route[:1] == ["chat"] and len(route) == 3:
+                cid, act, b = route[1], route[2], self.json_body()
+                if act == "message":
+                    if not str(b.get("text") or "").strip():
+                        return self.err(400, "Type what to build or change.")
+                    chat.load(cid)
+                    return self.send(200, {"job": start_job(chat.run_turn, cid=cid, text=str(b["text"]), part_id=b.get("part_id") or None)["id"]})
+                if act == "answer":
+                    text = chat.answer(cid, b.get("question_id"), b.get("choice"))
+                    job = start_job(chat.run_turn, cid=cid, text=text, add_user=False) if text else None
+                    return self.send(200, {"job": job and job["id"]})
+                if act == "undo":
+                    return self.send(200, chat.undo(cid))
+                if act == "keep":
+                    return self.send(200, chat.keep(cid, b.get("version")))
+                if act == "checkout":
+                    return self.send(200, chat.checkout(cid, b.get("version")))
+                if act == "save":
+                    return self.send(200, chat.save_build(cid, b.get("title")))
             if route == ["generate"]:
                 b = self.json_body()
                 image = None
