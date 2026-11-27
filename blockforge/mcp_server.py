@@ -149,7 +149,7 @@ TOOLS = [
     {
         "name": "save_build",
         "description": 'Finish: run the final placement pass and save the session as a build in the BlockForge gallery. Returns the build id and the 3D preview link (give it to the user exactly as returned).',
-        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "title": {"type": "string"}}, "required": ["session"], "additionalProperties": False},
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "title": {"type": "string"}, "accept_problems": {"type": "string", "description": "Only when check still finds problems you cannot fix: say why each one is fine. Without it, save_build refuses while check finds problems."}}, "required": ["session"], "additionalProperties": False},
     },
 ]
 
@@ -332,6 +332,12 @@ def _session_call(name, args):
         if name == "describe":
             return session.describe_text(s)
         if name == "save_build":
+            from . import checks as _ck
+            found = _ck.run(s.blocks)
+            if found and not (args.get("accept_problems") or "").strip():      # the AI looks at its problems before it may finish
+                raise ToolError("Not saved yet: check still finds problems. Fix them with build_step (look with view, test paths with walk_test), "
+                                "then call save_build again. If one can't be fixed or is intended, call save_build with accept_problems "
+                                "explaining why.\n" + session.check_text(s))
             m, link = session.save(s, args.get("title"))
             return _summary(m) + link
     except session.SessionError as e:
