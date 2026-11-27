@@ -9,7 +9,7 @@ import re
 import time
 import uuid
 
-from . import checks, describe, mods, placement, render, sandbox, share, store, terrain as terr
+from . import checks, describe, mods, placement, render, sandbox, selfimprove, share, store, terrain as terr
 
 DIR = os.path.join(store.DATA, "sessions")
 MAX_LINES = 15
@@ -280,10 +280,23 @@ def _check_lines(blocks, limit, ground=None):
 def check_text(s):
     if not s.blocks:
         return "The build is empty, nothing to check."
+<<<<<<< HEAD
     found = checks.run(s.blocks, ground=s.ground())
     if not found:
         return "No problems found: no floating parts, buried or jumpy paths, wrong stairs or blocked doors."
     return "\n".join(["Checks: " + checks.summary(found) + "."] + checks.advice(found) + ["- " + f["text"] for f in found])
+=======
+    a = selfimprove.assess(s.blocks, s.ground(), s.terrain_blocks, s.size_hint)
+    if not a["found"]:
+        ok = "No problems found: no floating parts, buried or jumpy paths, wrong stairs or blocked doors."
+        if a["low_quality"]:                                  # clean checks, but a plain building: not done once it is finished
+            return (ok + f"\nBut the quality is {a['qtotal']}/100, under the minimum of {selfimprove.quality.QUALITY_MIN}. "
+                    "If this build is finished it is NOT DONE YET - improve the weakest parts, then check again:\n"
+                    + "\n".join(selfimprove.quality_lines(a)))
+        return ok
+    return ("NOT DONE YET - fix these, then call check again (repeat until it says no problems):\n"
+            "Checks: " + checks.summary(a["found"]) + ".\n" + "\n".join("- " + f["text"] for f in a["found"]))
+>>>>>>> 17213e7 (One-shot and session tools say NOT DONE YET with the findings until the build is clean)
 
 
 def ground_text(s, x1=None, z1=None, x2=None, z2=None, step=None):
