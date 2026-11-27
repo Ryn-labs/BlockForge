@@ -87,10 +87,15 @@ def fill(x1, y1, z1, x2, y2, z2, st, hollow=False, outline=False, only_air=False
     outline=True keeps the shell and leaves the inside alone; only_air=True never overwrites."""
     st = _norm(st)
     xs, ys, zs = _rng(x1, x2), _rng(y1, y2), _rng(z1, z2)
+    # a box only 1 thick on some axis is all "shell" on that axis; ignore that axis so outline draws just the rim
+    flat = outline and not hollow and 1 in (len(xs), len(ys), len(zs)) and len(xs) * len(ys) * len(zs) > 1
     for x in xs:
         for y in ys:
             for z in zs:
-                edge = x in (xs[0], xs[-1]) or y in (ys[0], ys[-1]) or z in (zs[0], zs[-1])
+                ex = (x in (xs[0], xs[-1])) and not (flat and len(xs) == 1)
+                ey = (y in (ys[0], ys[-1])) and not (flat and len(ys) == 1)
+                ez = (z in (zs[0], zs[-1])) and not (flat and len(zs) == 1)
+                edge = ex or ey or ez
                 if (hollow or outline) and not edge:
                     if hollow:
                         _blocks.pop((x, y, z), None)
