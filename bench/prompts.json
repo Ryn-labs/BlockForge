@@ -8,5 +8,6 @@
   {"id": 7, "key": "village_street", "size": "medium", "prompt": "A village street with lanterns, hanging signs and flower planters, lined with three small shop fronts."},
   {"id": 8, "key": "grove", "size": "medium", "prompt": "A natural grove of 12 trees of mixed species (oak, birch, spruce, dark oak) on grass, with bushes and flowers."},
   {"id": 9, "key": "furnished_room", "size": "small", "prompt": "One furnished room: a bed, a table with chairs, two chests, a carpet, a bookshelf and a lamp, inside four walls with a door."},
-  {"id": 10, "key": "cottage_edit", "size": "small", "edit_of": 1, "prompt": "Add a second floor and a balcony to this cottage."}
+  {"id": 10, "key": "cottage_edit", "size": "small", "edit_of": 1, "prompt": "Add a second floor and a balcony to this cottage."},
+  {"id": 11, "key": "hill_town", "size": "large", "terrain": "terrain/hill.schem", "prompt": "A small Japanese hill town on this terrain: a castle on the highest hill, a stair road up to it with landings, a street with 8 houses, a shrine with a torii, trees and lanterns."}
 ]

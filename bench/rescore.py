@@ -14,8 +14,9 @@ for label in sys.argv[1:]:
         d = next((os.path.join(x, r.get("build", "")) for x in DIRS if r.get("build") and os.path.isdir(os.path.join(x, r["build"]))), None)
         if not d:
             miss += 1; res.append(r); continue
-        p = P[r["id"]]; lo, hi = RANGES.get(p["size"], (None, None)) if not p.get("edit_of") else (None, None)
-        r.update(SC.score(d, lo, hi)); res.append(r)
+        p = P[r["id"]]; lo, hi = RANGES.get(p["size"], (None, None)) if not (p.get("edit_of") or p.get("terrain")) else (None, None)
+        tf = os.path.join(HERE, p["terrain"]) if p.get("terrain") else None
+        r.update(SC.score(d, lo, hi, SC.load_terrain(tf) if tf and os.path.isfile(tf) else None)); res.append(r)
     with open(os.path.join(out, "results.jsonl"), "w", encoding="utf-8") as f:
         for r in sorted(res, key=lambda r: r["id"]): f.write(json.dumps(r) + "\n")
     print("RESCORE_OK", label, "builds", len(rows), "missing", miss)

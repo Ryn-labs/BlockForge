@@ -9,7 +9,7 @@ VERSION = os.environ.get("BENCH_LABEL") or VERSION
 args = sys.argv[1:]
 N = int(args[args.index("--workers") + 1]) if "--workers" in args else 5
 extra = (["--model", args[args.index("--model") + 1]] if "--model" in args else []) + (["--engine", args[args.index("--engine") + 1]] if "--engine" in args else [])
-groups = [[1, 10], [2], [3], [4], [5], [6], [7], [8], [9]]
+groups = [[1, 10], [2], [3], [4], [5], [6], [7], [8], [9], [11]]
 procs = []; running = []
 def start(k, g):
     env = dict(os.environ, BLOCKFORGE_DATA=os.path.join(tempfile.gettempdir(), f"bf-bench-{VERSION}-w{k}"), BENCH_LABEL=VERSION, BLOCKFORGE_PORT=str(8801 + k),

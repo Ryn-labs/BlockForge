@@ -9,7 +9,7 @@ import re
 import time
 import uuid
 
-from . import checks, describe, mods, placement, render, sandbox, share, store
+from . import checks, describe, mods, placement, render, sandbox, share, store, terrain as terr
 
 DIR = os.path.join(store.DATA, "sessions")
 MAX_LINES = 15
@@ -26,7 +26,8 @@ def _path(sid):
 
 
 class Session:
-    def __init__(self, sid, title="Untitled build", size_hint="", blocks=None, tiles=None, entities=None, history=None):
+    def __init__(self, sid, title="Untitled build", size_hint="", blocks=None, tiles=None, entities=None, history=None,
+                 terrain_blocks=None, terrain_top=None):
         self.id = sid
         self.title = title
         self.size_hint = size_hint
@@ -34,21 +35,50 @@ class Session:
         self.tiles = tiles or {}
         self.entities = entities or []          # [x, y, z, entity]
         self.history = history or []            # [{"note", "code", "diff": [[x,y,z,old,new]], "entities": n, "time"}]
+        self.terrain_blocks = terrain_blocks or {}   # the land the build started on: {pos: original state} (own file)
+        self.terrain = set(self.terrain_blocks)      # its positions
+        self.terrain_top = terrain_top or {}         # original ground height {(x, z): y}
+
+    def ground(self):
+        """The Ground object the checks use, or None when the build did not start on terrain."""
+        return terr.Ground(self.blocks, self.terrain_blocks) if self.terrain_blocks else None
+
+    def save_terrain(self):
+        d = {"blocks": [[x, y, z, s] for (x, y, z), s in self.terrain_blocks.items()],
+             "top": [[x, z, y] for (x, z), y in self.terrain_top.items()]}
+        with open(_terrain_path(self.id), "w", encoding="utf-8") as f:
+            json.dump(d, f, separators=(",", ":"))
 
     def save(self):
         os.makedirs(DIR, exist_ok=True)
         data = {"id": self.id, "title": self.title, "size_hint": self.size_hint,
                 "blocks": [[x, y, z, s] for (x, y, z), s in self.blocks.items()],
                 "tiles": [[x, y, z, t] for (x, y, z), t in self.tiles.items()],
-                "entities": self.entities, "history": self.history}
+                "entities": self.entities, "history": self.history, "terrain": bool(self.terrain_blocks)}
         tmp = _path(self.id) + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, separators=(",", ":"))
         os.replace(tmp, _path(self.id))
 
 
-def start(title="Untitled build", size_hint=""):
+def _terrain_path(sid):
+    return os.path.join(DIR, sid + ".terrain.json")
+
+
+def start(title="Untitled build", size_hint="", terrain=None):
+    """terrain = id of a stored build or the path of a .schem/.litematic file: the session starts on that land."""
     s = Session(uuid.uuid4().hex[:10], str(title or "Untitled build")[:80], str(size_hint or "")[:200])
+    if terrain:
+        try:
+            land = terr.load(terrain)
+        except terr.TerrainError as e:
+            raise SessionError(str(e)) from None
+        s.terrain_blocks = dict(land)
+        s.terrain = set(land)
+        s.blocks = dict(land)
+        s.terrain_top = terr.ground_top(land, land)
+        os.makedirs(DIR, exist_ok=True)
+        s.save_terrain()
     s.save()
     return s
 
@@ -59,8 +89,14 @@ def load(sid):
             d = json.load(f)
     except OSError:
         raise SessionError(f"There is no build session '{sid}'. Start one with start_build.") from None
+    tb, top = None, None
+    if d.get("terrain"):
+        with open(_terrain_path(sid), encoding="utf-8") as f:
+            td = json.load(f)
+        tb = {(x, y, z): s for x, y, z, s in td["blocks"]}
+        top = {(x, z): y for x, z, y in td["top"]}
     return Session(d["id"], d.get("title"), d.get("size_hint", ""), {(x, y, z): s for x, y, z, s in d["blocks"]},
-                   {(x, y, z): t for x, y, z, t in d.get("tiles", [])}, d.get("entities", []), d.get("history", []))
+                   {(x, y, z): t for x, y, z, t in d.get("tiles", [])}, d.get("entities", []), d.get("history", []), tb, top)
 
 
 def _fmt(p):
@@ -81,48 +117,155 @@ def _size_words(blocks):
 
 
 # ------------------------------------------------------------------ steps
-def step(s, code, note=""):
-    """Run `code` on top of the session's blocks. Returns a plain-words report."""
+def _popts():
     try:
-        popts = mods.build_opts()[2]
+        return mods.build_opts()[2]
     except Exception:                                    # noqa: BLE001 - settings problems must not stop building
-        popts = {}
+        return {}
+
+
+def _run(s, code, popts):
     base = (dict(s.blocks), dict(s.tiles)) if s.blocks else None
     try:
-        new, meta = sandbox.run_safe(code, placement_opts=popts, base=base)
+        return sandbox.run_safe(code, placement_opts=popts, base=base)
     except sandbox.ScriptError as e:
         raise SessionError("That step failed, nothing was changed:\n" + str(e)) from None
-    old = s.blocks
-    diff = [[x, y, z, old.get((x, y, z)), new.get((x, y, z))]
+
+
+def _diff(old, new):
+    return [[x, y, z, old.get((x, y, z)), new.get((x, y, z))]
             for (x, y, z) in sorted(set(old) | set(new), key=lambda q: (q[1], q[0], q[2]))
             if old.get((x, y, z)) != new.get((x, y, z))]
+
+
+def terrain_total(s):
+    """Terrain changes of all steps still in the history."""
+    tot = {"dug": 0, "replaced": 0, "filled": 0}
+    for e in s.history:
+        for k, v in (e.get("terrain") or {}).items():
+            tot[k] = tot.get(k, 0) + v
+    return tot
+
+
+def _commit(s, new, tiles, new_ents, diff, note, code, lines):
+    """Store a finished step in the session and build the plain-words report."""
     added = sum(1 for d in diff if d[3] is None)
     removed = sum(1 for d in diff if d[4] is None)
     changed = len(diff) - added - removed                 # a block that was there and is now a different block
-    new_ents = [list(e) for e in (meta.get("entities") or [])]
     s.blocks = new
-    s.tiles = sandbox.tiles_of(meta)
+    s.tiles = tiles
     s.entities += new_ents
-    s.history.append({"note": str(note or "")[:200], "code": code, "diff": diff, "entities": len(new_ents),
-                      "time": time.time()})
+    entry = {"note": str(note or "")[:200], "code": code, "diff": diff, "entities": len(new_ents), "time": time.time()}
+    tc = terr.change_counts(diff, s.terrain, s.terrain_top) if s.terrain else None
+    if tc and any(tc.values()):
+        entry["terrain"] = tc
+    s.history.append(entry)
     s.save()
-    lines = [f"Step {len(s.history)} done: {added} added, {changed} replaced, {removed} removed. "
-             f"The build now has {len(new):,} blocks, {_size_words(new)}."]
-    if changed:
-        ex = [d for d in diff if d[3] is not None and d[4] is not None][:3]
-        lines.append(f"{changed} existing block{'s were' if changed != 1 else ' was'} overwritten, e.g. "
-                     + "; ".join(f"{_fmt(d[:3])} {_short(d[3])} -> {_short(d[4])}" for d in ex)
-                     + ". Fine if you meant it.")
+    out = [f"Step {len(s.history)} done: {added} added, {changed} replaced, {removed} removed. "
+           f"The build now has {len(new):,} blocks, {_size_words(new)}."]
+    if tc and any(tc.values()):
+        out.append(terr.change_words(tc, terrain_total(s)))
+    over = [d for d in diff if d[3] is not None and d[4] is not None and (d[0], d[1], d[2]) not in s.terrain]
+    if over:
+        out.append(f"{len(over)} existing block{'s were' if len(over) != 1 else ' was'} overwritten, e.g. "
+                   + "; ".join(f"{_fmt(d[:3])} {_short(d[3])} -> {_short(d[4])}" for d in over[:3])
+                   + ". Fine if you meant it.")
+    out += lines
+    out += _check_lines(new, MAX_LINES, s.ground())
+    return "\n".join(out)
+
+
+def _meta_lines(meta, prefix=""):
+    out = []
     for w in (meta.get("warnings") or [])[:4]:
-        lines.append("Warning: " + str(w))
+        out.append(prefix + "Warning: " + str(w))
     for fx in (meta.get("fixes") or [])[:3]:
-        lines.append("Auto-fixed: " + str(fx))
-    lines += _check_lines(new, MAX_LINES)
-    return "\n".join(lines)
+        out.append(prefix + "Auto-fixed: " + str(fx))
+    return out
 
 
-def _check_lines(blocks, limit):
-    found = checks.run(blocks)
+def step(s, code, note=""):
+    """Run `code` on top of the session's blocks. Returns a plain-words report."""
+    new, meta = _run(s, code, _popts())
+    diff = _diff(s.blocks, new)
+    return _commit(s, new, sandbox.tiles_of(meta), [list(e) for e in (meta.get("entities") or [])], diff, note, code,
+                   _meta_lines(meta))
+
+
+MAX_PARTS = 4
+
+
+def step_parts(s, parts, note=""):
+    """Run several independent snippets at once (max 4 in parallel, each on the blocks as they are now), then merge.
+    If two parts change the same cell the first part keeps it and the clash is reported."""
+    from concurrent.futures import ThreadPoolExecutor
+    if not isinstance(parts, list) or not parts:
+        raise SessionError("parts must be a list of {note, code}.")
+    items = []
+    for i, p in enumerate(parts, 1):
+        if not isinstance(p, dict) or not str(p.get("code") or "").strip():
+            raise SessionError(f"Part {i} has no code.")
+        items.append((str(p.get("note") or f"part {i}")[:80], p["code"]))
+    popts = _popts()
+    results = [None] * len(items)
+
+    def work(i):
+        try:
+            results[i] = _run(s, items[i][1], popts)
+        except SessionError as e:
+            results[i] = e
+
+    with ThreadPoolExecutor(max_workers=min(MAX_PARTS, len(items))) as ex:
+        list(ex.map(work, range(len(items))))
+    old = s.blocks
+    new = dict(old)
+    tiles = dict(s.tiles)
+    owner, lines, ents, failed, clashes = {}, [], [], [], []
+    for i, (pnote, _code) in enumerate(items):
+        r = results[i]
+        if isinstance(r, SessionError):
+            failed.append(f"Part {i + 1} ({pnote}) failed and was skipped: {str(r).split(chr(10), 1)[-1][:300]}")
+            continue
+        blocks_i, meta = r
+        n_clash = 0
+        for pos in set(old) | set(blocks_i):
+            st = blocks_i.get(pos)
+            if old.get(pos) == st:
+                continue
+            if pos in owner:
+                if new.get(pos) != st:
+                    n_clash += 1
+                    if len(clashes) < 4:
+                        clashes.append(f"{_fmt(pos)}: part {owner[pos] + 1} ({items[owner[pos]][0]}) kept over part {i + 1} ({pnote})")
+                continue
+            owner[pos] = i
+            if st is None:
+                new.pop(pos, None)
+            else:
+                new[pos] = st
+        if n_clash:
+            lines.append(f"Conflict: part {i + 1} ({pnote}) touched {n_clash} cell{'s' if n_clash != 1 else ''} "
+                         f"already changed by an earlier part; the earlier part was kept.")
+        for k, tl in sandbox.tiles_of(meta).items():
+            if owner.get(k) == i:
+                tiles[k] = tl
+        ents += [list(e) for e in (meta.get("entities") or [])]
+        lines += _meta_lines(meta, f"Part {i + 1}: ")
+    if len(failed) == len(items):
+        raise SessionError("Every part failed, nothing was changed:\n" + "\n".join(failed))
+    if clashes:
+        lines.insert(0, "Clashes, e.g. " + "; ".join(clashes))
+    lines = failed + lines
+    tiles = {p: tl for p, tl in tiles.items() if p in new}
+    diff = _diff(old, new)
+    code = "\n\n".join(c for _n, c in items)
+    note = note or "; ".join(n_ for n_, _c in items)
+    head = f"Ran {len(items) - len(failed)} of {len(items)} parts in parallel. "
+    return head + _commit(s, new, tiles, ents, diff, note, code, lines)
+
+
+def _check_lines(blocks, limit, ground=None):
+    found = checks.run(blocks, ground=ground)
     if not found:
         return ["Checks: no problems found."]
     out = ["Checks: " + checks.summary(found) + "."]
@@ -136,10 +279,31 @@ def _check_lines(blocks, limit):
 def check_text(s):
     if not s.blocks:
         return "The build is empty, nothing to check."
-    found = checks.run(s.blocks)
+    found = checks.run(s.blocks, ground=s.ground())
     if not found:
         return "No problems found: no floating parts, buried or jumpy paths, wrong stairs or blocked doors."
     return "Checks: " + checks.summary(found) + ".\n" + "\n".join("- " + f["text"] for f in found)
+
+
+def ground_text(s, x1=None, z1=None, x2=None, z2=None, step=None):
+    """The ground height map of the build as it is now."""
+    if not s.blocks:
+        return "The build is empty, there is no ground yet."
+    top = terr.ground_top(s.blocks, s.terrain_blocks)
+    return terr.ground_text(top, x1, z1, x2, z2, step)
+
+
+def plan_layout_text(s, area, parts, street_width=5):
+    """(text, plan dict) of layout.plan on the current ground."""
+    from . import layout
+    if not s.blocks:
+        raise SessionError("The build is empty, there is no ground to plan on. Start the build with terrain.")
+    top = terr.ground_top(s.blocks, s.terrain_blocks)
+    try:
+        plan = layout.plan(top, area, parts, street_width)
+    except layout.LayoutError as e:
+        raise SessionError(str(e)) from None
+    return layout.plan_text(plan), plan
 
 
 # ------------------------------------------------------------------ undo / history
@@ -178,6 +342,17 @@ def history_text(s):
 def describe_text(s):
     if not s.blocks:
         return "The build is empty."
+    if s.terrain:
+        top = terr.ground_top(s.blocks, s.terrain_blocks)
+        span = max(max(c[0] for c in top) - min(c[0] for c in top), max(c[1] for c in top) - min(c[1] for c in top)) + 1
+        out = [terr.summary(s.blocks, s.terrain_blocks, top),
+               terr.change_words(terrain_total(s)) or "Terrain: untouched so far.",
+               terr.ground_text(top, step=max(1, -(-span // 32)))]
+        built = {p: st for p, st in s.blocks.items() if s.terrain_blocks.get(p) != st}
+        out.append("What you built so far: " + (f"{_size_words(built)}, {len(built):,} blocks." if built else "nothing yet."))
+        if built:
+            out.append(describe.describe(built, budget=6000))
+        return "\n".join(out)
     return describe.base_brief(s.blocks, has_picture=False)
 
 
@@ -290,7 +465,7 @@ def save(s, title=None):
     pack, version, popts = mods.build_opts()
     blocks = dict(s.blocks)
     final = placement.process(blocks, final=True, **popts)             # nothing impossible gets saved
-    found = checks.run(blocks)
+    found = checks.run(blocks, ground=s.ground())
     code = "\n\n".join((e.get("code") or "").strip() for e in s.history if e.get("code")) or None
     ents = [tuple(e) for e in s.entities]
     m = store.save_build(blocks, title or s.title, prompt=s.size_hint or "", code=code, source="claude_chat",

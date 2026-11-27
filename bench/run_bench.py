@@ -1,5 +1,6 @@
 """BlockForge benchmark: the 10 fixed prompts through the real generate path, headless, on TEMP data (never the real gallery).
 Each build is scored by bench/score.py and rendered by bench/render.py. Results: bench/out/<version>/results.jsonl + table.md + renders.
+Prompts with a "terrain" (bench/terrain/<file>) start as a NEW build on that land; bench/make_terrain.py makes hill.schem on demand.
 python bench/run_bench.py [--only 1,2] [--model claude-opus-5-5] [--research]   -> BENCH_OK <version> total <mistakes>
 Runs one build at a time (memory). Engine: Claude Code (claude -p), like the app's default."""
 import os, sys, json, time, tempfile, traceback, collections
@@ -30,17 +31,32 @@ if os.path.exists(res_path):
     for l in open(res_path, encoding="utf-8"):
         r = json.loads(l); done[r["id"]] = r
 KEYS = ("floating", "removed", "overwritten", "buried_path", "jump_steps", "corner_turns", "blocked_doors", "wrong_facing", "size_off",
-        "script_errors", "fix_rounds")
+        "terrain_floating", "terrain_buried", "script_errors", "fix_rounds")
+
+
+def terrain_file(rel):
+    """Absolute path of a bench terrain; a missing one is generated (deterministic) so it never has to be committed."""
+    path = os.path.normpath(os.path.join(ROOT, "bench", rel))
+    if not os.path.isfile(path):
+        import make_terrain
+        make_terrain.main(path)
+    return path
+
+
+
 for p in PROMPTS:
     if ONLY and p["id"] not in ONLY: continue
     logs = []; t0 = time.time(); r = {"id": p["id"], "key": p["key"], "version": VERSION}
     parent = done.get(p.get("edit_of"), {}).get("build") if p.get("edit_of") else None
     try:
+        tpath = terrain_file(p["terrain"]) if p.get("terrain") else None
+        tblocks = SC.load_terrain(tpath) if tpath else None
         meta = engine.generate(p["prompt"], size=p["size"], palette="auto", model=MODEL, engine=ENGINE, parent_id=parent,
-                               research=RESEARCH, redstone=False, use_mods=False, log=lambda m: logs.append(str(m)))
+                               research=RESEARCH, redstone=False, use_mods=False, log=lambda m: logs.append(str(m)),
+                               terrain=tpath)
         r["build"] = meta["id"]; d = os.path.join(str(store.BUILDS), meta["id"])
-        lo, hi = P.PRESET_RANGES.get(p["size"], (None, None)) if not p.get("edit_of") else (None, None)
-        r.update(SC.score(d, lo, hi))
+        lo, hi = P.PRESET_RANGES.get(p["size"], (None, None)) if not (p.get("edit_of") or tpath) else (None, None)
+        r.update(SC.score(d, lo, hi, tblocks))
         cp = os.path.join(d, "code.py")
         r["overwritten"] = SC.overwritten(open(cp, encoding="utf-8").read()) if os.path.exists(cp) else -1
         u = meta.get("usage") or {}
