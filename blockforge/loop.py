@@ -133,7 +133,7 @@ def run(text, model, usage, exe, log=print, image_path=None):
         proc.stdin.close()
         timer = threading.Timer(TIMEOUT, proc.kill)
         timer.start()
-        res, uses, saved_id = None, {}, None
+        res, uses, saved_id, sid = None, {}, None, None
         try:
             for raw in proc.stdout:
                 try:
@@ -158,6 +158,12 @@ def run(text, model, usage, exe, log=print, image_path=None):
                             continue
                         name = uses.get(c.get("tool_use_id"), "").replace(PREFIX, "")
                         out = _text_of(c.get("content"))
+                        if name == "start_build" and not c.get("is_error"):
+                            m0 = re.search(r"[Ss]ession(?: id)?:?\s*([\w-]{6,})", out) or re.search(r"([0-9a-f]{8,}|[\w]{6,}-[\w-]+)", out)
+                            sid = m0.group(1) if m0 else sid
+                        if c.get("is_error") and name == "save_build":
+                            log("Save refused: " + out[:160].replace("
+", " "))
                         if name == "check":
                             m = re.search(r"(\d+) problem", out)
                             log("Checks: " + (f"{m.group(1)} problems" if m else "no problems"))
@@ -189,6 +195,13 @@ def run(text, model, usage, exe, log=print, image_path=None):
         if not saved_id:
             b = newest_build(started)
             saved_id = b and b["id"]
+        if not saved_id and sid:                                        # it built but never finished: save what it made, with its check results
+            try:
+                from . import session as _ss
+                m_, _ = _ss.save(_ss.load(sid))
+                saved_id = m_["id"]; log("Saved the build as it was (Claude stopped before save_build).")
+            except Exception as e:
+                log(f"Could not save the unfinished session {sid}: {e}")
         if not saved_id:
             raise EngineError("Claude finished without saving the build (it never called save_build).")
         return saved_id
