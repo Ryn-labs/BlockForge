@@ -1175,3 +1175,278 @@ def plaza(x1, z1, x2, z2, y, block="stone_bricks", well=True):
             out.append(f"fill({px}, {y + 1}, {pz}, {px}, {y + 2}, {pz}, 'cobblestone_wall')")
         out.append(f"fill({cx - 1}, {y + 3}, {cz - 1}, {cx + 1}, {y + 3}, {cz + 1}, {_st('spruce_slab', type='bottom')})")
     return _code(out)
+
+
+# ------------------------------------------------------------------ shape: a manor that is not one long box
+_TURN = {"south": ((1, 0), (0, 1)), "north": ((-1, 0), (0, -1)), "east": ((0, -1), (1, 0)), "west": ((0, 1), (-1, 0))}
+
+
+class _Frame:
+    """Local coordinates for a part that faces `facing`: local +lz is the front (out of the entrance), local +lx runs
+    along the front. at(lx, lz) -> world (x, z); side('south') -> the world side that local south (the front) is."""
+
+    def __init__(self, x, z, facing):
+        _dir(facing)
+        self.x, self.z = int(x), int(z)
+        self.ex, self.ez = _TURN[facing]                             # world vectors of local +lx and +lz
+
+    def at(self, lx, lz):
+        return (self.x + self.ex[0] * lx + self.ez[0] * lz, self.z + self.ex[1] * lx + self.ez[1] * lz)
+
+    def side(self, name):
+        v = {"south": (0, 1), "north": (0, -1), "east": (1, 0), "west": (-1, 0)}[name]
+        w = (self.ex[0] * v[0] + self.ez[0] * v[1], self.ex[1] * v[0] + self.ez[1] * v[1])
+        return next(n for n, d in DIRS.items() if d == w)
+
+    def rect(self, lx1, lz1, lx2, lz2):
+        (a, b), (c, d) = self.at(lx1, lz1), self.at(lx2, lz2)
+        return min(a, c), min(b, d), max(a, c), max(b, d)
+
+    def axis(self, local_axis):
+        """'x' or 'z' in the world for a local ridge axis."""
+        return local_axis if self.ex[0] else ("z" if local_axis == "x" else "x")
+
+    def run(self, l1, l2, lz):
+        """The world cell of the west/north end of the local run lx l1..l2 on row lz (windows and balconies count their
+        width east or south from there)."""
+        return min(self.at(l1, lz), self.at(l2, lz))
+
+
+def _roof_cells(x1, z1, x2, z2, y, stairs, trim, ridge, overhang=2, fill="oak_planks", open_end=None):
+    """The cells of one trimmed gable roof (gable_roof_trim without the clean-up), to merge with others."""
+    a = _gable_args(x1, z1, x2, z2, ridge, open_end)
+    return _gable_cells(*a[:4], y, _stairs(stairs), _stairs(trim), a[4], max(0, int(overhang)), fill, a[5])
+
+
+def _merge_roofs(parts, cut=()):
+    """Several roofs as one: {cell: state}, the later roof wins a shared cell, cells over the columns in `cut` (the
+    rectangles of a taller block the roof runs into) are dropped."""
+    cells = {}
+    for part in parts:
+        cells.update(part)
+    for (x1, z1, x2, z2) in cut:
+        for key in [p for p in cells if x1 <= p[0] <= x2 and z1 <= p[2] <= z2]:
+            del cells[key]
+    return cells
+
+
+def bay_window(x, y, z, facing, width=3, floors=1, storey=4, depth=1, wall=None, frame="oak_log", roof=ROOF_DEFAULT,
+               glass="glass_pane", box="oak_trapdoor"):
+    """A bay window standing out of a wall: `width` (3 or 5) wide, `depth` blocks out (1 or 2) on the `facing` side of a
+    wall whose outside face is the row at (x, z) (x, z is the middle of the bay, on the wall line); log posts on the
+    corners, glass panes on the front and sides of every floor (`floors` of `storey` free blocks from y), a floor slab
+    and a small pent roof of `roof` stairs on top. The wall behind it is opened into the bay. It breaks a long flat
+    wall into shorter runs. wall = the fill (default: birch planks, the light look)."""
+    dx, dz = _dir(facing)
+    px, pz = (1, 0) if _AXIS[facing] == "x" else (0, 1)
+    width = 5 if int(width) >= 5 else 3
+    depth = 2 if int(depth) >= 2 else 1
+    floors, storey = max(1, int(floors)), max(3, int(storey))
+    fill = wall or WALL_STYLES[DEFAULT_STYLE][0]
+    half = width // 2
+    top = y + floors * (storey + 1) - 1
+    rst = _stairs(roof)
+    conn = {"east": True, "west": True} if px else {"north": True, "south": True}
+    side_conn = {"north": True, "south": True} if px else {"east": True, "west": True}
+
+    def at(k, w):
+        return x + dx * k + px * w, z + dz * k + pz * w
+    out = [f"# bay window facing {facing}, {width} wide, {depth} out, {floors} floor(s)"]
+    for k in range(1, depth + 1):                                    # the floor of the bay, on a stone foot
+        for w in range(-half, half + 1):
+            cx, cz = at(k, w)
+            out.append(f"block({cx}, {y - 1}, {cz}, 'cobblestone')")
+    for f in range(floors):
+        fy = y + f * (storey + 1)
+        for w in range(-half + 1, half):                             # open the wall behind
+            cx, cz = at(0, w)
+            out.append(f"fill({cx}, {fy}, {cz}, {cx}, {fy + storey - 1}, {cz}, 'air')")
+        for k in range(1, depth + 1):
+            for w in range(-half, half + 1):
+                cx, cz = at(k, w)
+                corner = abs(w) == half
+                if corner and k == depth:
+                    out.append(f"fill({cx}, {fy}, {cz}, {cx}, {fy + storey}, {cz}, {_st(frame, axis='y')})")
+                    continue
+                if corner:
+                    st = _st(glass, **side_conn) if glass.endswith("_pane") else repr(glass)
+                elif k == depth:
+                    st = _st(glass, **conn) if glass.endswith("_pane") else repr(glass)
+                else:
+                    st = "'air'"
+                out.append(f"block({cx}, {fy}, {cz}, {fill!r})")
+                if st != "'air'":
+                    out.append(f"fill({cx}, {fy + 1}, {cz}, {cx}, {fy + storey - 2}, {cz}, {st})")
+                    out.append(f"block({cx}, {fy + storey - 1}, {cz}, {fill!r})")
+                else:
+                    out.append(f"fill({cx}, {fy + 1}, {cz}, {cx}, {fy + storey - 1}, {cz}, 'air')")
+                out.append(f"block({cx}, {fy + storey}, {cz}, {_st(frame, axis=_AXIS[facing])})")
+        if f == 0:
+            for w in range(-half + 1, half):                         # a flower box under the front panes
+                cx, cz = at(depth + 1, w)
+                out.append(f"block({cx}, {fy}, {cz}, {_st(box, facing=facing, half='top', open=False)})")
+    for k in range(1, depth + 2):                                    # pent roof: stairs rising to the wall
+        for w in range(-half - 1, half + 2):
+            cx, cz = at(k, w)
+            if k == depth + 1 or abs(w) == half + 1:
+                out.append(f"block({cx}, {top + 1}, {cz}, {_st(rst[:-7] + '_slab', type='bottom')})")
+            else:
+                out.append(f"block({cx}, {top + 1}, {cz}, {_st(rst, facing=OPP[facing], half='bottom')})")
+    return _code(out)
+
+
+def dormer(x, y, z, facing, width=3, roof=ROOF_DEFAULT, trim=TRIM_DEFAULT, wall=None, glass="glass_pane"):
+    """A dormer on a roof slope: a small gabled box `width` (3 or 5) wide whose window wall faces `facing` (down the
+    slope), the window wall's middle at (x, y, z) with y the lowest glass row (on the roof stairs, the slope rising
+    behind it). Glass in the middle, birch fill round it, a trimmed gable roof with its own ridge running into the main
+    roof. It breaks a long roof plane and adds a peak to the outline."""
+    dx, dz = _dir(facing)
+    px, pz = (1, 0) if _AXIS[facing] == "x" else (0, 1)
+    width = 5 if int(width) >= 5 else 3
+    half = width // 2
+    fill = wall or WALL_STYLES[DEFAULT_STYLE][0]
+    conn = {"east": True, "west": True} if px else {"north": True, "south": True}
+
+    def at(k, w):
+        return x - dx * k + px * w, z - dz * k + pz * w               # k counts back up the slope
+    out = [f"# dormer facing {facing}, {width} wide"]
+    depth = half + 2
+    for k in range(depth):
+        for w in range(-half, half + 1):
+            cx, cz = at(k, w)
+            out.append(f"fill({cx}, {y - 1}, {cz}, {cx}, {y + 1}, {cz}, {fill!r})")
+            if k and abs(w) < half:
+                out.append(f"fill({cx}, {y}, {cz}, {cx}, {y + 1}, {cz}, 'air')")
+    for w in range(-half + 1, half):
+        cx, cz = at(0, w)
+        out.append(f"fill({cx}, {y}, {cz}, {cx}, {y + 1}, {cz}, "
+                   f"{_st(glass, **conn) if glass.endswith('_pane') else repr(glass)})")
+    (ax, az), (bx, bz) = at(0, -half), at(depth - 1, half)
+    ridge = "z" if px else "x"
+    cells = _roof_cells(min(ax, bx), min(az, bz), max(ax, bx), max(az, bz), y + 2, roof, trim, ridge, overhang=0,
+                        fill=fill, open_end=OPP[facing])
+    return _code(out + _emit(_settle(cells, _full(_stairs(trim)))))
+
+
+def manor_layout(x, y, z, facing="south", style="light", roof=ROOF_DEFAULT, trim=TRIM_DEFAULT, raised=4, stilts=False,
+                 ground=None, flower="poppy", chimney_block="bricks"):
+    """A whole manor in the shape of the reference houses, not one long box: a taller central block (17 x 11, 3 storeys
+    of 5, its big gable facing the front) with a 3-storey entrance bay standing 3 out of the middle of the front (a lower
+    gable in front of the big one) and a 2-storey bay at the back, two 2-storey wings (9 x 9, set back 3, their own
+    front gables 12 lower than the central ridge) stepping down on both sides, a porch at the door and a grand front
+    stair in flights with landings up to it, a balcony with a door on each wing, 2 x 2 framed windows with flower boxes,
+    storey bands and a chimney. No straight wall is longer than 9 blocks.
+    (x, z) is the middle of the central block, y the ground level (the top of the ground is y-1), `facing` the entrance
+    side. The house stands `raised` blocks up (1-8) on a stone terrace with railings, or on log stilts down to the ground
+    (stilts=True, for uneven ground or water: the posts go down until they meet the ground; `ground` = the lowest
+    ground top under the house, default y-1). Footprint about 35 x 33 round (x, z) with the stair; top about
+    y + raised + 29. Palette: style / roof / trim as for framed_house and gable_roof_trim (default birch fill in oak logs,
+    teal roofs with an oak trim)."""
+    F = _Frame(x, z, facing)
+    raised = max(1, min(8, int(raised)))
+    y = int(y)
+    Y = y + raised                                                   # ground floor walls start here
+    S, SW = 5, 4                                                     # storey of the central block and of the wings
+    fill, frame = _style(style, None, None)
+    low = int(ground) if ground is not None else y - 1
+    sd = F.side
+    W = dict(width=2, height=2, flower=flower)
+    out = [f"# manor layout facing {facing} round x {x}, z {z}: central block, entrance bay, two stepped wings, "
+           f"grand stair\n"]
+
+    def win(l1, l2, wy, lz, n, **kw):
+        a = dict(W, **kw)
+        a["width"] = abs(l2 - l1) + 1
+        wx, wz = F.run(l1, l2, lz)
+        return window_with_box(wx, wy, wz, sd(n), **a)
+
+    def win_side(lz1, lz2, wy, lx, n):
+        wx, wz = min(F.at(lx, lz1), F.at(lx, lz2))
+        return window_with_box(wx, wy, wz, sd(n), **dict(W, width=abs(lz2 - lz1) + 1))
+
+    def line(lx1, lz1, lx2, lz2, yy, st):
+        x1, z1, x2, z2 = F.rect(lx1, lz1, lx2, lz2)
+        return f"fill({x1}, {yy}, {z1}, {x2}, {yy}, {z2}, {st!r})\n"
+    # ---- the base: a stone terrace (or a deck on stilts) under the house, the front terrace and the wing terraces
+    for r in ((-9, -9, 9, 11), (-17, -7, 17, 5)):
+        x1, z1, x2, z2 = F.rect(*r)
+        if stilts:
+            out.append(stilt_base(x1, z1, x2, z2, Y - 1, depth=max(2, Y - low)))
+        else:
+            out.append(f"fill({x1}, {low + 1}, {z1}, {x2}, {Y - 2}, {z2}, 'stone_bricks')\n"
+                       f"fill({x1}, {Y - 1}, {z1}, {x2}, {Y - 1}, {z2}, 'spruce_planks')\n")
+    for sgn in (1, -1):                                              # railings round the terrace edges
+        for r in ((10, 5, 17, 5), (17, -7, 17, 4), (9, 6, 9, 11), (3, 11, 8, 11), (9, -9, 9, -8), (4, -9, 8, -9),
+                  (10, -7, 16, -7)):
+            out.append(line(r[0] * sgn, r[1], r[2] * sgn, r[3], Y, "oak_fence"))
+    # ---- bodies: central block, entrance bay, back bay, wings
+    out.append(framed_house(*F.rect(-8, -5, 8, 5), Y, floors=3, storey=S, fill=fill, frame=frame, spacing=8,
+                            flat=[sd("east"), sd("west")]))
+    out.append(framed_house(*F.rect(-3, 5, 3, 8), Y, floors=3, storey=S, fill=fill, frame=frame, spacing=6,
+                            skip=[sd("north")], flat=[sd("east"), sd("west")], clear=True))
+    out.append(framed_house(*F.rect(-3, -8, 3, -5), Y, floors=2, storey=S, fill=fill, frame=frame, spacing=6,
+                            skip=[sd("south")], flat=[sd("east"), sd("west")], clear=True))
+    for sgn in (1, -1):
+        out.append(framed_house(*F.rect(8 * sgn, -6, 16 * sgn, 2), Y, floors=2, storey=SW, fill=fill, frame=frame,
+                                spacing=8, skip=[sd("west" if sgn > 0 else "east")], clear=True))
+    for f in range(3):                                               # the central block opens into the bays
+        fy = Y + f * (S + 1)
+        for lz in ((5, -5) if f < 2 else (5,)):
+            x1, z1, x2, z2 = F.rect(-2, lz, 2, lz)
+            out.append(f"fill({x1}, {fy}, {z1}, {x2}, {fy + S - 1}, {z2}, 'air')\n")
+    for sgn in (1, -1):                                              # doors from the central block into the wings
+        wx, wz = F.at(8 * sgn, -2)
+        f = sd("east" if sgn > 0 else "west")
+        out.append(f"block({wx}, {Y}, {wz}, {_st('oak_door', facing=f, half='lower', hinge='left', open=False)})\n"
+                   f"block({wx}, {Y + 1}, {wz}, {_st('oak_door', facing=f, half='upper', hinge='left', open=False)})\n")
+    # ---- windows: 2 x 2 with shutters and a flower box; a tall 3-wide window over the porch
+    for f in range(3):
+        wy = Y + 1 + f * (S + 1)
+        for l1 in (-6, 5):
+            out.append(win(l1, l1 + 1, wy, 5, "south"))
+            if f < 2:                                                # the top floor's back is under the bay's eaves
+                out.append(win(l1, l1 + 1, wy, -5, "north"))
+        if f:
+            out.append(win(-1, 1, wy, 8, "south", height=3))
+        if f < 2:
+            out.append(win(-1, 1, wy, -8, "north"))
+    for sgn in (1, -1):
+        for f in range(2):
+            wy = Y + 1 + f * (SW + 1)
+            for l1 in ((10, 13) if sgn > 0 else (-11, -14)):
+                if not f:
+                    out.append(win(l1, l1 + 1, wy, 2, "south"))
+                out.append(win(l1, l1 + 1, wy, -6, "north"))
+            for lz1 in (-4, -1):
+                out.append(win_side(lz1, lz1 + 1, wy, 16 * sgn, "east" if sgn > 0 else "west"))
+    # ---- storey bands: the central block's front, the wing backs and ends
+    for yy in (Y + S, Y + 2 * S + 1):
+        out.append(storey_band(*F.rect(-8, -5, 8, 5), yy, skip=[sd("east"), sd("west"), sd("north")],
+                               gaps=[F.rect(-4, 6, 4, 8)]))
+    for sgn in (1, -1):
+        out.append(storey_band(*F.rect(8 * sgn, -6, 16 * sgn, 2), Y + SW,
+                               skip=[sd("south"), sd("west" if sgn > 0 else "east")],
+                               gaps=[F.rect(6 * sgn, -8, 7 * sgn, -8)]))
+    # ---- porch at the front door, the grand stair up to it, a balcony on each wing
+    px, pz = F.at(0, 8)
+    out.append(porch(px, Y, pz, sd("south"), width=5, depth=3, path=0))
+    flight = 2 if raised > 2 else raised
+    length = raised + 2 * (-(-raised // flight))
+    sx, sz = F.at(-1, 12 + length - 1)
+    out.append(external_stair(sx, y, sz, sd("north"), raised, width=3, flight=flight, landing=2))
+    for sgn in (1, -1):
+        bx, bz = F.run(10 * sgn, 14 * sgn, 3)
+        out.append(balcony(bx, Y + SW, bz, sd("south"), length=5, depth=2, door=True))
+    # ---- roofs, merged so the joins are clean: wings first (cut at the central block), then the central block
+    rs, tr = _stairs(roof), _stairs(trim)
+    wings = [_roof_cells(*F.rect(8 * sgn, -6, 16 * sgn, 2), Y + 2 * (SW + 1), rs, tr, F.axis("z"), 2, fill)
+             for sgn in (1, -1)]
+    cells = _merge_roofs(wings, cut=[F.rect(-8, -20, 8, 20)])
+    cells.update(_merge_roofs([
+        _roof_cells(*F.rect(-8, -5, 8, 5), Y + 3 * (S + 1), rs, tr, F.axis("z"), 1, fill),
+        _roof_cells(*F.rect(-3, 5, 3, 8), Y + 3 * (S + 1), rs, tr, F.axis("z"), 2, fill, open_end=sd("north")),
+        _roof_cells(*F.rect(-3, -8, 3, -5), Y + 2 * (S + 1), rs, tr, F.axis("z"), 2, fill, open_end=sd("south"))]))
+    out.append(_code(["# manor roofs"] + _emit(_settle(cells, _full(tr)))))
+    cx, cz = F.at(-5, -7)
+    out.append(chimney(cx, Y - 1, cz, height=3 * (S + 1) + 10, block=chimney_block))
+    return "".join(out)

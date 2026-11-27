@@ -5,6 +5,11 @@ from tests.test_bench_score import S, build
 from blockforge import checks, examples, patterns, sandbox
 
 KINDS = ("buried_path", "jump_step", "door_blocked", "floating", "headroom", "wrong_facing", "corner_turn")
+HILL = ("for x in range(-24, 25):\n"                              # uneven ground for the manor on stilts
+        "  for z in range(-24, 25):\n"
+        "    h = int(2 + 3 * noise(x, z, 9))\n"
+        "    fill(x, 0, z, x, h, z, 'dirt')\n"
+        "    block(x, h + 1, z, 'grass_block')\n")
 
 CASES = {
     "stair_run_east": lambda: patterns.straight_stair_run(2, 1, 2, "east", 6, 3),
@@ -68,11 +73,23 @@ CASES = {
     "gable_roof_teal": lambda: patterns.gable_roof_trim(0, 0, 10, 6, 1, "teal", "oak", overhang=2),
     "cross_gable_green": lambda: patterns.cross_gable_roof(0, 0, 16, 10, 1, "green", "spruce", front="south", overhang=2),
     "hip_roof_gray": lambda: patterns.hip_roof_trim(0, 0, 8, 6, 1, "gray", "dark_oak"),
+    "manor_layout": lambda: patterns.manor_layout(0, 2, 0),
+    "manor_layout_north": lambda: patterns.manor_layout(0, 2, 0, "north", raised=2),
+    "manor_layout_east": lambda: patterns.manor_layout(0, 2, 0, "east", "plaster", "red", raised=5),
+    "manor_layout_west": lambda: patterns.manor_layout(0, 2, 0, "west", raised=1),
+    "manor_layout_stilts": lambda: (HILL + patterns.manor_layout(0, 8, 0, raised=3, stilts=True, ground=1)),
+    "bay_window": lambda: (patterns.framed_house(0, 0, 12, 8, 1, floors=2, storey=4)
+                           + patterns.bay_window(6, 1, 8, "south", 3, floors=2)),
+    "bay_window_wide": lambda: (patterns.framed_house(0, 0, 12, 8, 1, floors=1, storey=4)
+                                + patterns.bay_window(0, 1, 4, "west", 5, depth=2)),
+    "dormer": lambda: (patterns.framed_house(0, 0, 14, 8, 1, floors=1, storey=4)
+                       + patterns.gable_roof_trim(0, 0, 14, 8, 6, overhang=2) + patterns.dormer(7, 9, 8, "south")),
 }
 # every pattern that people walk up: 0 jump steps and 0 corner turns by checks.run AND by bench/score.py
 STAIRS = ("stair_run_east", "stair_run_north", "stair_run_west", "switchback", "switchback_east", "porch_steps",
           "external_stair", "external_stair_north", "external_stair_narrow", "balcony_access", "storey_band",
-          "storey_band_gaps")
+          "storey_band_gaps", "manor_layout", "manor_layout_north", "manor_layout_east", "manor_layout_west",
+          "manor_layout_stilts")
 
 
 class Patterns(unittest.TestCase):
