@@ -4,9 +4,13 @@ BlockForge turns build scripts into Minecraft builds (schematics) that show up i
 step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes before saving, like a builder would.
 
 ## Tools
-- start_build(title, size_hint) - new session, returns its id.
+- start_build(title, size_hint, terrain?) - new session, returns its id. terrain = a stored build id or a .schem/.litematic path:
+  the session starts ON that land.
 - build_step(session, code, note) - run a short script ON TOP of what is already built. Reports what changed, overwrites,
-  warnings and the checks with coordinates.
+  warnings and the checks with coordinates. build_step(session, parts=[{note, code}, ...]) runs up to 4 INDEPENDENT snippets
+  in parallel and merges them (a clash on one block: the first part wins, it is reported); then view and check once.
+- ground(session, x1, z1, x2, z2, step?) - the ground height map (y of the top solid block per column, trees skipped).
+- plan_layout(session, area, parts, street_width) - spots for many buildings and the streets between them (see Big builds).
 - view(session, sides) - pictures of north / east / south / west / top. Do this after every part.
 - check(session) - every problem found (floating parts, buried or jumpy paths, wrong stairs, blocked doors, head room).
 - walk_test(session, path) - walk a path of [x, z] points; reports jumps, low head room, missing floor.
@@ -35,6 +39,21 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 6. walk_test the routes people will use (front door to every room, stairs, garden paths). Fix what it finds.
 7. Before save_build: run check and walk_test for every path people will use; fix what they find.
 8. save_build and give the user the preview link.
+
+## Big builds (towns, castles on real land)
+start_build with terrain, ground(), plan_layout(), then build part by part, district by district.
+1. start_build(title, terrain=<build id or .schem path>). The land is already in the build and keeps its own coordinates
+   (not 0,0,0). It counts as terrain: every cut and fill is reported ("dug 340 terrain blocks, filled 120"), so change
+   the land only where a building or road needs it. Never rebuild the land.
+2. ground() (or describe) first: build ON the land. Use the numbers as floor levels; a house floor is the ground level
+   (median of its footprint), not the highest corner. A big area is sampled with a step: ground() a small area for detail.
+3. plan_layout(area=[x1,z1,x2,z2], parts=[{name, w, l, kind: house|plaza|castle|shrine|park, near?}], street_width=5):
+   returns each part's rectangle, ground level, cut/fill and the street centre lines as (x,z,y) points with flat landings
+   at the corners. Streets never climb more than 1 block in 2. Build the parts where it says; if a street warning says it
+   is too steep, add a stair run (pattern straight_stair_run) between the points or move a part.
+4. Build district by district: first the streets and terraces, then the buildings of one street with build_step(parts=[...]),
+   one view and check after the batch. check() on terrain flags a path running into the hill (buried path) and a building
+   floating over the ground (gap below it): fix them by cutting the hill away or filling under the building.
 
 ## Coordinates
 x goes east, y goes up, z goes south (north is smaller z). Start at 0,0,0 and keep to positive numbers.
