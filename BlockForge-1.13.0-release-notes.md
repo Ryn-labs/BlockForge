@@ -2,7 +2,7 @@
 
 **Talk to it.** A new Talk tab: describe what you want, answer a couple of quick choices, see the plan as parts, and watch it build one part at a time. Click a part and say "make the roof steeper" to change only that part, with Keep and Undo. Every change is a version you can go back to. Quick create is still there.
 
-**Better buildings by default.** Houses now start from proven parts: two or more storeys, light walls in a dark timber frame, coloured layered roofs with overhangs, big framed windows with flower boxes, balconies and gardens. A quality check scores every building and town, and a build that looks plain or blocky is improved before it is saved.
+**Better buildings by default.** Houses now start from proven parts: two or more storeys, light walls in a dark timber frame, coloured layered roofs with overhangs, big framed windows with flower boxes, balconies and gardens. A quality check scores every building and town, and a build that looks plain or blocky can't be saved until it is improved.
 
 **Builds that work in game.** Stairs you can walk up without jumping, corners on landings, nothing buried or floating, doors kept free, lanterns get a post or chain instead of disappearing, and the size you asked for.
 
