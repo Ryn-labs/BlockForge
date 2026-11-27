@@ -138,6 +138,38 @@ def _floating(C):
     return out
 
 
+def _floating_on_land(C, ground):
+    """Floating parts of what was BUILT on terrain: groups of new blocks that touch no untouched ground block.
+    The terrain itself (tree leaves, overhangs) is not checked."""
+    out = []
+    new = {p for p, s in C.items() if not ground.untouched(C, p)}
+    seen = set()
+    for p in sorted(new, key=lambda q: (q[1], q[0], q[2])):
+        if p in seen:
+            continue
+        comp = [p]
+        seen.add(p)
+        k, grounded = 0, False
+        while k < len(comp):
+            x, y, z = comp[k]
+            k += 1
+            for a, b, c in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)):
+                q = (x + a, y + b, z + c)
+                if q in new:
+                    if q not in seen:
+                        seen.add(q)
+                        comp.append(q)
+                elif ground.is_land(C, q):
+                    grounded = True
+        if not grounded:
+            at = min(comp, key=lambda q: (q[1], q[0], q[2]))
+            top = ground.top.get((at[0], at[2]))
+            gap = f", {at[1] - top - 1} block{'s' if at[1] - top - 1 != 1 else ''} above the ground" if top is not None and at[1] > top + 1 else ""
+            out.append(("floating", at, f"A group of {len(comp)} block{'s' if len(comp) != 1 else ''} near {_fmt(at)} "
+                                        f"is not connected to the ground, so it floats{gap}"))
+    return out
+
+
 def _free(C, p):
     """Nothing there at all (air, or no block)."""
     return name(C.get(p)) in ("air", "cave_air", "void_air")
@@ -166,23 +198,58 @@ def _is_roof_step(C, x, y, z):
     return (low(1, 0) and low(-1, 0)) or (low(0, 1) and low(0, -1))
 
 
-def run(blocks, size=None):
-    """All findings for a build, capped per check. `size` is accepted for callers that have it; no check needs it yet."""
+class _Stand:
+    """Standing spots (x, z, y): a stair/slab/solid block with nothing solid or stepped directly above. Worked out on demand."""
+
+    def __init__(self, C):
+        self.C = C
+        self.memo = {}
+
+    def __contains__(self, key):
+        r = self.memo.get(key)
+        if r is None:
+            x, z, y = key
+            g = self.C.get
+            s = g((x, y, z))
+            r = bool((is_solid(s) or is_step(s)) and not is_solid(g((x, y + 1, z))) and not is_solid(g((x, y + 2, z)))
+                     and not is_step(g((x, y + 1, z))))
+            self.memo[key] = r
+        return r
+
+
+def _terrain_burials(C, ground, cells):
+    """Path blocks the build put into the land that are covered by untouched ground (a path that runs into a hill)."""
+    out = []
+    for (x, y, z), s in cells:
+        if name(s) not in PATH_BLOCKS:
+            continue
+        cover = next((h for h in (1, 2) if ground.is_land(C, (x, y + h, z)) and C.get((x, y + h, z)) is not None), None)
+        if cover is None:
+            continue
+        if any(name(C.get((x + a, y + dy, z + c))) in PATH_BLOCKS or shape(C.get((x + a, y + dy, z + c))) in ("bottom_stair", "bottom_slab")
+               for a, c in DV.values() for dy in (-1, 0, 1)):
+            out.append(("buried_path", (x, y, z),
+                        f"Path block at {_fmt((x, y, z))} runs into the terrain: the ground is {cover} above it, "
+                        f"so cut the hill away or move the path up"))
+    return out
+
+
+def run(blocks, size=None, ground=None):
+    """All findings for a build, capped per check. `size` is accepted for callers that have it; no check needs it yet.
+    `ground` (terrain.Ground) = the build sits on terrain: floating is measured against the land, and paths that run into
+    the land are buried paths. The terrain's own blocks are never reported."""
     C = blocks
     if not C:
         return []
     g = C.get
-    found = list(_floating(C))
-
-    # standing spots: a stair/slab/solid block with nothing solid or stepped directly above
-    stand = {}
-    for (x, y, z), s in C.items():
-        if is_solid(s) or is_step(s):
-            if not is_solid(g((x, y + 1, z))) and not is_solid(g((x, y + 2, z))) and not is_step(g((x, y + 1, z))):
-                stand[(x, z, y)] = feet(s, y)
+    found = list(_floating_on_land(C, ground)) if ground is not None else list(_floating(C))
+    stand = _Stand(C)
 
     walk = {}
-    for (x, y, z), s in C.items():
+    cells = C.items() if ground is None else [(p, s) for p, s in C.items() if not ground.untouched(C, p)]
+    if ground is not None:
+        found += _terrain_burials(C, ground, cells)
+    for (x, y, z), s in cells:
         n, sh = name(s), shape(s)
         if sh not in ("bottom_stair", "bottom_slab") and n not in PATH_BLOCKS:
             continue
@@ -242,7 +309,7 @@ def run(blocks, size=None):
                                       f"Stair at {_fmt((x, y, z))} is followed by a stair at {_fmt(p2)} that turns 90 degrees, "
                                       f"so put a flat landing at the turn"))
 
-    for (x, y, z), s in C.items():
+    for (x, y, z), s in cells:
         if name(s).endswith("_door") and props(s).get("half") == "lower":
             dv = DV.get(props(s).get("facing"))
             if dv:

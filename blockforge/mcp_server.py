@@ -124,18 +124,18 @@ TOOLS = [
     },
     {
         "name": "pattern",
-        "description": 'A proven build part (stairs, landings, doorway, window, lantern post, roof house shell, bridge, tree, spiral stair in a round or square tower) as buildkit text you pass to build_step. Unknown or empty name lists the patterns with their arguments.',
+        "description": 'A proven build part (stairs, landings, doorway, window, lantern post, roof house shell, bridge, tree) as buildkit text you pass to build_step. Unknown or empty name lists the patterns with their arguments.',
         "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "args": {"type": "object", "description": "Keyword arguments of the pattern, e.g. {\"x\": 3, \"y\": 1, \"z\": 4, \"facing\": \"south\"}"}}, "additionalProperties": False},
     },
     {
         "name": "start_build",
-        "description": 'Start a step-by-step build session (the build lives on the server until save_build). Returns the session id. Read get_build_guide first.',
-        "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "size_hint": {"type": "string", "description": "Rough size or idea, e.g. 24 x 16 x 30 cottage"}}, "required": ["title"], "additionalProperties": False},
+        "description": 'Start a step-by-step build session (the build lives on the server until save_build). Returns the session id. Read get_build_guide first. For a build ON real land pass terrain: the session then starts with that land (marked as terrain; every change to it is counted).',
+        "inputSchema": {"type": "object", "properties": {"title": {"type": "string"}, "size_hint": {"type": "string", "description": "Rough size or idea, e.g. 24 x 16 x 30 cottage"}, "terrain": {"type": "string", "description": "Optional: the id of a stored build (e.g. an imported .schem of the site) or the path of a .schem/.litematic file to build on"}}, "required": ["title"], "additionalProperties": False},
     },
     {
         "name": "build_step",
         "description": 'Run a SHORT buildkit snippet on top of what is already in the session (same functions as create_build scripts, coordinates x east, y up, z south). Returns blocks added/replaced/removed, overwrites, placement warnings and the build checks with coordinates. Build one part at a time, then view and check.',
-        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "code": {"type": "string", "description": "Build script for this part only"}, "note": {"type": "string", "description": "What this step is, e.g. north wall"}}, "required": ["session", "code"], "additionalProperties": False},
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "code": {"type": "string", "description": "Build script for this part only"}, "note": {"type": "string", "description": "What this step is, e.g. north wall"}, "parts": {"type": "array", "maxItems": 12, "items": {"type": "object", "properties": {"note": {"type": "string"}, "code": {"type": "string"}}, "required": ["code"]}, "description": "Instead of code: several INDEPENDENT snippets (houses of one street, towers of one wall) run in parallel (4 at a time) on the current build and merged. If two parts change the same block the first one wins and the clash is reported. Then view and check once."}}, "required": ["session"], "additionalProperties": False},
     },
     {
         "name": "view",
@@ -161,6 +161,16 @@ TOOLS = [
         "name": "history",
         "description": 'List the steps done so far in the session.',
         "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}}, "required": ["session"], "additionalProperties": False},
+    },
+    {
+        "name": "ground",
+        "description": 'The ground height map of the build (y of the top solid block of every column, trees skipped) as rows of numbers, max 64 x 64 cells (a bigger area is sampled with a step). Use it before placing anything on terrain so the building sits ON the land. Without an area it covers everything.',
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "x1": {"type": "integer"}, "z1": {"type": "integer"}, "x2": {"type": "integer"}, "z2": {"type": "integer"}, "step": {"type": "integer", "description": "Sample every n blocks (default: as small as fits 64 cells)"}}, "required": ["session"], "additionalProperties": False},
+    },
+    {
+        "name": "plan_layout",
+        "description": 'Plan a whole district on the ground: finds the flattest free spot for every part (castle on high ground, plaza in the middle, houses near what they say), keeps 3+ blocks between them and joins them with streets that follow the ground with at most a 1 in 2 slope and flat landings at corners. Returns every part rectangle with its ground level and cut/fill, and every street centre line as (x,z,y) points. Build part by part from the plan (pass the street points to stair/path patterns).',
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "area": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4, "description": "[x1, z1, x2, z2] to plan inside"}, "parts": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "w": {"type": "integer", "description": "size along x"}, "l": {"type": "integer", "description": "size along z"}, "kind": {"type": "string", "enum": ["house", "plaza", "castle", "shrine", "park"]}, "near": {"type": "string", "description": "name of another part to sit close to"}}, "required": ["name", "w", "l", "kind"]}}, "street_width": {"type": "integer", "default": 5}}, "required": ["session", "area", "parts"], "additionalProperties": False},
     },
     {
         "name": "describe",
@@ -320,7 +330,7 @@ def _skill_text():
         return ""
 
 
-SESSION_TOOLS = ("block_info", "style_sheet", "lessons", "pattern", "start_build", "build_step", "view", "check", "walk_test", "undo", "history", "describe", "save_build")
+SESSION_TOOLS = ("block_info", "style_sheet", "lessons", "pattern", "start_build", "build_step", "view", "check", "walk_test", "undo", "history", "ground", "plan_layout", "describe", "save_build")
 
 
 def _pattern_table():
@@ -368,14 +378,25 @@ def _session_call(name, args):
         return _extra_call(name, args)
     try:
         if name == "start_build":
-            s = session.start(args.get("title"), args.get("size_hint"))
+            s = session.start(args.get("title"), args.get("size_hint"), args.get("terrain"))
+            if s.terrain:
+                from . import terrain as _tr
+                return (f"Build session {s.id} started ('{s.title}') on terrain. "
+                        + _tr.summary(s.blocks, s.terrain_blocks, _tr.ground_top(s.blocks, s.terrain_blocks))
+                        + " The terrain keeps its own coordinates. Build one part at a time with build_step, view and check.")
             return (f"Build session {s.id} started ('{s.title}'). Build one part at a time with build_step, then view and "
                     f"check. Coordinates: x east, y up, z south; start at 0,0,0.")
         s = session.load(args.get("session"))
         if name == "build_step":
+            if args.get("parts"):
+                return session.step_parts(s, args["parts"], args.get("note"))
             if not str(args.get("code") or "").strip():
-                raise ToolError("build_step needs some code.")
+                raise ToolError("build_step needs some code (or parts).")
             return session.step(s, args["code"], args.get("note"))
+        if name == "ground":
+            return session.ground_text(s, args.get("x1"), args.get("z1"), args.get("x2"), args.get("z2"), args.get("step"))
+        if name == "plan_layout":
+            return session.plan_layout_text(s, args.get("area"), args.get("parts"), args.get("street_width", 5))[0]
         if name == "view":
             pics = session.view(s, args.get("sides"))
             out = [{"type": "text", "text": f"{len(s.blocks):,} blocks. Views: " + ", ".join(p[0] for p in pics)
@@ -396,16 +417,11 @@ def _session_call(name, args):
             return session.describe_text(s)
         if name == "save_build":
             from . import checks as _ck
-            found = _ck.run(s.blocks)
+            found = _ck.run(s.blocks, ground=s.ground())
             if found and not (args.get("accept_problems") or "").strip():      # the AI looks at its problems before it may finish
                 raise ToolError("Not saved yet: check still finds problems. Fix them with build_step (look with view, test paths with walk_test), "
                                 "then call save_build again. If one can't be fixed or is intended, call save_build with accept_problems "
                                 "explaining why.\n" + session.check_text(s))
-            size_msg = prompts.size_problem(s.size_hint, prompts.dims_of(s.blocks))
-            if size_msg and not (args.get("accept_problems") or "").strip():   # same rule for the size that was asked for
-                raise ToolError("Not saved yet: the size is off. " + size_msg + " Resize the build with build_step (scale the whole design, "
-                                "keep the detail), then call save_build again. If this size is intended, call save_build with "
-                                "accept_problems explaining why.")
             m, link = session.save(s, args.get("title"))
             return _summary(m) + link
     except session.SessionError as e:

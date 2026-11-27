@@ -13,7 +13,7 @@ import time
 from . import store
 
 PREFIX = "mcp__blockforge__"
-TOOLS = ("block_info", "style_sheet", "lessons", "pattern", "start_build", "build_step", "view", "check", "walk_test", "undo", "history", "describe", "save_build",
+TOOLS = ("block_info", "style_sheet", "lessons", "pattern", "start_build", "build_step", "view", "check", "walk_test", "undo", "history", "ground", "plan_layout", "describe", "save_build",
          "get_build_guide")
 TIMEOUT = 1200                  # seconds, same kill timer as the script path
 MAX_TURNS = 80
@@ -48,9 +48,9 @@ def system_prompt(text=None):
     from . import lessons, mcp_server
     out = (mcp_server._skill_text() + "\n\n---\n\nYou have only the BlockForge session tools (and Read for a reference "
            "image). Write build scripts for build_step as described above; the script functions are the same in every step.\n")
-    top = lessons.for_ai()
+    top = lessons.top(40)
     if top:
-        out += "\n## Lessons from earlier builds\n" + "\n".join(top) + "\n"
+        out += "\n## Lessons from earlier builds\n" + "\n".join("- " + ln for ln in top) + "\n"
     style = style_for(text)
     if style:
         out += f"\n## Style sheet: {style}\n" + lessons.for_style(style).strip() + "\n"
@@ -83,6 +83,10 @@ def _describe(name, inp):
         return "Taking a step back"
     if name == "save_build":
         return "Saving the build"
+    if name == "ground":
+        return "Reading the ground height"
+    if name == "plan_layout":
+        return "Planning the layout"
     if name in ("history", "describe", "get_build_guide"):
         return None
     if name == "Read":
