@@ -35,3 +35,20 @@ class CheckerCrashIsReported(unittest.TestCase):
         finally:
             placement._check_block = real
         self.assertTrue(any("crashed" in p and "ZeroDivisionError" in p for p in rep["problems"]))
+
+
+class LightsKeptWithSupport(unittest.TestCase):
+    def test_floating_lantern_gets_a_post_down_to_the_ground(self):
+        blocks = {(x, 0, z): "minecraft:stone" for x in range(3) for z in range(3)}
+        blocks[(1, 4, 1)] = "minecraft:lantern[hanging=false]"          # 3 blocks of air under it
+        rep = placement.process(blocks, final=True, pack=None, version="1.21.1", check_ids=False)
+        self.assertIn((1, 4, 1), blocks)                                  # the light stays
+        self.assertTrue(all("fence" in blocks[(1, y, 1)] for y in (1, 2, 3)))
+        self.assertTrue(any("fence post" in f for f in rep["fixed"]))
+
+    def test_lantern_under_a_roof_hangs_from_a_chain(self):
+        blocks = {(x, 6, z): "minecraft:stone" for x in range(3) for z in range(3)}
+        blocks[(1, 3, 1)] = "minecraft:lantern[hanging=true]"            # roof 3 blocks above, nothing below
+        placement.process(blocks, final=True, pack=None, version="1.21.1", check_ids=False)
+        self.assertIn((1, 3, 1), blocks)
+        self.assertTrue(all("chain" in blocks[(1, y, 1)] for y in (4, 5)))
