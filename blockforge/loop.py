@@ -13,7 +13,7 @@ import time
 from . import store
 
 PREFIX = "mcp__blockforge__"
-TOOLS = ("start_build", "build_step", "view", "check", "walk_test", "undo", "history", "describe", "save_build",
+TOOLS = ("block_info", "style_sheet", "lessons", "pattern", "start_build", "build_step", "view", "check", "walk_test", "undo", "history", "describe", "save_build",
          "get_build_guide")
 TIMEOUT = 1200                  # seconds, same kill timer as the script path
 MAX_TURNS = 80

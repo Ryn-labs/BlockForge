@@ -13,7 +13,17 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 - undo(session, steps), history(session), describe(session) - take back, list steps, text map of the build.
 - save_build(session, title) - final fix-up pass, saves the build, returns the 3D preview link. Give the link to the
   user exactly as returned.
+- lessons() - what earlier builds taught. style_sheet(style) - palette, shapes and details of a style (unknown name lists them).
+- pattern(name, args) - proven parts as script text for build_step: stairs, landings, doorway, window, lantern post, house
+  shell with roof, bridge, tree (unknown name lists them with their arguments).
+- block_info(blocks) - what a block state is: solid or not, what it needs to stay, light, properties.
 - create_build / update_build still exist for writing one whole script at once.
+
+## Before you build
+- Call lessons(). Call style_sheet(<style>) for the style asked (or the one the palette in the request matches).
+- Use pattern() for stairs, landings, doors, windows, lantern posts, roofs, bridges and trees instead of inventing them;
+  pass the text it returns to build_step and change the arguments, not the proven shape.
+- Unsure about a block (needs support? stairs facing? properties)? Call block_info before you place it.
 
 ## THE BUILD LOOP
 1. Plan in parts first: footprint and size, floor, walls, doors and windows, roof, inside, paths and decoration.
@@ -22,7 +32,8 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 4. check. Fix every problem it lists with another build_step, or undo and redo the part.
 5. Next part. Repeat 2-4.
 6. walk_test the routes people will use (front door to every room, stairs, garden paths). Fix what it finds.
-7. save_build and give the user the preview link.
+7. Before save_build: run check and walk_test for every path people will use; fix what they find.
+8. save_build and give the user the preview link.
 
 ## Coordinates
 x goes east, y goes up, z goes south (north is smaller z). Start at 0,0,0 and keep to positive numbers.

@@ -1,6 +1,7 @@
 """BlockForge MCP server (stdio). Lets a Claude Code chat create, edit and export builds that show up
 in the BlockForge app's gallery. No extra packages needed."""
 import base64
+import inspect
 import json
 import os
 import subprocess
@@ -10,7 +11,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import exporters, learn, mods, placement, prompts, sandbox, session, share, store, testlab  # noqa: E402
+from blockforge import blockinfo, exporters, learn, lessons, mods, patterns, placement, prompts, sandbox, session, share, store, testlab  # noqa: E402
 
 SERVER = {"name": "blockforge", "version": "1.1.0"}
 APP_URL = f"http://127.0.0.1:{os.environ.get('BLOCKFORGE_PORT', '8765')}"
@@ -105,6 +106,26 @@ TOOLS = [
             "build_id": {"type": "string"},
             "format": {"type": "string", "enum": list(exporters.FORMATS)}},
             "required": ["build_id", "format"], "additionalProperties": False},
+    },
+    {
+        "name": "block_info",
+        "description": 'Facts about block states (solid or not, what it needs to stay in place, light, settable properties). Use it when unsure about a block, e.g. ["oak_stairs[facing=north,half=bottom]", "lantern[hanging=true]"].',
+        "inputSchema": {"type": "object", "properties": {"blocks": {"type": "array", "items": {"type": "string"}, "description": "Block states"}}, "required": ["blocks"], "additionalProperties": False},
+    },
+    {
+        "name": "style_sheet",
+        "description": 'The style sheet (palette, shapes, details, mistakes) for a building style. Unknown or empty style lists the available styles.',
+        "inputSchema": {"type": "object", "properties": {"style": {"type": "string"}}, "additionalProperties": False},
+    },
+    {
+        "name": "lessons",
+        "description": 'The top lessons learned from earlier builds. Read them before you build.',
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "pattern",
+        "description": 'A proven build part (stairs, landings, doorway, window, lantern post, roof house shell, bridge, tree) as buildkit text you pass to build_step. Unknown or empty name lists the patterns with their arguments.',
+        "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "args": {"type": "object", "description": "Keyword arguments of the pattern, e.g. {\"x\": 3, \"y\": 1, \"z\": 4, \"facing\": \"south\"}"}}, "additionalProperties": False},
     },
     {
         "name": "start_build",
@@ -299,10 +320,52 @@ def _skill_text():
         return ""
 
 
-SESSION_TOOLS = ("start_build", "build_step", "view", "check", "walk_test", "undo", "history", "describe", "save_build")
+SESSION_TOOLS = ("block_info", "style_sheet", "lessons", "pattern", "start_build", "build_step", "view", "check", "walk_test", "undo", "history", "describe", "save_build")
+
+
+def _pattern_table():
+    import inspect
+    return {n: f for n, f in inspect.getmembers(patterns, inspect.isfunction)
+            if not n.startswith("_") and f.__module__ == patterns.__name__}
+
+
+def _pattern_list(table):
+    return "\n".join(f"- {n}{inspect.signature(f)}: {(f.__doc__ or '').strip().splitlines()[0] if (f.__doc__ or '').strip() else ''}"
+                     for n, f in sorted(table.items()))
+
+
+def _extra_call(name, args):
+    if name == "block_info":
+        blocks = args.get("blocks") or []
+        if isinstance(blocks, str):
+            blocks = [blocks]
+        if not blocks:
+            raise ToolError("block_info needs a list of block states.")
+        out = []
+        for b in blocks[:40]:
+            d = blockinfo.info(b)
+            bad = blockinfo.check_properties(b)
+            out.append(f"{b}: {blockinfo.explain(b)} Shape {d['shape']}, solid {d['solid']}, needs {d['needs_support']}, light {d['light']}."
+                       + (f" Not allowed here: {', '.join(bad)}." if bad else ""))
+        return "\n".join(out)
+    if name == "style_sheet":
+        text = lessons.for_style(args.get("style"))
+        return text or ("Unknown style. Available: " + ", ".join(lessons.styles()))
+    if name == "lessons":
+        return "\n".join("- " + ln for ln in lessons.top(40))
+    table = _pattern_table()
+    fn = table.get(str(args.get("name") or "").strip().lower())
+    if not fn:
+        return "Unknown pattern. Available patterns (pass the arguments as args):\n" + _pattern_list(table)
+    try:
+        return fn(**(args.get("args") or {}))
+    except (TypeError, ValueError) as e:
+        raise ToolError(f"pattern {fn.__name__}{inspect.signature(fn)}: {e}") from None
 
 
 def _session_call(name, args):
+    if name in ("block_info", "style_sheet", "lessons", "pattern"):
+        return _extra_call(name, args)
     try:
         if name == "start_build":
             s = session.start(args.get("title"), args.get("size_hint"))
