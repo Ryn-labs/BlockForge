@@ -191,7 +191,7 @@ def _toml(text):
     try:
         import tomllib
         return tomllib.loads(text)
-    except Exception:                                     # noqa: BLE001
+    except Exception:                                     # noqa: BLE001 - harmless: odd mod metadata is just skipped
         return {}
 
 
@@ -223,7 +223,7 @@ def read_mod_meta(zf, filename):
             d = json.loads(zf.read("mcmod.info").decode("utf-8", "replace"), strict=False)
             d = d[0] if isinstance(d, list) else (d.get("modList") or [{}])[0]
             return d.get("modid"), d.get("name"), str(d.get("version", "")), str(d.get("mcversion", ""))
-    except Exception:                                     # noqa: BLE001
+    except Exception:                                     # noqa: BLE001 - harmless: unreadable mod metadata, fall back to the file name
         pass
     return None, base, "", ""
 
@@ -447,7 +447,7 @@ def scan(mods_dir, name=None, log=print, extra_jars=()):
                 if not col:
                     png = lookup(f"assets/{ns}/textures/block/{b}.png")
                     col = png_average(png) if png else None
-            except Exception:                              # noqa: BLE001
+            except Exception:                              # noqa: BLE001 - harmless: unreadable texture, use the fallback colour
                 col = None
             c = col or _fallback_color(full)
             colors[full] = "%02x%02x%02x" % tuple(int(x) for x in c)

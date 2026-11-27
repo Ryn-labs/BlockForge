@@ -223,13 +223,13 @@ def stop():
             try:
                 rcon(["stop"])
             except (OSError, LabError):
-                pass
+                pass                                    # harmless: the adopted server was already gone
             _proc["adopted"] = False
         if p and p.poll() is None:
             try:
                 rcon(["stop"])
                 p.wait(30)
-            except Exception:                           # noqa: BLE001
+            except Exception:                           # noqa: BLE001 - graceful stop failed, so the process is killed instead
                 p.kill()
         _proc["p"] = None
 

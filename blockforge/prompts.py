@@ -205,6 +205,12 @@ BlockForge checks all of this after your script runs; anything that can't exist 
 - Scale: honour the requested size. Doors 2 high, ceilings 3-5 high, a human-scale room >= 5x5.
 - Keep it efficient: avoid placing millions of blocks; prefer hollow shells for huge solids.
 
+## Walkable paths (stairs, ramps, steps)
+- Every 1-block rise is a bottom stair (half=bottom) facing UPHILL: the stair's facing is the direction you walk up.
+- Keep 2 free blocks above every path cell (feet + head): no ceiling, beam, slab, fence or leaves lower than that.
+- Turn on a flat landing (a full block or slab at least 1x1 wide), never 90 degrees on one stair.
+- Nothing solid right in front of or behind a door, so you can walk through it.
+
 ## Editing an existing build
 If you are given the previous script and a change request, return the COMPLETE updated script (not a
 diff), keeping everything the user did not ask to change.
@@ -340,6 +346,25 @@ def test_missing_message():
     return ("This build has redstone or a farm, so it must PROVE it works. Add test_* steps to the script: give it its "
             "inputs (test_put / test_press / test_power), let time pass (test_wait) and check the outcome "
             "(test_expect_items / test_expect_block / test_expect_mob). Reply with the complete script in one ```python block.")
+
+
+def checks_fix_message(findings):
+    """Plain-words list of walking/door/floating problems found by checks.run, grouped by check."""
+    from . import checks
+    by = {}
+    for f in findings:
+        by.setdefault(f["check"], []).append(f)
+    counts = checks.counts(findings)
+    lines = []
+    for chk, items in by.items():
+        label = checks.CHECK_LABELS.get(chk, chk)
+        lines.append(f"{label.capitalize()} ({counts.get(chk, len(items))}):")
+        lines += ["- " + f["text"] for f in items]
+        if counts.get(chk, len(items)) > len(items):
+            lines.append(f"- ...and {counts[chk] - len(items)} more of the same kind")
+    return ("The build ran, but BlockForge's walk-through check found these problems (coordinates are x, y, z in the build):\n"
+            + "\n".join(lines) +
+            "\n\nFix these and keep everything else exactly as it is. Reply with the complete corrected script in one ```python block.")
 
 
 def redstone_fix_message(problems):

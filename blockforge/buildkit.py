@@ -14,6 +14,10 @@ _entities = []        # mobs in the build: [x, y, z, {"id": ..., ...}] (see test
 _tests = []           # in-game test steps for the test lab (see testkit.py)
 _meta = {"name": None, "description": None}
 random = _random.Random(1337)
+OVERWRITE_EXAMPLES = 20
+_ow = [0, []]         # [count, examples]: a script placed a DIFFERENT block over one it (or the base build) already had
+_ow_skip = set()      # positions of the base build being edited: replacing those is the point of an edit, not an accident
+_track = [True]
 
 
 class BuildError(Exception):
@@ -60,9 +64,29 @@ def block(x, y, z, st):
     if st is None:
         _blocks.pop(p, None)
         return
-    if len(_blocks) >= MAX_BLOCKS and p not in _blocks:
-        raise BuildError(f"build is over {MAX_BLOCKS} blocks")
+    prev = _blocks.get(p)
+    if prev is None:
+        if len(_blocks) >= MAX_BLOCKS:
+            raise BuildError(f"build is over {MAX_BLOCKS} blocks")
+    elif prev != st and _track[0]:                   # slow path only when a different block is replaced
+        if p in _ow_skip:
+            _ow_skip.discard(p)
+        else:
+            _ow[0] += 1
+            if len(_ow[1]) < OVERWRITE_EXAMPLES:
+                _ow[1].append({"at": list(p), "was": prev, "now": st})
     _blocks[p] = st
+
+
+def _reset_overwrites():
+    _ow[0] = 0
+    _ow[1] = []
+    _ow_skip.clear()
+
+
+def overwrites():
+    """What the script overwrote: {"count": n, "examples": [{"at": [x, y, z], "was": ..., "now": ...}, ...up to 20]}."""
+    return {"count": _ow[0], "examples": list(_ow[1])}
 
 
 setblock = place = block
@@ -87,10 +111,15 @@ def fill(x1, y1, z1, x2, y2, z2, st, hollow=False, outline=False, only_air=False
     outline=True keeps the shell and leaves the inside alone; only_air=True never overwrites."""
     st = _norm(st)
     xs, ys, zs = _rng(x1, x2), _rng(y1, y2), _rng(z1, z2)
+    # a box only 1 thick on some axis is all "shell" on that axis; ignore that axis so outline draws just the rim
+    flat = outline and not hollow and 1 in (len(xs), len(ys), len(zs)) and len(xs) * len(ys) * len(zs) > 1
     for x in xs:
         for y in ys:
             for z in zs:
-                edge = x in (xs[0], xs[-1]) or y in (ys[0], ys[-1]) or z in (zs[0], zs[-1])
+                ex = (x in (xs[0], xs[-1])) and not (flat and len(xs) == 1)
+                ey = (y in (ys[0], ys[-1])) and not (flat and len(ys) == 1)
+                ez = (z in (zs[0], zs[-1])) and not (flat and len(zs) == 1)
+                edge = ex or ey or ez
                 if (hollow or outline) and not edge:
                     if hollow:
                         _blocks.pop((x, y, z), None)
@@ -124,12 +153,16 @@ def replace(x1, y1, z1, x2, y2, z2, old, new):
     """Replace blocks whose name (without properties) matches old (or a list of names)."""
     olds = [old] if isinstance(old, str) else list(old)
     olds = {_norm(o).split("[", 1)[0] for o in olds}
-    for x in _rng(x1, x2):
-        for y in _rng(y1, y2):
-            for z in _rng(z1, z2):
-                cur = _blocks.get((x, y, z))
-                if cur and cur.split("[", 1)[0] in olds:
-                    block(x, y, z, new)
+    _track[0] = False                                # replacing is deliberate, not an accidental overwrite
+    try:
+        for x in _rng(x1, x2):
+            for y in _rng(y1, y2):
+                for z in _rng(z1, z2):
+                    cur = _blocks.get((x, y, z))
+                    if cur and cur.split("[", 1)[0] in olds:
+                        block(x, y, z, new)
+    finally:
+        _track[0] = True
 
 
 def line(x1, y1, z1, x2, y2, z2, st, width=1):

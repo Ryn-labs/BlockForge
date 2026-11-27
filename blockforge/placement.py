@@ -5,12 +5,14 @@ becomes a wall torch...) and returns what's left as problems for the AI to fix. 
 pass: whatever still couldn't exist (it would pop off or fall the moment the world updates) is replaced or removed,
 and listed."""
 import re
+import sys
 from collections import Counter
 
 from . import mods as modlib
 from . import redstone as rs
 from . import store
 
+EXAMPLES = 20
 HORIZ, OPP, DIRS = rs.HORIZ, rs.OPP, rs.DIRS
 _add, _name, _props, _with = rs._add, rs._name, rs._props, rs._with
 
@@ -59,6 +61,7 @@ class Ctx:
         self.b = blocks
         self.fixed, self.problems = [], []
         self.fixes = Counter()
+        self.where = {}                                    # removal text -> positions
         self.cnt = Counter()
         fences = Counter(_name(s) for s in blocks.values() if _is_fence(_name(s)))
         self.fence = fences.most_common(1)[0][0] if fences else "oak_fence"
@@ -71,8 +74,21 @@ class Ctx:
     def get(self, p, d=None):
         return self.b.get(p if d is None else _add(p, d))
 
-    def fix(self, kind, text):
+    def fix(self, kind, text, p=None):
         self.fixes[text] += 1
+        if p is not None and kind == "removed":
+            self.where.setdefault(text, []).append(p)
+
+    def fixed_list(self):
+        """Fix texts with counts; removals also list up to 20 example coordinates."""
+        out = []
+        for t, n in self.fixes.items():
+            line = f"{t} (×{n})" if n > 1 else t
+            ps = self.where.get(t)
+            if ps:
+                line += " at " + ", ".join(str(q) for q in ps[:EXAMPLES]) + (f" ...and {len(ps) - EXAMPLES} more" if len(ps) > EXAMPLES else "")
+            out.append(line)
+        return out
 
     def problem(self, kind, p, text):
         self.cnt[kind + "|n"] += 1
@@ -120,7 +136,7 @@ def _check_block(c, p, st, final):
             c.fix("bracket", "Lanterns on a wall now hang from a small fence bracket (lanterns can't attach to a wall sideways in vanilla)")
             return
         if final:
-            del b[p]; c.fix("removed", "Removed lanterns with nothing to hang from or stand on")
+            del b[p]; c.fix("removed", "Removed lanterns with nothing to hang from or stand on", p)
         else:
             c.problem("lantern", p, f"{n} has nothing to hang from or stand on")
         return
@@ -134,7 +150,7 @@ def _check_block(c, p, st, final):
             b[p] = f"minecraft:{TORCHES[n]}[facing={OPP[wd]}]"
             c.fix("torch", "Floor torches with no floor below became wall torches on the wall next to them")
         elif final:
-            del b[p]; c.fix("removed", "Removed torches with nothing to attach to")
+            del b[p]; c.fix("removed", "Removed torches with nothing to attach to", p)
         else:
             c.problem("torch", p, f"{n} has no floor or wall to attach to")
         return
@@ -148,7 +164,7 @@ def _check_block(c, p, st, final):
         elif _floor_ok(below):
             b[p] = f"minecraft:{WALL_TORCHES[n]}"; c.fix("torch", "Wall torches next to nothing now stand on the floor")
         elif final:
-            del b[p]; c.fix("removed", "Removed torches with nothing to attach to")
+            del b[p]; c.fix("removed", "Removed torches with nothing to attach to", p)
         else:
             c.problem("torch", p, f"{n} isn't attached to anything")
         return
@@ -162,7 +178,7 @@ def _check_block(c, p, st, final):
         if wd:
             b[p] = _with(st, facing=OPP[wd]); c.fix("mount", "Wall-mounted blocks (ladders, signs, banners) that weren't touching a wall were turned to face one")
         elif final:
-            del b[p]; c.fix("removed", "Removed wall-mounted blocks with no wall behind them")
+            del b[p]; c.fix("removed", "Removed wall-mounted blocks with no wall behind them", p)
         else:
             c.problem("mount", p, f"{n} has no wall behind it")
         return
@@ -177,7 +193,7 @@ def _check_block(c, p, st, final):
         if wd:
             b[p] = _with(st, face="wall", facing=OPP[wd]); c.fix("mount", "Buttons/levers floating in the air were attached to a nearby wall")
         elif final:
-            del b[p]; c.fix("removed", "Removed buttons/levers with nothing to attach to")
+            del b[p]; c.fix("removed", "Removed buttons/levers with nothing to attach to", p)
         else:
             c.problem("mount", p, f"{n} isn't attached to anything")
         return
@@ -190,7 +206,7 @@ def _check_block(c, p, st, final):
                 if not above:
                     b[_add(p, "up")] = _with(st, half="upper"); c.fix("halves", "Added the missing top half of doors and tall plants")
                 else:
-                    del b[p]; c.fix("removed", "Removed doors/tall plants with something blocking their top half")
+                    del b[p]; c.fix("removed", "Removed doors/tall plants with something blocking their top half", p)
                 return
             if n.endswith("_door") and not _floor_ok(below):
                 c.problem("door", p, f"{n} has nothing solid under it")
@@ -202,7 +218,7 @@ def _check_block(c, p, st, final):
                 if not below:
                     c.fix("halves", "Added the missing bottom half of doors and tall plants")
                 else:
-                    del b[p]; c.fix("removed", "Removed a door/plant top half with no bottom half")
+                    del b[p]; c.fix("removed", "Removed a door/plant top half with no bottom half", p)
         return
 
     # ---- beds: both halves
@@ -213,7 +229,7 @@ def _check_block(c, p, st, final):
             if b.get(other) is None:
                 b[other] = _with(st, part="head" if part == "foot" else "foot"); c.fix("halves", "Added the missing half of beds")
             else:
-                del b[p]; c.fix("removed", "Removed a half-bed that had no second half")
+                del b[p]; c.fix("removed", "Removed a half-bed that had no second half", p)
         return
 
     # ---- plants and crops
@@ -253,7 +269,7 @@ def _check_block(c, p, st, final):
     if n and (n.endswith("_carpet") or n == "moss_carpet" or n in ("snow", "cake", "flower_pot") or n.startswith("potted_")):
         if not below:
             if final:
-                del b[p]; c.fix("removed", "Removed carpets/snow/pots floating over nothing")
+                del b[p]; c.fix("removed", "Removed carpets/snow/pots floating over nothing", p)
             else:
                 c.problem("floor", p, f"{n} has nothing under it")
         return
@@ -261,14 +277,14 @@ def _check_block(c, p, st, final):
     if n and (n.endswith("candle") or n.endswith("_pressure_plate") or (n.endswith(("_sign", "_banner")) and "_wall_" not in n and "hanging" not in n)):
         if not _floor_ok(below):
             if final:
-                del b[p]; c.fix("removed", "Removed candles/plates/signs with nothing sturdy under them")
+                del b[p]; c.fix("removed", "Removed candles/plates/signs with nothing sturdy under them", p)
             else:
                 c.problem("floor", p, f"{n} needs a solid block under it")
         return
     if n and n.endswith("_hanging_sign") and "_wall_" not in n:
         if not _hang_ok(above):
             if final:
-                del b[p]; c.fix("removed", "Removed hanging signs with nothing above them")
+                del b[p]; c.fix("removed", "Removed hanging signs with nothing above them", p)
             else:
                 c.problem("hang", p, f"{n} has nothing to hang from")
 
@@ -278,7 +294,8 @@ def _soil_problem(c, p, n, final, double=False):
         del c.b[p]
         if double and _add(p, "up") in c.b:
             del c.b[_add(p, "up")]
-        c.fix("removed", "Removed plants and crops that had no soil (they would pop off the moment the world updates)")
+            c.where.setdefault("Removed plants and crops that had no soil (they would pop off the moment the world updates)", []).append(_add(p, "up"))
+        c.fix("removed", "Removed plants and crops that had no soil (they would pop off the moment the world updates)", p)
     else:
         c.problem("soil", p, f"{n} is not on the soil it needs")
 
@@ -322,7 +339,7 @@ def _check_ids(c, final, version):
             for p, st in c.scoped():
                 if st.split("[", 1)[0] in unknown_vanilla:
                     del c.b[p]
-            c.fix("removed", "Removed blocks that don't exist in Minecraft " + str(version) + ": " + ", ".join(unknown_vanilla[:4]))
+                    c.fix("removed", "Removed blocks that don't exist in Minecraft " + str(version) + ": " + ", ".join(unknown_vanilla[:4]), p)
         else:
             c.problems.append(f"These blocks don't exist in Minecraft {version}: {', '.join(unknown_vanilla[:6])}. Use real vanilla block ids.")
     if mod_blocks:
@@ -331,7 +348,7 @@ def _check_ids(c, final, version):
             for p, st in c.scoped():
                 if st.split("[", 1)[0] in mod_blocks:
                     c.b[p] = "minecraft:stone_bricks"
-            c.fix("removed", f"Replaced modded blocks with stone bricks because {why}: " + ", ".join(mod_blocks[:4]))
+                    c.fix("removed", f"Replaced modded blocks with stone bricks because {why}: " + ", ".join(mod_blocks[:4]), p)
         else:
             c.problems.append(f"These modded blocks can't be used ({why}): {', '.join(mod_blocks[:6])}. Use vanilla blocks or ones from the pack.")
 
@@ -399,7 +416,14 @@ def fix_states(blocks):
     """Only correct block settings that don't exist (used after quick edits like swaps)."""
     c = Ctx(blocks)
     _check_states(c)
-    return [f"{t} (×{n})" if n > 1 else t for t, n in c.fixes.items()]
+    return c.fixed_list()
+
+
+def _checker_error(c, what, e):
+    """A checker step crashed: the build is kept, but the error is printed and returned in the problems."""
+    msg = f"The placement {what} crashed ({type(e).__name__}: {e}), so some blocks were not checked."
+    print("blockforge placement: " + msg, file=sys.stderr)
+    c.problems.append(msg)
 
 
 def process(blocks, final=False, version=None, pack="auto", only=None, check_ids=True):
@@ -416,12 +440,13 @@ def process(blocks, final=False, version=None, pack="auto", only=None, check_ids
     try:
         if check_ids:
             _check_ids(c, final, version)
-    except Exception:                                      # noqa: BLE001 - never lose a build over the checker
-        pass
+    except Exception as e:                                 # noqa: BLE001 - never lose a build over the checker, but say so
+        _checker_error(c, "block id check", e)
     try:
         _check_states(c)
-    except Exception:                                      # noqa: BLE001
-        pass
+    except Exception as e:                                 # noqa: BLE001
+        _checker_error(c, "block state check", e)
+    crashed = []
     for p in sorted(blocks if only is None else [q for q in blocks if q in only],
                     key=lambda q: (q[1], q[0], q[2])):          # bottom-up so supports are settled first
         st = blocks.get(p)
@@ -429,10 +454,14 @@ def process(blocks, final=False, version=None, pack="auto", only=None, check_ids
             continue
         try:
             _check_block(c, p, st, final)
-        except Exception:                                  # noqa: BLE001
+        except Exception as e:                             # noqa: BLE001 - keep checking the other blocks, but report it
+            crashed.append((p, _name(st), e))
             continue
+    if crashed:
+        p0, n0, e0 = crashed[0]
+        _checker_error(c, f"check of {len(crashed)} block(s), first {n0} at {p0}", e0)
     if c.fixes:
         rs._fix_connections(blocks)                        # new fences/etc. need their connections worked out
         rs._fix_dust(blocks)
-    fixed = [f"{t} (×{n})" if n > 1 else t for t, n in c.fixes.items()]
+    fixed = c.fixed_list()
     return {"fixed": fixed, "problems": c.problems}

@@ -21,6 +21,7 @@ MODELS = {
     "claude-haiku-5-5": "Quick - Claude Haiku 5.5 (fastest)",
 }
 MAX_FIX_ATTEMPTS = 2
+MAX_CHECK_FIXES = 1
 MAX_TEST_FIXES = 3          # times the AI may redesign a machine that failed its in-game test
 
 
@@ -38,7 +39,7 @@ def _version(exe):
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         m = re.search(r"(\d+)\.(\d+)\.(\d+)", r.stdout.decode("utf-8", "replace"))
         return tuple(map(int, m.groups())) if m else (0,)
-    except Exception:                                # noqa: BLE001
+    except Exception:                                # noqa: BLE001 - harmless: unknown version just means "old"
         return (0,)
 
 
@@ -538,6 +539,17 @@ class _Conversation:
         return self.text.split("## Research first (required)")[0]
 
 
+def _overwrite_note(meta):
+    """One line telling the AI which blocks its script placed over different blocks it had already placed."""
+    ow = meta.get("overwrites") or {}
+    if not ow.get("count"):
+        return ""
+    ex = ", ".join(f"({e['at'][0]}, {e['at'][1]}, {e['at'][2]}) {str(e['was']).split(':', 1)[-1]} -> {str(e['now']).split(':', 1)[-1]}"
+                   for e in ow.get("examples") or [])
+    return (f"Note: the script placed a different block over {ow['count']:,} blocks it had already placed (the last one wins). "
+            f"If that was not intended, fix the order or the boxes. Examples: {ex}")
+
+
 def generate(prompt, size="medium", palette="auto", model=None, engine=None, image=None, parent_id=None,
              research=None, redstone=None, use_mods=None, log=print):
     """image: (bytes, mime). Returns the saved build's meta."""
@@ -646,15 +658,34 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
         problems = meta.get("warnings") or []
         for f in meta.get("fixes") or []:
             log("Auto-fixed: " + f)
+        ow_note = _overwrite_note(meta)
+        if ow_note:
+            log(ow_note)
         if problems:
             log("Build check: " + "; ".join(problems)[:300])
             log(f"Asking {who} to fix {'the redstone and ' if redstone else ''}blocks that can't exist...")
             try:
-                _, code2, _ = extract(convo.follow_up(prompts.redstone_fix_message(problems), code))
+                _, code2, _ = extract(convo.follow_up(prompts.redstone_fix_message(problems + ([ow_note] if ow_note else [])), code))
                 code2, blocks2, meta2 = build(code2)
                 if len(meta2.get("warnings") or []) <= len(problems):
                     code, blocks, meta = code2, blocks2, meta2
                     problems = meta.get("warnings") or []
+            except EngineError as e:
+                log(f"Kept the first version ({e}).")
+        from . import checks
+        found = checks.run(blocks, size)
+        if found and MAX_CHECK_FIXES > 0:
+            log("Checks: " + checks.summary(found))
+            log(f"Asking {who} to fix the walking, door and floating problems...")
+            try:
+                _, code2, _ = extract(convo.follow_up(prompts.checks_fix_message(found), code))
+                code2, blocks2, meta2 = build(code2)
+                found2 = checks.run(blocks2, size)
+                if checks.total(found2) < checks.total(found):
+                    code, blocks, meta, found = code2, blocks2, meta2, found2
+                    log("Checks after the fix: " + (checks.summary(found) if found else "no problems"))
+                else:
+                    log("Kept the first version (the second didn't have fewer check problems).")
             except EngineError as e:
                 log(f"Kept the first version ({e}).")
         final = placement.process(blocks, final=True, **popts, only=sandbox.scope(meta))   # last resort: nothing impossible is left
@@ -717,6 +748,10 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                     log(f"Kept the earlier version ({e}).")
                     break
 
+        found = checks.run(blocks, size)                  # final state (the test lab may have changed the build)
+        checks_meta = {"total": checks.total(found), "by_check": checks.counts(found)}
+        if found:
+            log("Checks: " + checks.summary(found))
         title = meta.get("name") or title or prompt[:60] or "Build"
         rec = usage.record()
         cost = f" (about ${rec['cost_usd']:.2f})" if rec["cost_usd"] else ""
@@ -734,7 +769,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                                  researched=bool(research), redstone=bool(redstone), warnings=problems, fixes=fixes,
                                  data_version=mods.data_version(version), modpack=(pack or {}).get("name"),
                                  tiles=sandbox.tiles_of(meta), modules=meta.get("modules"), base=base_id,
-                                 entities=meta.get("entities"), tested=tested)
+                                 entities=meta.get("entities"), tested=tested, checks=checks_meta)
         status = "done"
         learn.log_generation(saved, fixes, list(meta.get("redstone_warnings") or []))
         return saved
@@ -748,4 +783,4 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
             try:
                 os.remove(image_path)
             except OSError:
-                pass
+                pass                                     # temp reference image already gone: harmless
