@@ -12,5 +12,8 @@
   {"id": 11, "key": "hill_town", "size": "large", "terrain": "terrain/hill.schem", "prompt": "A small Japanese hill town on this terrain: a castle on the highest hill, a stair road up to it with landings, a street with 8 houses, a shrine with a torii, trees and lanterns."},
   {"id": 12, "key": "wooden_manor", "size": "large", "prompt": "A wooden manor with log frames, a layered roof, a balcony, window boxes and a terrace garden."},
   {"id": 13, "key": "farmhouse_fields", "size": "medium", "prompt": "A farmhouse with fields, a fenced yard and a small barn."},
-  {"id": 14, "key": "small_cottage", "size": "small", "prompt": "A small cottage."}
+  {"id": 14, "key": "small_cottage", "size": "small", "prompt": "A small cottage."},
+  {"id": 15, "key": "snowy_mountain", "size": "large", "prompt": "A snowy mountain: a tall rocky peak with snow on top, ridges and gullies on its sides, forested foothills around it."},
+  {"id": 16, "key": "mountain_valley_river", "size": "large", "prompt": "A mountain valley with a winding river between two forested ridges."},
+  {"id": 17, "key": "hill_town_mountain", "size": "colossal", "prompt": "A small hill town on the side of a mountain: houses on terraces, a winding road up, the mountain rising behind it."}
 ]

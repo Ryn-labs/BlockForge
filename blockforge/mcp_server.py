@@ -173,6 +173,21 @@ TOOLS = [
         "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "area": {"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4, "description": "[x1, z1, x2, z2] to plan inside"}, "parts": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "w": {"type": "integer", "description": "size along x"}, "l": {"type": "integer", "description": "size along z"}, "kind": {"type": "string", "enum": ["house", "plaza", "castle", "shrine", "park"]}, "near": {"type": "string", "description": "name of another part to sit close to"}}, "required": ["name", "w", "l", "kind"]}}, "street_width": {"type": "integer", "default": 5}}, "required": ["session", "area", "parts"], "additionalProperties": False},
     },
     {
+        "name": "make_terrain",
+        "description": 'Lay real-looking land into the session: a mountain (one massif with side peaks, ridges and gullies), a range, a valley with a river, or rolling hills. Smooth slopes (no steps over 3 except real cliffs), rock strata on steep faces, scree, snow above the snowline, trees that thin out with height, land that rolls out to the box edge. Use it for EVERY mountain, hill or valley (never cones, cylinders or stacked boxes), then build on it. Returns what changed and the terrain score.',
+        "inputSchema": {"type": "object", "properties": {
+            "session": {"type": "string", "description": "Session id from start_build"},
+            "kind": {"type": "string", "enum": ["mountain", "range", "valley", "hills"], "default": "mountain"},
+            "x1": {"type": "integer"}, "z1": {"type": "integer"}, "x2": {"type": "integer"}, "z2": {"type": "integer"},
+            "y": {"type": "integer", "default": 0, "description": "Ground level at the box edges"},
+            "height": {"type": "integer", "default": 40, "description": "Rise of the highest ground above y"},
+            "seed": {"type": "integer", "default": 0, "description": "Another seed = another mountain of the same kind"},
+            "snowline": {"type": "integer", "description": "y where snow starts (default: 72% up a mountain, none on hills)"},
+            "river": {"type": "boolean", "description": "Winding river along the valley floor (default on for valley)"},
+            "trees": {"type": "boolean", "default": True}},
+            "required": ["session", "x1", "z1", "x2", "z2"], "additionalProperties": False},
+    },
+    {
         "name": "describe",
         "description": 'Text description of the build as it is now: size, materials with where they are, and top, front and side letter maps.',
         "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}}, "required": ["session"], "additionalProperties": False},
@@ -180,7 +195,7 @@ TOOLS = [
     {
         "name": "save_build",
         "description": 'Finish: run the final placement pass and save the session as a build in the BlockForge gallery. Returns the build id and the 3D preview link (give it to the user exactly as returned).',
-        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "title": {"type": "string"}, "accept_problems": {"type": "string", "description": "Only when check still finds problems you cannot fix: say why each one is fine. Without it, save_build refuses while check finds problems."}, "keep_size_user_answer": {"type": "string", "description": "Only after the USER answered that the current size is fine: their words. The AI can not waive a size miss itself."}, "keep_quality_user_answer": {"type": "string", "description": "Only after the USER answered that a plain building is what they want: their words. The AI can not waive a low quality score itself."}}, "required": ["session"], "additionalProperties": False},
+        "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}, "title": {"type": "string"}, "accept_problems": {"type": "string", "description": "Only when check still finds problems you cannot fix: say why each one is fine. Without it, save_build refuses while check finds problems."}, "keep_terrain_user_answer": {"type": "string", "description": "Only after the user said to keep land that save_build called unnatural: their words."}, "keep_size_user_answer": {"type": "string", "description": "Only after the USER answered that the current size is fine: their words. The AI can not waive a size miss itself."}, "keep_quality_user_answer": {"type": "string", "description": "Only after the USER answered that a plain building is what they want: their words. The AI can not waive a low quality score itself."}}, "required": ["session"], "additionalProperties": False},
     },
     {
         "name": "review",
@@ -335,7 +350,7 @@ def _skill_text():
         return ""
 
 
-SESSION_TOOLS = ("block_info", "style_sheet", "lessons", "pattern", "start_build", "build_step", "view", "check", "walk_test", "undo", "history", "ground", "plan_layout", "describe", "review", "save_build")
+SESSION_TOOLS = ("block_info", "style_sheet", "lessons", "pattern", "start_build", "build_step", "make_terrain", "view", "check", "walk_test", "undo", "history", "ground", "plan_layout", "describe", "review", "save_build")
 
 
 def _pattern_table():
@@ -419,6 +434,13 @@ def _session_call(name, args):
             if not str(args.get("code") or "").strip():
                 raise ToolError("build_step needs some code (or parts).")
             return session.step(s, args["code"], args.get("note"))
+        if name == "make_terrain":
+            keys = ("x1", "z1", "x2", "z2", "y", "height", "kind", "seed", "snowline", "river", "trees")
+            kw = ", ".join(f"{k}={args[k]!r}" for k in keys if args.get(k) is not None)
+            from . import terrain_quality as _tq
+            text = session.step(s, f"natural_terrain({kw})", args.get("note") or f"natural terrain ({args.get('kind', 'mountain')})")
+            q = _tq.score(quality.built_only(s.blocks, s.terrain_blocks))
+            return (text if isinstance(text, str) else json.dumps(text)) + "\nTerrain: " + _tq.summary(q)
         if name == "ground":
             return session.ground_text(s, args.get("x1"), args.get("z1"), args.get("x2"), args.get("z2"), args.get("step"))
         if name == "plan_layout":
@@ -467,6 +489,16 @@ def _session_call(name, args):
                                 "chimney, fence_garden, farm_plot, road, plaza), call review to look at it, then save_build again. accept_problems does not "
                                 "cover the quality." + ("" if unattended else " If the user asked for a plain building on purpose, ask "
                                 "them; only if they say keep it, call save_build with keep_quality_user_answer set to their words."))
+            from . import terrain_quality as _tq                              # AI-made land must look like land, not a house
+            built = quality.built_only(s.blocks, s.terrain_blocks)
+            user_t = bool((args.get("keep_terrain_user_answer") or "").strip()) and not unattended
+            if not q["building"] and _tq.is_terrain(built):
+                tqs = _tq.score(built)
+                if tqs["total"] < _tq.TERRAIN_MIN and not user_t:
+                    raise ToolError("Not saved yet: " + _tq.gate_text(tqs) + " Rebuild the land with make_terrain (or "
+                                    "natural_terrain in build_step), then save_build again. accept_problems does not cover the terrain."
+                                    + ("" if unattended else " If the user asked for this land on purpose, ask them; only if they "
+                                       "say keep it, call save_build with keep_terrain_user_answer set to their words."))
             m, link = session.save(s, args.get("title"))
             if q["building"]:
                 m = store.update_meta(m["id"], quality={"total": q["total"], "parts": q["parts"], "town": q["town"],

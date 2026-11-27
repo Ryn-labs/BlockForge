@@ -9,6 +9,8 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 - build_step(session, code, note) - run a short script ON TOP of what is already built. Reports what changed, overwrites,
   warnings and the checks with coordinates. build_step(session, parts=[{note, code}, ...]) runs up to 4 INDEPENDENT snippets
   in parallel and merges them (a clash on one block: the first part wins, it is reported); then view and check once.
+- make_terrain(session, kind, x1, z1, x2, z2, y?, height?, seed?, snowline?, river?) - real-looking land: mountain, range,
+  valley (with river) or hills. Use it for EVERY mountain, hill or valley, then build on it (same as natural_terrain() in a script).
 - ground(session, x1, z1, x2, z2, step?) - the ground height map (y of the top solid block per column, trees skipped).
 - plan_layout(session, area, parts, street_width) - spots for many buildings and the streets between them (see Big builds).
 - view(session, sides) - pictures of north / east / south / west / top. Do this after every part.
@@ -81,6 +83,12 @@ start_build with terrain, ground(), plan_layout(), then build part by part, dist
 4. Build district by district: first the streets and terraces, then the buildings of one street with build_step(parts=[...]),
    one view and check after the batch. check() on terrain flags a path running into the hill (buried path) and a building
    floating over the ground (gap below it): fix them by cutting the hill away or filling under the building.
+
+## Mountains, hills and valleys
+Never build land from cones, cylinders, pyramids or stacked boxes: that looks like a house, not a mountain, and save_build
+refuses land that scores under 60 (sheer cuts, straight step lines, a lone cone on a flat plate, contour stripes, a cut-off
+edge). Lay the land first with make_terrain (several calls with different seeds for a bigger landscape), look at it with
+view, then put buildings, roads and terraces on it with build_step.
 
 ## Coordinates
 x goes east, y goes up, z goes south (north is smaller z). Start at 0,0,0 and keep to positive numbers.
