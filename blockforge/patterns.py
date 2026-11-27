@@ -418,3 +418,623 @@ def square_spiral_stair(x1, z1, size, y, height, block="stone_brick_stairs", wal
     wall_cells = [(x, z) for x in range(x1, x1 + size) for z in range(z1, z1 + size) if (x, z) not in inner]
     wins = [(x1 + size - 1, z1 + size // 2), (x1, z1 + size // 2), (x1 + size // 2, z1 + size - 1)]
     return _spiral_tower(interior, wall_cells, ring, y, height, wall, block, (xa + 1, z1, "north"), wins)
+
+
+# ------------------------------------------------------------------ house parts (quality: docs/QUALITY.md)
+# Rules taken from good survival houses: log frames that stick out of the wall, roofs that overhang 1-2 blocks with a trim,
+# framed windows with shutters and flower boxes, porches and balconies on posts, a chimney, a garden and a path.
+WOOD_NAMES = ("oak", "spruce", "birch", "jungle", "acacia", "dark_oak", "mangrove", "cherry", "bamboo", "crimson",
+              "warped", "pale_oak")
+_AXIS = {"north": "x", "south": "x", "east": "z", "west": "z"}
+
+
+def _wall_cells(x1, z1, x2, z2, facing):
+    """The cells of a straight wall from (x1, z1) to (x2, z2) and its outward step."""
+    dx, dz = _dir(facing)
+    if x1 != x2 and z1 != z2:
+        raise ValueError("a wall must be straight: x1 == x2 or z1 == z2")
+    if (x1 != x2 and dz == 0) or (z1 != z2 and dx == 0):
+        raise ValueError(f"a wall along x faces north or south, a wall along z faces east or west (got {facing!r})")
+    cells = [(x, z) for x in range(min(x1, x2), max(x1, x2) + 1) for z in range(min(z1, z2), max(z1, z2) + 1)]
+    return cells, (dx, dz)
+
+
+def _posts(cells, spacing):
+    return [c for i, c in enumerate(cells) if i % max(2, int(spacing)) == 0 or i == len(cells) - 1]
+
+
+def framed_wall(x1, z1, x2, z2, y, h, facing, fill="oak_planks", frame="spruce_log", spacing=4):
+    """A timber-framed wall: `fill` infill from y to y+h-1 on the straight line (x1, z1)-(x2, z2), log posts in the wall
+    at both ends and every `spacing` blocks, and a frame that sticks out 1 block on the `facing` side: posts from y-1 to
+    the top and log beams along the bottom (y-1) and top (y+h-1) rows. Leave the cells between posts for windows/doors."""
+    cells, (dx, dz) = _wall_cells(x1, z1, x2, z2, facing)
+    along = _AXIS[facing]
+    top = y + max(2, int(h)) - 1
+    a, b = cells[0], cells[-1]
+    out = [f"# framed wall facing {facing}, {len(cells)} long, rows {y}..{top}",
+           f"fill({a[0]}, {y}, {a[1]}, {b[0]}, {top}, {b[1]}, {fill!r})"]
+    for (cx, cz) in _posts(cells, spacing):
+        out.append(f"fill({cx}, {y}, {cz}, {cx}, {top}, {cz}, {_st(frame, axis='y')})")
+        out.append(f"fill({cx + dx}, {y - 1}, {cz + dz}, {cx + dx}, {top}, {cz + dz}, {_st(frame, axis='y')})")
+    for row in (y - 1, top):
+        out.append(f"fill({a[0] + dx}, {row}, {a[1] + dz}, {b[0] + dx}, {row}, {b[1] + dz}, {_st(frame, axis=along)})")
+    return _code(out)
+
+
+def framed_house(x1, z1, x2, z2, y, floors=1, storey=4, fill="oak_planks", frame="spruce_log", floor="spruce_planks",
+                 foundation="cobblestone", spacing=4, skip=(), clear=False, flat=()):
+    """The body of a timber-framed house: foundation at y-1, `floors` storeys of `storey` free blocks (walls on the
+    outline x1..x2, z1..z2), plank floors between storeys and a ceiling on top, log posts in the walls every `spacing`
+    blocks and a frame sticking out 1 block (posts, a beam on every floor line, thick corners). The ceiling is at
+    y + floors * (storey + 1) - 1: the roof's eaves go one higher. skip = sides without a wall (a wing joined to another
+    building, e.g. ['east']); flat = sides whose frame stays in the wall (where a lower wing and its roof join);
+    clear=True empties the rooms first. Then add windows, a porch or door, and the roof.
+    Tip: a side of 4k+1 blocks with spacing 4 leaves 3-block bays, a window or door in the middle of each."""
+    x1, x2 = sorted((x1, x2))
+    z1, z2 = sorted((z1, z2))
+    if x2 - x1 < 3 or z2 - z1 < 3:
+        raise ValueError("a house needs at least 4 x 4 blocks")
+    floors, storey = max(1, int(floors)), max(3, int(storey))
+    skip = {str(s).lower() for s in (skip or ())}
+    flat = {str(s).lower() for s in (flat or ())}
+    bad = (skip | flat) - set(DIRS)
+    if bad:
+        raise ValueError(f"skip and flat take north, south, east, west (got {sorted(bad)})")
+    top = y + floors * (storey + 1) - 1
+    lines = [y + k * (storey + 1) + storey for k in range(floors)]
+    sides = {"north": (x1, z1, x2, z1), "south": (x1, z2, x2, z2), "west": (x1, z1, x1, z2), "east": (x2, z1, x2, z2)}
+    out = [f"# framed house x {x1}..{x2}, z {z1}..{z2}, {floors} floor(s), ceiling at y={top}",
+           f"fill({x1}, {y - 1}, {z1}, {x2}, {y - 1}, {z2}, {foundation!r})",
+           f"fill({x1 + 1}, {y - 1}, {z1 + 1}, {x2 - 1}, {y - 1}, {z2 - 1}, {floor!r})"]
+    if clear:
+        out.append(f"fill({x1 + 1}, {y}, {z1 + 1}, {x2 - 1}, {top - 1}, {z2 - 1}, 'air')")
+    for yk in lines:
+        out.append(f"fill({x1 + 1}, {yk}, {z1 + 1}, {x2 - 1}, {yk}, {z2 - 1}, {floor!r})")
+    for side, (a, b, c, d) in sides.items():
+        if side in skip:
+            continue
+        dx, dz = DIRS[side]
+        along = _AXIS[side]
+        out.append(f"fill({a}, {y}, {b}, {c}, {top}, {d}, {fill!r})")
+        for yk in lines:
+            out.append(f"fill({a}, {yk}, {b}, {c}, {yk}, {d}, {_st(frame, axis=along)})")
+        cells = [(x, z) for x in range(a, c + 1) for z in range(b, d + 1)]
+        for (cx, cz) in _posts(cells, spacing):
+            out.append(f"fill({cx}, {y}, {cz}, {cx}, {top}, {cz}, {_st(frame, axis='y')})")
+            if side not in flat:
+                out.append(f"fill({cx + dx}, {y - 1}, {cz + dz}, {cx + dx}, {top}, {cz + dz}, {_st(frame, axis='y')})")
+        for row in ([y - 1] + lines) if side not in flat else ():
+            out.append(f"fill({a + dx}, {row}, {b + dz}, {c + dx}, {row}, {d + dz}, {_st(frame, axis=along)})")
+    for (cx, cz, s1, s2) in ((x1 - 1, z1 - 1, "west", "north"), (x2 + 1, z1 - 1, "east", "north"),
+                             (x1 - 1, z2 + 1, "west", "south"), (x2 + 1, z2 + 1, "east", "south")):
+        if not ({s1, s2} & (skip | flat)):
+            out.append(f"fill({cx}, {y - 1}, {cz}, {cx}, {top}, {cz}, {_st(frame, axis='y')})")
+    return _code(out)
+
+
+def window_with_box(x, y, z, facing, width=1, height=2, glass="glass_pane", shutter="spruce_trapdoor",
+                    box="spruce_trapdoor", flower="poppy", lintel="stripped_spruce_log", wall=None):
+    """A framed window in a wall: `width` x `height` panes, the lowest-left pane at (x, y, z) (width runs east or south
+    along the wall), a log lintel over it, open trapdoor shutters on both sides and a flower box under it (grass block
+    with flowers, trapdoors round its front, sides and bottom), all on the `facing` (outside) side.
+    wall = a block for a small wall piece round it (a window on its own); None keeps the wall already built."""
+    dx, dz = _dir(facing)
+    ax, az = (1, 0) if _AXIS[facing] == "x" else (0, 1)
+    width, height = max(1, int(width)), max(1, int(height))
+    conn = {"east": True, "west": True} if ax else {"north": True, "south": True}
+    neg, pos = ("west", "east") if ax else ("north", "south")
+    out = [f"# window {width} x {height} facing {facing} with shutters and a flower box"]
+    if wall:
+        out.append(f"fill({x - 2 * ax}, {y - 2}, {z - 2 * az}, {x + (width + 1) * ax}, {y + height + 1}, "
+                   f"{z + (width + 1) * az}, {wall!r})")
+    for i in range(width):
+        cx, cz = x + ax * i, z + az * i
+        for k in range(height):
+            out.append(f"block({cx}, {y + k}, {cz}, {_st(glass, **conn) if glass.endswith('_pane') else repr(glass)})")
+        out.append(f"block({cx + dx}, {y - 1}, {cz + dz}, 'grass_block')")
+        out.append(f"block({cx + dx}, {y}, {cz + dz}, {flower!r})")
+        out.append(f"block({cx + 2 * dx}, {y - 1}, {cz + 2 * dz}, {_st(box, facing=facing, half='bottom', open=True)})")
+        out.append(f"block({cx + dx}, {y - 2}, {cz + dz}, {_st(box, facing=facing, half='top', open=False)})")
+    out.append(f"fill({x - ax}, {y + height}, {z - az}, {x + width * ax}, {y + height}, {z + width * az}, "
+               f"{_st(lintel, axis=_AXIS[facing])})")
+    for side, (sx, sz) in ((neg, (x - ax, z - az)), (pos, (x + width * ax, z + width * az))):
+        for k in range(height):
+            out.append(f"block({sx + dx}, {y + k}, {sz + dz}, {_st(shutter, facing=facing, half='bottom', open=True)})")
+        out.append(f"block({sx + dx}, {y - 1}, {sz + dz}, {_st(box, facing=side, half='bottom', open=True)})")
+    return _code(out)
+
+
+def porch(x, y, z, facing, width=5, depth=3, wood="spruce", post="spruce_log", roof="spruce_stairs", steps=0, path=2,
+          path_block="dirt_path", door=True):
+    """A covered porch at a door: the door at (x, y, z) in the wall (facing out), a plank deck at y-1 in front of it
+    (`width` wide, `depth` deep), log posts on the front corners, beams at y+3, a low roof at y+4 with stair edges, a
+    lantern under the front beam, `steps` stairs down from the deck (the ground is then `steps` lower than the deck)
+    and a `path` of path blocks leading away. Keeps 3 free blocks over the deck."""
+    dx, dz = _dir(facing)
+    px, pz = (1, 0) if _AXIS[facing] == "x" else (0, 1)
+    back = OPP[facing]
+    half = max(1, int(width) // 2)
+    depth = max(2, int(depth))
+    steps, path = max(0, int(steps)), max(0, int(path))
+    planks = wood + "_planks"
+    rst = _stairs(roof)
+    slab = rst[:-7] + "_slab"
+    left, right = ("west", "east") if px else ("north", "south")
+
+    def at(k, w):
+        return x + dx * k + px * w, z + dz * k + pz * w
+    out = [f"# porch facing {facing}, {2 * half + 1} wide, {depth} deep"]
+    base = y - 1 - steps
+    for k in range(1, depth + 1):
+        for w in range(-half, half + 1):
+            cx, cz = at(k, w)
+            if steps:
+                out.append(f"fill({cx}, {base}, {cz}, {cx}, {y - 2}, {cz}, 'cobblestone')")
+            out.append(f"block({cx}, {y - 1}, {cz}, {planks!r})")
+            out.append(f"fill({cx}, {y}, {cz}, {cx}, {y + 2}, {cz}, 'air')")
+    for w in (-half, half):
+        cx, cz = at(depth, w)
+        out.append(f"fill({cx}, {y}, {cz}, {cx}, {y + 2}, {cz}, {_st(post, axis='y')})")
+    for w in range(-half, half + 1):
+        cx, cz = at(depth, w)
+        out.append(f"block({cx}, {y + 3}, {cz}, {_st(post, axis=_AXIS[facing])})")
+    for k in range(1, depth):
+        for w in (-half, half):
+            cx, cz = at(k, w)
+            out.append(f"block({cx}, {y + 3}, {cz}, {_st(post, axis=_AXIS[left])})")
+    for k in range(1, depth + 2):
+        for w in range(-half - 1, half + 2):
+            cx, cz = at(k, w)
+            if k == depth + 1 and abs(w) == half + 1:
+                st = _st(slab, type="top")                           # corner: no stair turns on one block
+            elif k == depth + 1:
+                st = _st(rst, facing=back, half="bottom")
+            elif w == -half - 1:
+                st = _st(rst, facing=right, half="top")              # top halves: the porch roof can sit under eaves
+            elif w == half + 1:
+                st = _st(rst, facing=left, half="top")
+            else:
+                st = _st(slab, type="top")
+            out.append(f"block({cx}, {y + 4}, {cz}, {st})")
+    cx, cz = at(depth, 0)
+    out.append(f"block({cx}, {y + 2}, {cz}, {_st('lantern', hanging=True)})")
+    for i in range(steps):
+        for w in (-1, 0, 1):
+            cx, cz = at(depth + 1 + i, w)
+            if y - 2 - i >= base:
+                out.append(f"fill({cx}, {base}, {cz}, {cx}, {y - 2 - i}, {cz}, 'cobblestone')")
+            out.append(f"block({cx}, {y - 1 - i}, {cz}, "
+                       f"{_st(_stairs(wood), facing=back, half='bottom', shape='straight')})")
+    for i in range(path):
+        for w in (-1, 0, 1):
+            cx, cz = at(depth + 1 + steps + i, w)
+            out.append(f"block({cx}, {base - 1}, {cz}, 'dirt')")
+            out.append(f"block({cx}, {base}, {cz}, {path_block!r})")
+    if door:
+        out.append(f"block({x}, {y - 1}, {z}, {planks!r})")
+        out.append(f"block({x}, {y}, {z}, {_st(wood + '_door', facing=facing, half='lower', hinge='left', open=False)})")
+        out.append(f"block({x}, {y + 1}, {z}, {_st(wood + '_door', facing=facing, half='upper', hinge='left', open=False)})")
+    return _code(out)
+
+
+def balcony(x, y, z, facing, length=5, depth=2, wood="spruce", post="spruce_log", ground_y=None, door=False):
+    """A balcony: a plank floor at height y sticking out `depth` blocks on the `facing` side of a wall, `length` blocks
+    along it from (x, z) (the floor cell next to the wall; length runs east or south). A fence railing round the open
+    edges, log posts with lanterns on the outer corners, upside-down stair brackets under the floor at both ends, and
+    posts down to ground_y (the top block of the ground) when given. door=True puts a door in the wall behind the middle."""
+    dx, dz = _dir(facing)
+    px, pz = (1, 0) if _AXIS[facing] == "x" else (0, 1)
+    length, depth = max(3, int(length)), max(1, int(depth))
+    fence = wood + "_fence"
+
+    def at(k, w):
+        return x + dx * k + px * w, z + dz * k + pz * w
+    out = [f"# balcony facing {facing}, {length} x {depth}, floor at y={y}"]
+    for k in range(depth):
+        for w in range(length):
+            cx, cz = at(k, w)
+            out.append(f"block({cx}, {y}, {cz}, {wood + '_planks'!r})")
+            if k == depth - 1 and w in (0, length - 1):
+                out.append(f"block({cx}, {y + 1}, {cz}, {_st(post, axis='y')})")
+                out.append(f"block({cx}, {y + 2}, {cz}, {_st('lantern', hanging=False)})")
+            elif k == depth - 1 or w in (0, length - 1):
+                out.append(f"block({cx}, {y + 1}, {cz}, {fence!r})")
+    for w in (0, length - 1):
+        for k in range(depth):
+            cx, cz = at(k, w)
+            out.append(f"block({cx}, {y - 1}, {cz}, {_st(_stairs(wood), facing=OPP[facing], half='top')})")
+        cx, cz = at(depth - 1, w)
+        if ground_y is not None and int(ground_y) < y - 1:
+            out.append(f"fill({cx}, {int(ground_y) + 1}, {cz}, {cx}, {y - 1}, {cz}, {_st(post, axis='y')})")
+    if door:
+        cx, cz = at(-1, length // 2)
+        out.append(f"block({cx}, {y + 1}, {cz}, {_st(wood + '_door', facing=facing, half='lower', hinge='left', open=False)})")
+        out.append(f"block({cx}, {y + 2}, {cz}, {_st(wood + '_door', facing=facing, half='upper', hinge='left', open=False)})")
+    return _code(out)
+
+
+def _emit(cells):
+    """Script lines for {(x, y, z): state text}: runs of the same state along x or z become one fill()."""
+    out, done = [], set()
+    for (x, y, z) in sorted(cells, key=lambda p: (p[1], p[2], p[0])):
+        if (x, y, z) in done:
+            continue
+        st = cells[(x, y, z)]
+        x2 = x
+        while (x2 + 1, y, z) in cells and cells[(x2 + 1, y, z)] == st and (x2 + 1, y, z) not in done:
+            x2 += 1
+        z2 = z
+        if x2 == x:
+            while (x, y, z2 + 1) in cells and cells[(x, y, z2 + 1)] == st and (x, y, z2 + 1) not in done:
+                z2 += 1
+        for xx in range(x, x2 + 1):
+            for zz in range(z, z2 + 1):
+                done.add((xx, y, zz))
+        if (x2, z2) == (x, z):
+            out.append(f"block({x}, {y}, {z}, {st})")
+        else:
+            out.append(f"fill({x}, {y}, {z}, {x2}, {y}, {z2}, {st})")
+    return out
+
+
+def _is_roof_piece(st):
+    """A bottom stair or bottom slab: the roof pieces the path checks would read as steps."""
+    return ("_stairs'" in st and "half='bottom'" in st) or ("_slab'" in st and "type='bottom'" in st)
+
+
+def _settle(cells, trim_block=None):
+    """Clean up where roofs overlap. A stair or slab with any block 1-2 above it is hidden under another roof (it would
+    read as a step with no head room): removed. Where two slopes meet in a valley (stairs facing across each other)
+    the stair becomes a full `trim_block`, a valley rafter, so no stair turns or jumps on the roof."""
+    for (x, y, z) in list(cells):
+        st = cells.get((x, y, z))
+        if st and _is_roof_piece(st) and ((x, y + 1, z) in cells or (x, y + 2, z) in cells):
+            del cells[(x, y, z)]
+    if trim_block:
+        def facing(st):
+            return st.split("facing=", 1)[1].split("'", 2)[1] if "_stairs'" in st and "facing=" in st else None
+        for (x, y, z) in sorted(cells):
+            st = cells[(x, y, z)]
+            if not _is_roof_piece(st):
+                continue
+            f = facing(st)
+            for name_, (a, c) in DIRS.items():
+                bad = False
+                for dy in (-1, 0, 1):
+                    q = cells.get((x + a, y + dy, z + c))
+                    if not q or not _is_roof_piece(q):
+                        continue
+                    g = facing(q)
+                    if f and g and g != f and g != OPP[f]:
+                        bad = True                                   # two slopes meet across each other
+                    elif dy == 1 and f != name_:
+                        bad = True                                   # a step up that is not this slope going on
+                if bad:
+                    cells[(x, y, z)] = repr(trim_block)
+                    break
+    return cells
+
+
+def _gable_cells(x1, z1, x2, z2, y, stairs, trim, ridge, o, fill, ends, rafter=True):
+    """{(x, y, z): state text} of a trimmed gable roof (see gable_roof_trim)."""
+    tslab = _st(trim[:-7] + "_slab", type="bottom")
+    lo_f, hi_f = ("south", "north") if ridge == "x" else ("east", "west")
+    if ridge == "x":
+        a, b = z1 - o, z2 + o
+        run = list(range(x1 - (o if "lo" in ends else 0), x2 + (o if "hi" in ends else 0) + 1))
+        gab, glo, ghi = (z1, z2), x1, x2
+    else:
+        a, b = x1 - o, x2 + o
+        run = list(range(z1 - (o if "lo" in ends else 0), z2 + (o if "hi" in ends else 0) + 1))
+        gab, glo, ghi = (x1, x2), z1, z2
+
+    def put(v, c, yy, st):
+        cells[(v, yy, c) if ridge == "x" else (c, yy, v)] = st
+    cells = {}
+    k = 0
+    while a + k <= b - k:
+        yy = y + k
+        for v in run:
+            edge = (v == run[0] and "lo" in ends) or (v == run[-1] and "hi" in ends)
+            mat = trim if edge or k == 0 else stairs
+            if a + k == b - k:
+                put(v, a + k, yy, tslab)
+            elif a + k + 1 == b - k:                                 # even span: the top pair is the trim ridge
+                put(v, a + k, yy, _st(trim, facing=lo_f, half="bottom"))
+                put(v, b - k, yy, _st(trim, facing=hi_f, half="bottom"))
+            else:
+                put(v, a + k, yy, _st(mat, facing=lo_f, half="bottom"))
+                put(v, b - k, yy, _st(mat, facing=hi_f, half="bottom"))
+                if k < o and a + k + 1 < b - k - 1:                  # soffit under the overhang: it holds the eave up
+                    put(v, a + k + 1, yy, _st(trim, facing=hi_f, half="top"))
+                    put(v, b - k - 1, yy, _st(trim, facing=lo_f, half="top"))
+        if fill:
+            for c in range(max(a + k + 1, gab[0]), min(b - k - 1, gab[1]) + 1):
+                for g, e in ((glo, "lo"), (ghi, "hi")):
+                    if e in ends:
+                        put(g, c, yy, repr(fill))
+        k += 1
+    if rafter and len(ends) < 2:                                     # the joint with the taller building: a rafter
+        v = run[0] if "lo" not in ends else run[-1]
+        for key in [p for p in cells if (p[0] if ridge == "x" else p[2]) == v]:
+            cells[key] = repr(trim[:-7] + "_planks" if trim[:-7] in WOOD_NAMES else trim[:-7])
+    return cells
+
+
+def _gable_args(x1, z1, x2, z2, ridge, open_end):
+    x1, x2 = sorted((x1, x2))
+    z1, z2 = sorted((z1, z2))
+    ridge = ridge or ("x" if x2 - x1 >= z2 - z1 else "z")
+    if ridge not in ("x", "z"):
+        raise ValueError("ridge must be 'x' or 'z'")
+    lo, hi = ("west", "east") if ridge == "x" else ("north", "south")
+    if open_end not in (None, lo, hi):
+        raise ValueError(f"open_end must be {lo!r} or {hi!r} for ridge {ridge!r}")
+    ends = tuple(e for e, n in (("lo", lo), ("hi", hi)) if n != open_end)
+    if open_end == hi:
+        x2, z2 = (x2 - 1, z2) if ridge == "x" else (x2, z2 - 1)
+    elif open_end == lo:
+        x1, z1 = (x1 + 1, z1) if ridge == "x" else (x1, z1 + 1)
+    return x1, z1, x2, z2, ridge, ends
+
+
+def gable_roof_trim(x1, z1, x2, z2, y, stairs="spruce_stairs", trim="dark_oak", ridge=None, overhang=1, fill="oak_planks",
+                    open_end=None):
+    """A gable roof with a trim over the walls x1..x2, z1..z2 (eaves at y): `stairs` slopes; the eave row, the barge
+    boards on the gable ends and the ridge in `trim`; eaves `overhang` blocks past the walls (2 when the walls have a
+    frame sticking out); gable triangles filled with `fill`. ridge 'x' or 'z' (default: along the longer side).
+    open_end = 'west'/'east' (ridge x) or 'north'/'south' (ridge z): that end joins a taller building, so no overhang,
+    barge or gable there and the roof stops 1 block short of that wall."""
+    x1, z1, x2, z2, ridge, ends = _gable_args(x1, z1, x2, z2, ridge, open_end)
+    o = max(0, int(overhang))
+    cells = _gable_cells(x1, z1, x2, z2, y, _stairs(stairs), _stairs(trim), ridge, o, fill, ends)
+    return _code([f"# gable roof, {_stairs(trim)[:-7]} trim, x {x1}..{x2}, z {z1}..{z2}, eaves at y={y}, overhang {o}"]
+                 + _emit(_settle(cells)))
+
+
+def hip_roof_trim(x1, z1, x2, z2, y, stairs="spruce_stairs", trim="dark_oak", overhang=1, fill="oak_planks"):
+    """A four-sided (hip) roof over the walls x1..x2, z1..z2, eaves at y, `overhang` past the walls; the eave ring and the
+    ridge cap in `trim`; each ring of stairs stands on a ring of `fill` so nothing floats."""
+    x1, x2 = sorted((x1, x2))
+    z1, z2 = sorted((z1, z2))
+    o = max(0, int(overhang))
+    stairs, tst = _stairs(stairs), _stairs(trim)
+    cells = {}
+    ax, bx, az, bz = x1 - o, x2 + o, z1 - o, z2 + o
+    k = 0
+    while ax + k <= bx - k and az + k <= bz - k:
+        yy = y + k
+        lx, hx, lz, hz = ax + k, bx - k, az + k, bz - k
+        if k:
+            for xx in range(lx, hx + 1):
+                for zz in range(lz, hz + 1):
+                    if xx in (lx, hx) or zz in (lz, hz):
+                        cells[(xx, yy - 1, zz)] = repr(fill)
+        if hx - lx <= 1 or hz - lz <= 1:
+            for xx in range(lx, hx + 1):
+                for zz in range(lz, hz + 1):
+                    cells[(xx, yy, zz)] = _st(tst[:-7] + "_slab", type="bottom")
+            break
+        mat = tst if k == 0 else stairs
+        for xx in range(lx, hx + 1):
+            for zz in range(lz, hz + 1):
+                if zz == lz:
+                    cells[(xx, yy, zz)] = _st(mat, facing="south", half="bottom")
+                elif zz == hz:
+                    cells[(xx, yy, zz)] = _st(mat, facing="north", half="bottom")
+                elif xx == lx:
+                    cells[(xx, yy, zz)] = _st(mat, facing="east", half="bottom")
+                elif xx == hx:
+                    cells[(xx, yy, zz)] = _st(mat, facing="west", half="bottom")
+        k += 1
+    for (xx, yy, zz) in list(cells):                                 # corners: a slab, so no stair turns on one block
+        if (xx in (ax + yy - y, bx - yy + y)) and (zz in (az + yy - y, bz - yy + y)) and _is_roof_piece(cells[(xx, yy, zz)]):
+            cells[(xx, yy, zz)] = _st(tst[:-7] + "_slab", type="bottom")
+    return _code([f"# hip roof, {tst[:-7]} trim, x {x1}..{x2}, z {z1}..{z2}, eaves at y={y}"] + _emit(_settle(cells)))
+
+
+def cross_gable_roof(x1, z1, x2, z2, y, stairs="spruce_stairs", trim="dark_oak", fill="oak_planks", front="south",
+                     wing=None, overhang=1):
+    """A layered roof: a trimmed gable roof along the long side of x1..x2, z1..z2 plus a lower cross gable over the
+    middle of the `front` wall with its own gable end facing out, `wing` blocks wide (odd; default about a third of the
+    front). It breaks a long plain roof plane like the big survival manors."""
+    x1, x2 = sorted((x1, x2))
+    z1, z2 = sorted((z1, z2))
+    front = str(front).lower()
+    _dir(front)
+    along_x = front in ("north", "south")
+    span, depth = ((x2 - x1), (z2 - z1)) if along_x else ((z2 - z1), (x2 - x1))
+    w = int(wing) if wing else max(3, (span + 1) // 3)
+    w = max(3, min(w, depth - 2, span - 2))
+    w -= 1 - w % 2
+    o = max(0, int(overhang))
+    st, tr = _stairs(stairs), _stairs(trim)
+    cells = _gable_cells(*_gable_args(x1, z1, x2, z2, "x" if along_x else "z", None)[:4], y, st, tr,
+                         "x" if along_x else "z", o, fill, ("lo", "hi"))
+    c = ((x1 + x2) if along_x else (z1 + z2)) // 2
+    a, b = c - w // 2, c + w // 2
+    if along_x:
+        mid = (z1 + z2) // 2
+        box = (a, mid, b, z2) if front == "south" else (a, z1, b, mid)
+        args = _gable_args(*box, "z", "north" if front == "south" else "south")
+    else:
+        mid = (x1 + x2) // 2
+        box = (mid, a, x2, b) if front == "east" else (x1, a, mid, b)
+        args = _gable_args(*box, "x", "west" if front == "east" else "east")
+    cross = _gable_cells(*args[:4], y, st, tr, args[4], o, fill, args[5], rafter=False)
+    for (cx, cy, cz), s in cross.items():                         # the cross gable wins where it is higher
+        top = max((yy for (xx, yy, zz) in cells if (xx, zz) == (cx, cz)), default=None)
+        if top is None or cy >= top or not _is_roof_piece(s):
+            for yy in [yy for (xx, yy, zz) in cells if (xx, zz) == (cx, cz) and yy < cy and _is_roof_piece(cells[(xx, yy, zz)])]:
+                del cells[(cx, yy, cz)]
+            cells[(cx, cy, cz)] = s
+    return _code([f"# layered roof: gable over x {x1}..{x2}, z {z1}..{z2} with a cross gable to the {front}, eaves at y={y}"]
+                 + _emit(_settle(cells, tr[:-7] + "_planks" if tr[:-7] in WOOD_NAMES else tr[:-7])))
+
+
+def chimney(x, y, z, height=8, block="bricks", cap="campfire"):
+    """A chimney column at (x, z) from y up `height` blocks of `block`, a lit campfire (smoke) or a `cap` block on top.
+    Put it against a gable wall or through the roof; its top should stand 2+ blocks above the roof around it."""
+    height = max(3, int(height))
+    capst = _st("campfire", lit=True, signal_fire=False) if cap == "campfire" else repr(cap)
+    return _code([f"# chimney at x {x}, z {z}, {height} high",
+                  f"fill({x}, {y}, {z}, {x}, {y + height - 1}, {z}, {block!r})",
+                  f"block({x}, {y + height}, {z}, {capst})"])
+
+
+def stilt_base(x1, z1, x2, z2, y, post="spruce_log", beam="stripped_spruce_log", deck="spruce_planks", spacing=3, depth=16):
+    """A raised floor on stilts for uneven ground or water: a plank deck at y over x1..x2, z1..z2, a log ring beam under
+    its edges at y-1, and posts at the corners and every `spacing` blocks along the edges that go down from y-2 until
+    they reach the ground (at most `depth` blocks). Build the house on the deck."""
+    x1, x2 = sorted((x1, x2))
+    z1, z2 = sorted((z1, z2))
+    posts = set()
+    for xx in list(range(x1, x2 + 1, max(2, int(spacing)))) + [x2]:
+        posts.update({(xx, z1), (xx, z2)})
+    for zz in list(range(z1, z2 + 1, max(2, int(spacing)))) + [z2]:
+        posts.update({(x1, zz), (x2, zz)})
+    return _code([f"# stilt base x {x1}..{x2}, z {z1}..{z2}, deck at y={y}",
+                  f"fill({x1}, {y}, {z1}, {x2}, {y}, {z2}, {deck!r})",
+                  f"fill({x1}, {y - 1}, {z1}, {x2}, {y - 1}, {z1}, {_st(beam, axis='x')})",
+                  f"fill({x1}, {y - 1}, {z2}, {x2}, {y - 1}, {z2}, {_st(beam, axis='x')})",
+                  f"fill({x1}, {y - 1}, {z1 + 1}, {x1}, {y - 1}, {z2 - 1}, {_st(beam, axis='z')})",
+                  f"fill({x2}, {y - 1}, {z1 + 1}, {x2}, {y - 1}, {z2 - 1}, {_st(beam, axis='z')})",
+                  f"for px, pz in {sorted(posts)!r}:",
+                  f"    yy = {y - 2}",
+                  f"    while yy > {y - 2 - max(1, int(depth))} and is_air(px, yy, pz):",
+                  f"        block(px, yy, pz, {_st(post, axis='y')})",
+                  "        yy -= 1"])
+
+
+def farm_plot(x, y, z, w=7, l=7, crop="wheat", fence="oak_fence", border="spruce_log"):
+    """A fenced crop field: farmland at y-1 over w x l cells from the north-west corner (x, z), a water channel across
+    the middle (on dirt at y-2), ripe `crop` (wheat, carrots, potatoes, beetroots), a log border under a fence with a
+    gate in the middle of the south side and lanterns on the north corners. Keep w and l at 9 or less."""
+    w, l = max(3, int(w)), max(3, int(l))
+    if w > 9 or l > 9:
+        raise ValueError("keep a plot to 9 x 9 or smaller so the water reaches every crop (use more plots)")
+    age = 3 if crop == "beetroots" else 7
+    wz = z + l // 2
+    return _code([f"# farm plot {w} x {l} of {crop}",
+                  f"fill({x - 1}, {y - 1}, {z - 1}, {x + w}, {y - 1}, {z + l}, {_st(border, axis='x')})",
+                  f"fill({x}, {y - 1}, {z}, {x + w - 1}, {y - 1}, {z + l - 1}, {_st('farmland', moisture=7)})",
+                  f"fill({x}, {y - 2}, {wz}, {x + w - 1}, {y - 2}, {wz}, 'dirt')",
+                  f"fill({x}, {y - 1}, {wz}, {x + w - 1}, {y - 1}, {wz}, 'water')",
+                  f"fill({x}, {y}, {z}, {x + w - 1}, {y}, {z + l - 1}, {_st(crop, age=age)})",
+                  f"fill({x}, {y}, {wz}, {x + w - 1}, {y}, {wz}, 'air')",
+                  f"fill({x - 1}, {y}, {z - 1}, {x + w}, {y}, {z - 1}, {fence!r})",
+                  f"fill({x - 1}, {y}, {z + l}, {x + w}, {y}, {z + l}, {fence!r})",
+                  f"fill({x - 1}, {y}, {z}, {x - 1}, {y}, {z + l - 1}, {fence!r})",
+                  f"fill({x + w}, {y}, {z}, {x + w}, {y}, {z + l - 1}, {fence!r})",
+                  f"block({x + w // 2}, {y}, {z + l}, {_st(fence + '_gate', facing='south', open=False)})",
+                  f"block({x - 1}, {y}, {z - 1}, {_st(border, axis='y')})",
+                  f"block({x + w}, {y}, {z - 1}, {_st(border, axis='y')})",
+                  f"block({x - 1}, {y + 1}, {z - 1}, {_st('lantern', hanging=False)})",
+                  f"block({x + w}, {y + 1}, {z - 1}, {_st('lantern', hanging=False)})"])
+
+
+def fence_garden(x1, z1, x2, z2, y, fence="oak_fence", gates=("south",), flowers=("poppy", "dandelion", "cornflower", "allium"),
+                 path_block="dirt_path"):
+    """A fenced garden on grass: grass at y-1 over x1..x2, z1..z2 (dirt under it), a fence ring at y with a gate in the
+    middle of each side in `gates`, a path of `path_block` from every gate to the middle, flower rows and leaf bushes."""
+    x1, x2 = sorted((x1, x2))
+    z1, z2 = sorted((z1, z2))
+    if x2 - x1 < 4 or z2 - z1 < 4:
+        raise ValueError("a garden needs at least 5 x 5 blocks")
+    cx, cz = (x1 + x2) // 2, (z1 + z2) // 2
+    out = [f"# fenced garden x {x1}..{x2}, z {z1}..{z2}",
+           f"fill({x1}, {y - 2}, {z1}, {x2}, {y - 2}, {z2}, 'dirt')",
+           f"fill({x1}, {y - 1}, {z1}, {x2}, {y - 1}, {z2}, 'grass_block')",
+           f"fill({x1}, {y}, {z1}, {x2}, {y}, {z1}, {fence!r})",
+           f"fill({x1}, {y}, {z2}, {x2}, {y}, {z2}, {fence!r})",
+           f"fill({x1}, {y}, {z1 + 1}, {x1}, {y}, {z2 - 1}, {fence!r})",
+           f"fill({x2}, {y}, {z1 + 1}, {x2}, {y}, {z2 - 1}, {fence!r})"]
+    gate_at = {"north": (cx, z1), "south": (cx, z2), "west": (x1, cz), "east": (x2, cz)}
+    path = set()
+    for g in gates or ():
+        g = str(g).lower()
+        if g not in gate_at:
+            raise ValueError(f"gate side must be north, south, east or west (got {g!r})")
+        gx, gz = gate_at[g]
+        out.append(f"block({gx}, {y}, {gz}, {_st(fence + '_gate', facing=g, open=False)})")
+        dx, dz = DIRS[OPP[g]]
+        px_, pz_ = gx + dx, gz + dz
+        while x1 < px_ < x2 and z1 < pz_ < z2:
+            path.add((px_, pz_))
+            if (px_, pz_) == (cx, cz):
+                break
+            px_, pz_ = px_ + dx, pz_ + dz
+    for (px_, pz_) in sorted(path):
+        out.append(f"block({px_}, {y - 1}, {pz_}, {path_block!r})")
+    fl = list(flowers or ("poppy",))
+    i = 0
+    for xx in range(x1 + 1, x2):
+        for zz in range(z1 + 1, z2):
+            if (xx, zz) in path:
+                continue
+            if xx in (x1 + 1, x2 - 1) and zz in (z1 + 1, z2 - 1):
+                out.append(f"block({xx}, {y}, {zz}, {_st('oak_leaves', persistent=True)})")
+            elif (xx + zz) % 2 == 0:
+                out.append(f"block({xx}, {y}, {zz}, {fl[i % len(fl)]!r})")
+                i += 1
+    return _code(out)
+
+
+def site(x1, z1, x2, z2, y, top="grass_block", under="dirt"):
+    """The ground plot a house stands on: `under` at y-1 and `top` at y over x1..x2, z1..z2. Build the house's
+    foundation at y (it replaces the grass) and the rest on top."""
+    x1, x2 = sorted((x1, x2))
+    z1, z2 = sorted((z1, z2))
+    return _code([f"# ground plot x {x1}..{x2}, z {z1}..{z2}",
+                  f"fill({x1}, {y - 1}, {z1}, {x2}, {y - 1}, {z2}, {under!r})",
+                  f"fill({x1}, {y}, {z1}, {x2}, {y}, {z2}, {top!r})"])
+
+
+def road(points, y, width=3, block="dirt_path", under="dirt"):
+    """A street or garden path through `points` ([[x, z], ...], at least 2): `block` at y with `under` below it,
+    `width` wide, straight or diagonal between the points. Several points make it bend; follow the ground and the
+    houses instead of one straight line. For a climb use straight_stair_run between two flat parts."""
+    pts = [(int(p[0]), int(p[1])) for p in points or []]
+    if len(pts) < 2:
+        raise ValueError("a road needs at least 2 points [x, z]")
+    width = max(1, int(width))
+    lo = -((width - 1) // 2)
+    cells = set()
+    for (ax, az), (bx, bz) in zip(pts, pts[1:]):
+        n = max(abs(bx - ax), abs(bz - az), 1)
+        for i in range(n + 1):
+            cx = ax + round((bx - ax) * i / n)
+            cz = az + round((bz - az) * i / n)
+            for w in range(lo, lo + width):
+                cells.add((cx + w, cz))
+                cells.add((cx, cz + w))
+    out = [f"# road through {len(pts)} points, {width} wide"]
+    for (cx, cz) in sorted(cells):
+        out.append(f"block({cx}, {y - 1}, {cz}, {under!r})")
+        out.append(f"block({cx}, {y}, {cz}, {block!r})")
+    return _code(out)
+
+
+def plaza(x1, z1, x2, z2, y, block="stone_bricks", well=True):
+    """A paved square: `block` at y over x1..x2, z1..z2 (dirt under it) with a roofed well in the middle when `well`
+    and a lantern on a post at each corner. Make it 7 x 7 or bigger so it reads as a square, not a road."""
+    x1, x2 = sorted((x1, x2))
+    z1, z2 = sorted((z1, z2))
+    if x2 - x1 < 4 or z2 - z1 < 4:
+        raise ValueError("a plaza needs at least 5 x 5 blocks")
+    cx, cz = (x1 + x2) // 2, (z1 + z2) // 2
+    out = [f"# plaza x {x1}..{x2}, z {z1}..{z2}",
+           f"fill({x1}, {y - 1}, {z1}, {x2}, {y - 1}, {z2}, 'dirt')",
+           f"fill({x1}, {y}, {z1}, {x2}, {y}, {z2}, {block!r})"]
+    for (px, pz) in ((x1, z1), (x1, z2), (x2, z1), (x2, z2)):
+        out += [f"fill({px}, {y + 1}, {pz}, {px}, {y + 2}, {pz}, {_st('spruce_log', axis='y')})",
+                f"block({px}, {y + 3}, {pz}, {_st('lantern', hanging=False)})"]
+    if well and x2 - x1 >= 6 and z2 - z1 >= 6:
+        out += [f"fill({cx - 1}, {y - 2}, {cz - 1}, {cx + 1}, {y - 1}, {cz + 1}, 'cobblestone')",
+                f"fill({cx - 1}, {y}, {cz - 1}, {cx + 1}, {y}, {cz + 1}, 'cobblestone')",
+                f"block({cx}, {y}, {cz}, 'water')",
+                f"block({cx}, {y - 1}, {cz}, 'water')"]
+        for (px, pz) in ((cx - 1, cz - 1), (cx - 1, cz + 1), (cx + 1, cz - 1), (cx + 1, cz + 1)):
+            out.append(f"fill({px}, {y + 1}, {pz}, {px}, {y + 2}, {pz}, 'cobblestone_wall')")
+        out.append(f"fill({cx - 1}, {y + 3}, {cz - 1}, {cx + 1}, {y + 3}, {cz + 1}, {_st('spruce_slab', type='bottom')})")
+    return _code(out)
