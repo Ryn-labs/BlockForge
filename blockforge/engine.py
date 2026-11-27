@@ -589,8 +589,9 @@ def _generate_loop(text, size, model, usage, prompt, image_path, log):
 
 
 def generate(prompt, size="medium", palette="auto", model=None, engine=None, image=None, parent_id=None,
-             research=None, redstone=None, use_mods=None, log=print):
-    """image: (bytes, mime). Returns the saved build's meta."""
+             research=None, redstone=None, use_mods=None, log=print, build_mode=None):
+    """image: (bytes, mime). Returns the saved build's meta.
+    build_mode: "step_by_step" or "script" (default: the setting). engine="claude_loop" means step by step with Claude Code."""
     if len(prompt or "") > 500_000:
         raise EngineError(f"That prompt is about {len(prompt):,} characters. That's more than fits in one request, even for "
                           "the largest models (about 500,000 characters). Keep the most important parts and try again.")
@@ -598,10 +599,24 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
     engine = engine or settings.get("engine", "claude_code")
     if engine not in CLAUDE_ENGINES and engine not in PROVIDERS:
         engine = "claude_code"
-    if engine == "claude_code" and settings.get("build_mode") == "loop" and not parent_id:
-        engine = "claude_loop"
-    if engine == "claude_loop" and (parent_id or find_claude() is None):
-        engine = "claude_code"                       # edits keep the script path; no Claude Code means no loop
+    mode = store.normalize_build_mode(build_mode or settings.get("build_mode"))
+    if engine == "claude_loop":
+        mode = "step_by_step"
+        engine = "claude_code"
+    if mode == "step_by_step":
+        why = None
+        if parent_id:
+            why = "this is an edit"
+        elif engine != "claude_code":
+            why = f"{engine_label(engine)} builds with a script"
+        elif find_claude() is None:
+            why = "Claude Code isn't installed"
+        if why:
+            if build_mode or settings.get("build_mode") == "step_by_step":
+                log(f"Using the one-script build mode because {why}.")
+            mode = "script"
+        else:
+            engine = "claude_loop"
     if engine in CLAUDE_ENGINES:
         model = model if model in MODELS else settings.get("model", "claude-opus-5-5")
     else:
