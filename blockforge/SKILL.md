@@ -13,13 +13,14 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 - plan_layout(session, area, parts, street_width) - spots for many buildings and the streets between them (see Big builds).
 - view(session, sides) - pictures of north / east / south / west / top. Do this after every part.
 - check(session) - every problem found (floating parts, buried or jumpy paths, wrong stairs, blocked doors, head room).
+- review(session) - pictures of every side, the quality score with what to fix and where, and a rubric to score yourself.
 - walk_test(session, path) - walk a path of [x, z] points; reports jumps, low head room, missing floor.
 - undo(session, steps), history(session), describe(session) - take back, list steps, text map of the build.
 - save_build(session, title) - final fix-up pass, saves the build, returns the 3D preview link. Give the link to the
   user exactly as returned.
 - lessons() - what earlier builds taught. style_sheet(style) - palette, shapes and details of a style (unknown name lists them).
-- pattern(name, args) - proven parts as script text for build_step: stairs, landings, doorway, window, lantern post, house
-  shell with roof, bridge, tree (unknown name lists them with their arguments).
+- pattern(name, args) - proven parts as script text for build_step: house bodies, framed walls, windows with boxes, porch,
+  balcony, trimmed roofs, chimney, stilts, garden, farm, road, plaza, stairs, bridge, tree (unknown name lists them all).
 - block_info(blocks) - what a block state is: solid or not, what it needs to stay, light, properties.
 - create_build / update_build still exist for writing one whole script at once.
 
@@ -30,6 +31,19 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 - For spiral stairs use pattern('spiral_stair' ...) (round tower) or pattern('square_spiral_stair' ...); round_tower_with_stair adds the shell, door and windows.
 - Unsure about a block (needs support? stairs facing? properties)? Call block_info before you place it.
 
+## Houses and towns: start from the proven parts (default)
+Every house or building starts from pattern() parts; fill in between them, never a bare box:
+- Plan the mass first: a main volume plus a lower wing, a porch or a balcony; 2+ roof heights; 3-6 materials with roles
+  (logs for the frame, one wall fill, a different roof, accents).
+- framed_house (or framed_wall) for the walls: log posts and beams stick out 1 block, no flat wall over 5 blocks.
+- gable_roof_trim / hip_roof_trim / cross_gable_roof: overhang 2 over framed walls, trim on the edges and ridge.
+- window_with_box every 3-4 blocks, porch at the door (or balcony), chimney, then fence_garden, farm_plot, a road to
+  the door and lantern_post.
+Towns: plan_layout first, then houses of different sizes, storeys and ridge directions along streets that bend and
+follow the ground (road with several points, stair runs on slopes), a plaza with a well, trees and gardens between the
+houses, one landmark (a hall, temple or castle clearly bigger or taller). Never one straight row of equal houses.
+save_build refuses a building or town that scores below 60; only the user can keep it (keep_quality_user_answer).
+
 ## HOW TO BUILD, PART BY PART
 1. Plan in parts first: footprint and size, floor, walls, doors and windows, roof, inside, paths and decoration.
 2. build_step ONE part (about 10-40 lines of script).
@@ -38,6 +52,7 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 5. Next part. Repeat 2-4.
 6. walk_test the routes people will use (front door to every room, stairs, garden paths). Fix what it finds.
 7. Before save_build: run check and walk_test for every path people will use; fix what they find. Size off target? Fix it. Only the user can keep a wrong size: ask them, then pass their answer as keep_size_user_answer.
+   Then review() and fix every part you score below 4.
 8. save_build and give the user the preview link.
 
 ## Big builds (towns, castles on real land)

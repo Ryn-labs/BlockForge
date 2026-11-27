@@ -13,7 +13,7 @@ import time
 from . import store
 
 PREFIX = "mcp__blockforge__"
-TOOLS = ("block_info", "style_sheet", "lessons", "pattern", "start_build", "build_step", "view", "check", "walk_test", "undo", "history", "ground", "plan_layout", "describe", "save_build",
+TOOLS = ("block_info", "style_sheet", "lessons", "pattern", "start_build", "build_step", "view", "check", "walk_test", "undo", "history", "ground", "plan_layout", "describe", "review", "save_build",
          "get_build_guide")
 TIMEOUT = 1200                  # seconds, same kill timer as the script path
 MAX_TURNS = 80
@@ -70,8 +70,9 @@ def user_text(text, session_id=None):
             "Do not write one big script. " + start + "Plan the build in parts, then for "
             "each part: build_step it (about 10-40 lines), view it, and check it. Fix every problem the check lists with "
             "another build_step (or undo and redo the part). When paths, stairs or doors exist, walk_test the routes people "
-            "will use and fix what it finds. Keep the overall size asked for. Finish with save_build and tell the user the "
-            "preview link exactly as returned.")
+            "will use and fix what it finds. Keep the overall size asked for. For a house, building or town start from "
+            "the proven pattern() parts (see 'Houses and towns'), never a bare box. Before save_build call review and fix "
+            "every part you score below 4. Finish with save_build and tell the user the preview link exactly as returned.")
 
 
 def _describe(name, inp):
@@ -88,6 +89,8 @@ def _describe(name, inp):
         return "Walking the paths"
     if name == "undo":
         return "Taking a step back"
+    if name == "review":
+        return "Reviewing how the build looks"
     if name == "save_build":
         return "Saving the build"
     if name == "ground":
