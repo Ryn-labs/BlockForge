@@ -66,7 +66,7 @@ class LoopEngine(unittest.TestCase):
             return FakeProc(SCRIPT)
 
         with mock.patch.object(engine, "find_claude", return_value="claude"), mock.patch.object(loop, "_spawn", spawn), \
-                mock.patch.object(loop, "newest_build", lambda since: None):     # the id must come from the save result itself
+                mock.patch.object(loop, "newest_build", lambda *a, **k: None):     # the id must come from the save result itself
             meta = engine.generate("A small stone well", size="tiny", engine="claude_loop", research=False, log=lines.append)
         self.assertEqual(store.get_meta(meta["id"])["title"], "Test well")
         self.assertGreater(meta["block_count"], 40)
@@ -88,7 +88,7 @@ class LoopEngine(unittest.TestCase):
     def test_missing_save_keeps_the_unfinished_build(self):
         with mock.patch.object(engine, "find_claude", return_value="claude"), \
                 mock.patch.object(loop, "_spawn", lambda *a: FakeProc(SCRIPT[:3])), \
-                mock.patch.object(loop, "newest_build", lambda since: None):
+                mock.patch.object(loop, "newest_build", lambda *a, **k: None):
             meta = engine.generate("A well", size="tiny", engine="claude_loop", research=False, log=lambda s: None)
             self.assertTrue(meta.get("id"))
 
