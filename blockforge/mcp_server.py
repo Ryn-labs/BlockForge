@@ -536,7 +536,7 @@ def call(name, args):
                              entities=meta.get("entities"), tested=tested)
         learn.log_generation(m, fixes, meta.get("redstone_warnings") or [])
         try:                                                  # look at it like a reviewer would: checks + quality
-            a = selfimprove.assess(blocks)
+            a = selfimprove.assess(blocks, prompt=prompt)
         except Exception:                                     # a broken look must never lose the saved build
             a = None
         bad = a and selfimprove.not_done_text(a, "build", f"update_build with build_id {m['id']} and ONLY the changes")

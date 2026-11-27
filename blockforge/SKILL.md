@@ -32,16 +32,21 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 - Unsure about a block (needs support? stairs facing? properties)? Call block_info before you place it.
 
 ## Houses and towns: start from the proven parts (default)
-House default (unless the user asks otherwise): 2+ storeys, light wall fill with a dark frame, a colored layered roof,
-big framed windows with boxes, a balcony. A small hut or cottage may have one storey. Every house starts from
-pattern() parts; fill in between them, never a bare box:
+House default (unless the user asks otherwise): 2+ storeys, the reference palette - light oak, birch or stripped wood
+fill in an oak or spruce log frame, a teal (or green, red, warm oak) layered roof with an oak trim, big white-framed
+windows (birch shutters and lintel) with a flower box directly under each, a balcony. The house must read LIGHT: the
+quality score measures the colours on the rendered side views and holds a house that reads dark below the gate. Dark
+oak, deepslate, blackstone walls and black or grey roofs only when the user asks for a dark look (dark, gothic, spooky,
+haunted, night, a stronghold). A small hut or cottage may have one storey. Every house starts from pattern() parts;
+fill in between them, never a bare box:
 - Plan the mass first: a main volume plus a lower wing, a porch and balconies; 3 roof heights; 3-6 materials with roles
-  (dark logs for the frame, a light wall fill, a roof in its own colour, accents).
-- framed_house(..., floors=2, style='light') (or framed_wall; birch fill in dark oak logs, also 'oak', 'stripped',
-  'plaster'): posts and beams stick out 1 block, no flat wall over 5 blocks; spacing=5 or 6 leaves bays for 2-wide windows.
-- storey_band between the floors; gable_roof_trim / hip_roof_trim / cross_gable_roof with stairs='teal', 'green',
-  'gray' or 'red' and a wood trim, overhang 2 over framed walls; lower wings get their own lower roof.
-- window_with_box(..., width=2, height=2) in every bay, porch at the door with a balcony over it (balcony door=True),
+  (oak or spruce logs for the frame, a light wall fill, a roof in its own colour, accents).
+- framed_house(..., floors=2) (or framed_wall; default style 'light' = birch fill in oak logs, also 'oak', 'stripped',
+  'plaster'; 'dark' only when asked): posts and beams stick out 1 block, no flat wall over 5 blocks; spacing=5 or 6
+  leaves bays for 2-wide windows.
+- storey_band between the floors; gable_roof_trim / hip_roof_trim / cross_gable_roof (default teal with an oak trim,
+  or stairs='green', 'red', 'brick'), overhang 2 over framed walls; lower wings get their own lower roof.
+- window_with_box(..., width=2, height=2) in every bay (one flower kind per house; no flowers scattered on the walls), porch at the door with a balcony over it (balcony door=True),
   a terrace or second balcony reached by external_stair (straight flights with landings), chimney, then fence_garden,
   farm_plot, a road to the door and lantern_post.
 - Stairs and steps only from patterns: straight_stair_run, external_stair, switchback_landing, porch(steps=...),

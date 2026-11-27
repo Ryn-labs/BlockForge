@@ -23,7 +23,7 @@
 
 ## Common mistakes
 1. A hearth with no smoke hole; leave a 1-block gap or a chimney in the ridge above the campfire.
-2. Using bright oak and birch planks; prefer dark spruce.
+2. A longhouse that reads black: keep spruce for the frame and roof, but break the walls with lighter infill (stripped birch, birch planks or white plaster panels) and warm lit windows unless the user asked for a dark build.
 3. Turf roofs with grass_block placed directly on stairs; use moss_block or podzol and slabs.
 4. Stilts or docks floating over water without posts in the ground.
 5. Lantern posts and hanging lanterns with no beam or ground under them.

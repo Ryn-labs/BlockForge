@@ -25,7 +25,9 @@ class BenchQuality(unittest.TestCase):
     def test_quality_column_uses_the_prompt_for_bench_builds(self):
         for name, prompt, lo, hi in (("bench_wooden_manor_blocks.json", "A wooden manor with log frames, a layered roof, "
                                       "a balcony, window boxes and a terrace garden.", 0, 59),
-                                     ("bench_small_cottage_blocks.json", "A small cottage.", 50, 65)):
+                                     ("bench_dark_manor_1130_blocks.json", "A wooden manor with log frames, a layered "
+                                      "roof, a balcony, window boxes and a terrace garden.", 0, 59),
+                                     ("bench_small_cottage_blocks.json", "A small cottage.", 30, 59)):
             with self.subTest(name):
                 d = tempfile.mkdtemp(prefix="bf-quality-bench-")
                 try:

@@ -72,7 +72,9 @@ def user_text(text, session_id=None):
             "another build_step (or undo and redo the part). When paths, stairs or doors exist, walk_test the routes people "
             "will use and fix what it finds. Keep the overall size asked for. For a house, building or town start from "
             "the proven pattern() parts (see 'Houses and towns'), never a bare box; a house by default has 2+ storeys, "
-            "a light wall fill with a dark frame, a colored layered roof, big framed windows with boxes and a balcony. "
+            "the light reference palette (birch, oak or stripped wood fill in an oak or spruce log frame, a teal or "
+            "colored layered roof with an oak trim, big white-framed windows with a flower box under each) and a "
+            "balcony; dark oak, deepslate or blackstone and black roofs only if the request asks for a dark look. "
             "Before save_build call review and fix "
             "every part you score below 4. Finish with save_build and tell the user the preview link exactly as returned.")
 
@@ -136,7 +138,7 @@ def _look(sid):
     from . import selfimprove, session as _ss
     try:
         s = _ss.load(sid)
-        return selfimprove.assess(s.blocks, s.ground(), s.terrain_blocks, s.size_hint)
+        return selfimprove.assess(s.blocks, s.ground(), s.terrain_blocks, s.size_hint, prompt=s.title)
     except Exception:
         return None
 

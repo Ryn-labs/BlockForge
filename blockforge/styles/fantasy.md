@@ -3,7 +3,7 @@
 ## Palette
 - Walls: white_concrete / quartz_block / calcite (elven); deepslate_bricks / blackstone (dark); amethyst accents; stripped_birch_log
 - Frame: stripped_birch_log, stripped_cherry_log, dark_oak_log for twisted tree-houses
-- Roof: purple / blue / teal dyed terracotta or copper-family stairs (oxidized_cut_copper_stairs), prismarine_brick_stairs, spiral cone roofs
+- Roof: purple / blue / teal dyed terracotta or copper-family stairs (oxidized_cut_copper_stairs), prismarine_brick_stairs, spiral cone roofs (deepslate / blackstone only for a dark or spooky build)
 - Floor: polished_diorite, moss_block, white_terracotta, amethyst_block patches
 - Trim: end_rod, chain, iron_bars, stripped logs, quartz_pillar
 - Accents: amethyst_cluster, glow_berries, sea_lantern, enchanting_table, banners

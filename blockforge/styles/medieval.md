@@ -2,8 +2,8 @@
 
 ## Palette
 - Walls: cobblestone, stone_bricks, mossy_stone_bricks (castle); white_terracotta / birch_planks / stripped oak plaster (timber houses)
-- Frame: dark_oak_log, oak_log (half-timbering with plaster infill)
-- Roof: oak_stairs, spruce_stairs, dark_oak_stairs, stone_brick_stairs (towers), cobblestone_slab caps
+- Frame: oak_log, spruce_log (half-timbering with light plaster infill); dark_oak_log only for a stronghold or a dark build
+- Roof: oak_stairs, spruce_stairs, or teal / red with an oak trim for a manor; stone_brick_stairs (towers), cobblestone_slab caps; dark_oak or deepslate roofs only when asked for a dark look
 - Floor: oak_planks, spruce_planks, cobblestone, stone_bricks, packed dirt_path outside
 - Trim: oak_fence, stripped_oak_log beams, stone_brick_wall battlements, cobblestone_wall
 - Accents: banners, barrels, hay_block, iron_bars windows, oak_trapdoor shutters, chains
@@ -29,3 +29,4 @@
 3. Closing a castle courtyard with buildings; keep the courtyard open.
 4. Modern blocks (concrete, quartz, glass blocks, smooth stone) in the walls.
 5. Doors blocked by steps or fences, rooms without light, towers without a way up.
+6. A timber house that reads near-black (dark oak frame, spruce fill, deepslate roof): keep the infill light and the roof coloured unless the user asked for a dark build.

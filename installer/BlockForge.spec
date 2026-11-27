@@ -19,7 +19,7 @@ if not os.path.isfile(os.path.join(VOICE, "piper", "piper.exe")):
 a = Analysis(
     [os.path.join(APP, "app_main.py")],
     pathex=[ROOT],
-    datas=[(os.path.join(APP, "static"), "blockforge/static"), (os.path.join(APP, "SKILL.md"), "blockforge"), (os.path.join(APP, "lessons.md"), "blockforge"), (os.path.join(APP, "styles"), "blockforge/styles"), (VOICE, "blockforge/voice")],
+    datas=[(os.path.join(APP, "static"), "blockforge/static"), (os.path.join(APP, "SKILL.md"), "blockforge"), (os.path.join(APP, "lessons.md"), "blockforge"), (os.path.join(APP, "styles"), "blockforge/styles"), (os.path.join(APP, "data"), "blockforge/data"), (VOICE, "blockforge/voice")],
     hiddenimports=[
         "blockforge.server", "blockforge.mcp_server", "blockforge._runner", "blockforge.buildkit",
         "blockforge.engine", "blockforge.exporters", "blockforge.prompts", "blockforge.sandbox", "blockforge.store",
