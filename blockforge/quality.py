@@ -6,21 +6,24 @@ score(blocks, size=None, prompt=None) -> {"total": 0-100 or None, "building": bo
 Only buildings are scored: something with at least one closed room (walls on all four sides, a roof over it and 2 blocks
 of head room). Bridges, trees, terrain, statues and walls get total None (neutral, never gated).
 
-The twelve parts and their weights (docs/QUALITY.md has the rules behind the numbers):
-  contrast 16   on the render: a light wall fill (oak, birch, stripped logs, plaster) against the log frame, most of the
+The thirteen parts and their weights (docs/QUALITY.md has the rules behind the numbers):
+  contrast 15   on the render: a light wall fill (oak, birch, stripped logs, plaster) against the log frame, most of the
                 wall seen from outside light; one dark material everywhere is low
-  looks 14      on the render: light walls, a coloured (not near-black or grey) roof, a colour histogram close to the
+  looks 15      on the render: light walls, a coloured (not near-black or grey) roof, a colour histogram close to the
                 nearest reference house (blockforge/data/ref_palette.json)
-  storeys 14    2+ floors (a small house, hut or cottage may have 1), height against length: long and low is low
-  windows 11    glass share of every facade, framed (shutters, box, sill), big windows (4+ panes together)
-  balcony 10    outdoor floors above the ground floor with a railing (balconies, terraces), an outside stair up
-  roof_style 10 a roof colour that stands out from the walls (teal, green, red ...), roof planes at several heights
-  facade 5      wall depth: posts, frames and beams sticking out 1+ from the wall plane; flat runs longer than 5 = penalty
-  roof 5        pitched stair/slab roof, eaves overhanging 1+, a trim or ridge in a second material; flat = big penalty
-  massing 4     main volume + wings/porch/balcony/annex, more than one roof height; a single box is low
-  palette 3     3-6 materials with roles: frame (logs), wall fill, a different roof, accents; 1 material or 10 random = low
-  detail 4      windows per facade metre, framed windows, shutters/boxes/lanterns/fences/pots, a chimney
-  surroundings 4   a path to the door, garden/fence/farm/terrace/light around the house
+  shape 20      on the render: several gables and roof heights from every side (no long single ridge), a taller central
+                block with lower wings either side of the entrance, no straight wall over 9 blocks, a gable, porch or
+                stair at the entrance (a small house needs no wings); a big house with no shape is capped (SHAPE_CAP)
+  storeys 10    2+ floors (a small house, hut or cottage may have 1), height against length: long and low is low
+  windows 10    glass share of every facade, framed (shutters, box, sill), big windows (4+ panes together)
+  balcony 8     outdoor floors above the ground floor with a railing (balconies, terraces), an outside stair up
+  roof_style 8  a roof colour that stands out from the walls (teal, green, red ...), roof planes at several heights
+  facade 4      wall depth: posts, frames and beams sticking out 1+ from the wall plane; flat runs longer than 5 = penalty
+  roof 3        pitched stair/slab roof, eaves overhanging 1+, a trim or ridge in a second material; flat = big penalty
+  massing 2     main volume + wings/porch/balcony/annex, more than one roof height; a single box is low
+  palette 2     3-6 materials with roles: frame (logs), wall fill, a different roof, accents; 1 material or 10 random = low
+  detail 2      windows per facade metre, framed windows, shutters/boxes/lanterns/fences/pots, a chimney
+  surroundings 1   a path to the door, garden/fence/farm/terrace/light around the house
 "Render" = the four side views drawn with render.py's block colours (render.nearest), house cells only. A house that
 reads dark there is held below the gate (DARK_CAP) unless the prompt asks for a dark look (dark_asked).
 """
@@ -35,8 +38,8 @@ from .checks import PATH_BLOCKS, THIN_NAMES, THIN_SUFFIXES, name as _name, props
 from .render import block_color, nearest
 
 QUALITY_MIN = 60                     # save_build and the script engine refuse/fix a building below this (one place)
-WEIGHTS = {"contrast": 16, "looks": 14, "storeys": 14, "windows": 11, "balcony": 10, "roof_style": 10,
-           "facade": 5, "roof": 5, "massing": 4, "palette": 3, "detail": 4, "surroundings": 4}
+WEIGHTS = {"contrast": 15, "looks": 15, "storeys": 10, "windows": 10, "balcony": 8, "roof_style": 8, "shape": 20,
+           "facade": 4, "roof": 3, "massing": 2, "palette": 2, "detail": 2, "surroundings": 1}
 LABELS = {"facade": "Facade depth", "roof": "Roof", "massing": "Massing", "palette": "Palette", "detail": "Detail",
           "surroundings": "Surroundings", "contrast": "Wall contrast", "storeys": "Storeys", "windows": "Windows",
           "balcony": "Balconies", "roof_style": "Roof colour and layers", "looks": "Looks (colours)"}
@@ -727,6 +730,7 @@ def _surroundings(m):
 
 # ------------------------------------------------------------------ colour, storeys, windows, balconies, roof style
 WALL_KINDS = ("full", "frame", "stairs", "slab", "trapdoor", "fence")
+FILL_L = 62                          # lightness from here up reads as a pale fill (birch, stripped birch, plaster), not oak
 LIGHT_L = 45                         # CIE lightness from here up reads as a light wall (oak, birch, stripped logs, plaster)
 LOOK_CLOSE = (0.35, 0.6)             # histogram closeness to the nearest reference: 0 points at the first, full at the second
 DARK_CAP = (35, 65)                  # a house that reads dark (not asked for) scores at most 35 + 65 x brightness (_bright)
@@ -927,6 +931,7 @@ def _view(m):
     nw = max(1, v["wall_cells"])
     v["wall_l"] = sum(L * n for L, n in wl) / nw
     v["light"] = sum(n for L, n in wl if L >= LIGHT_L) / nw
+    v["fill_share"] = sum(n for L, n in wl if L >= FILL_L) / nw     # pale fill: birch, stripped birch, plaster
     if len(frame_l) >= 0.05 * nw and len(fill_l) >= 0.05 * nw:
         v["frame_l"], v["fill_l"] = sum(frame_l) / len(frame_l), sum(fill_l) / len(fill_l)
     elif wl:
@@ -1309,9 +1314,339 @@ def _roof_style(m):
     return score, find, fix
 
 
+# ------------------------------------------------------------------ shape (round 4: massing on the render)
+SHAPE_RUN = (9, 18)                  # straight wall run: full points up to 9 blocks, none from 18
+SHAPE_RIDGE = (12, 24)               # the longest flat ridge seen from a side: full up to 12 blocks, none from 24
+SMALL_FILL = 0.3                     # a small house shows a pale fill (birch, stripped birch, plaster) on 30%+ of its wall
+SHAPE_SMALL = 100                    # a house with this many room columns or fewer needs no wings (a cottage)
+SHAPE_CAP = (30, 70)                 # a big house with no shape (one long box, one ridge) scores at most 30 + 70 x shape
+SIL_KINDS = ("full", "frame", "stairs", "slab", "glass")
+SIDE_OF = {(0, 1): "south", (0, -1): "north", (1, 0): "east", (-1, 0): "west"}
+OPP_SIDE = {"north": "south", "south": "north", "east": "west", "west": "east"}
+
+
+def _profile_peaks(prof, ground):
+    """Peaks of one silhouette (a list of top heights, left to right): [(height, start, end, prominence)] for every
+    plateau higher than both neighbours, its prominence the drop to the higher of the two valleys round it (the ground
+    past the ends)."""
+    runs = []
+    for i, h in enumerate(prof):
+        if runs and runs[-1][0] == h:
+            runs[-1][2] = i
+        else:
+            runs.append([h, i, i])
+    out = []
+    for j, (h, a, b) in enumerate(runs):
+        lh = runs[j - 1][0] if j else ground
+        rh = runs[j + 1][0] if j + 1 < len(runs) else ground
+        if h <= lh or h <= rh:
+            continue
+        lows = []
+        for step in (-1, 1):                                         # of two equal peaks the right one keeps the drop
+            k, low = j + step, h
+            while 0 <= k < len(runs) and (runs[k][0] <= h if step < 0 else runs[k][0] < h):
+                low = min(low, runs[k][0])
+                k += step
+            lows.append(ground if not 0 <= k < len(runs) else low)
+        while a > 0 and prof[a - 1] >= h - 1:                        # the ridge: the top within 1 block (finials,
+            a -= 1                                                   # a cross gable 1 higher are the same ridge)
+        while b + 1 < len(prof) and prof[b + 1] >= h - 1:
+            b += 1
+        out.append((h, a, b, h - max(lows)))
+    return out
+
+
+def _despike(prof):
+    """The outline without spikes: a top 1-2 columns wide standing 2+ blocks over both neighbours (a finial, a post, a
+    flag pole, a chimney the chimney test missed) is cut down to the higher neighbour. A gable seen end-on steps down
+    1 at a time, so it stays."""
+    prof = list(prof)
+    changed = True
+    while changed:
+        changed = False
+        i = 0
+        while i < len(prof):
+            j = i
+            while j + 1 < len(prof) and prof[j + 1] == prof[i]:
+                j += 1
+            if j - i <= 1:
+                lh = prof[i - 1] if i else None
+                rh = prof[j + 1] if j + 1 < len(prof) else None
+                nb = [v for v in (lh, rh) if v is not None]
+                if nb and all(prof[i] - v >= 2 for v in nb) and len(nb) == 2:
+                    for k in range(i, j + 1):
+                        prof[k] = max(nb)
+                    changed = True
+            i = j + 1
+    return prof
+
+
+def _lower_tops(prof, H, ground):
+    """The wing tops of an outline: [(height, column)] of every local top (a gable or a flat ridge, higher than the
+    columns next to it on both sides or on one side and level on the other) at least 4 over the ground and 2+ under H."""
+    out = []
+    for i, h in enumerate(prof):
+        if h < ground + 4 or h > H - 2:
+            continue
+        lh = prof[i - 1] if i else ground
+        rh = prof[i + 1] if i + 1 < len(prof) else ground
+        if h >= lh and h >= rh and (h > lh or h > rh):
+            out.append((h, i))
+    return out
+
+
+def _sloped(prof, a, b):
+    """A pitched peak: the outline steps down 1 block at a time for 2+ steps on a side of the ridge a..b."""
+    for i, step in ((a, -1), (b, 1)):
+        n, k = 0, i
+        while 0 <= k + step < len(prof) and prof[k] - prof[k + step] == 1:
+            n += 1
+            k += step
+        if n >= 2:
+            return True
+    return False
+
+
+def _house_cells(m):
+    """The house as the render shows it for the outline: structural blocks on the building's columns and 2 round
+    them above the foundation; chimneys, lights, fences and props left out."""
+    chim = {(q[0], q[2]) for q in m.chimneys}
+    return {p: m.S[p] for p in m.ST if (p[0], p[2]) in m.F2 and (p[0], p[2]) not in chim and p[1] > m.g
+            and m.K[p] in SIL_KINDS}
+
+
+def _silhouettes(m):
+    """The outline of the house against the sky from each side, on the render (render.nearest of _house_cells):
+    {side: {"top": [heights left to right as the viewer sees it], "across": [the view column of each], "peaks":
+    [(height, start, end, prominence)] with prominence 2+, "ridge": the longest flat peak in blocks, "levels": the roof
+    heights seen (peaks and flat runs of 3+ columns at 4+ over the ground, 2+ apart), "width": columns}}."""
+    if getattr(m, "sil", None) is not None:
+        return m.sil
+    house = _house_cells(m)
+    out = {}
+    for side in ("north", "east", "south", "west"):
+        view = nearest(house, side)
+        tops = {}
+        for (a, v) in view:
+            if v > tops.get(a, -10 ** 9):
+                tops[a] = v
+        if not tops:
+            continue
+        across = list(range(min(tops), max(tops) + 1))
+        if side in ("north", "east"):                                # left to right as the viewer sees it
+            across = across[::-1]
+        prof = _despike([tops.get(a, m.g) for a in across])
+        peaks = [p for p in _profile_peaks(prof, m.g) if p[3] >= 2]
+        ridge = max((b - a + 1 for h, a, b, pr in peaks), default=0)
+        hs = {h for h, a, b, pr in peaks}
+        i = 0
+        while i < len(prof):                                         # flat runs: a wing ridge, a shoulder, a terrace roof
+            j = i
+            while j + 1 < len(prof) and prof[j + 1] == prof[i]:
+                j += 1
+            if j - i >= 2 and prof[i] >= m.g + 4:
+                hs.add(prof[i])
+            i = j + 1
+        levels = []
+        for h in sorted(hs):
+            if not levels or h - levels[-1] >= 2:
+                levels.append(h)
+        out[side] = {"top": prof, "across": across, "peaks": peaks, "ridge": ridge, "levels": levels,
+                     "width": len(prof), "view": view}
+    m.sil = out
+    return out
+
+
+def _wall_runs(m):
+    """The straight runs of the outside walls (the outline of the rooms, seen from each side): [(blocks, side, (x, z) of
+    the first wall cell, (x, z) of the last)], longest first. A step of the wall line in or out (a wing, a bay, a
+    set-back) ends a run; log posts in the wall and inner walls meeting it (rooms side by side) do not. Inner walls
+    between two rooms are not outside walls."""
+    if getattr(m, "runs", None) is not None:
+        return m.runs
+    high = collections.Counter((p[0], p[2]) for p in m.IN)
+    cols = {c for c in m.I if high[c] >= 3}                         # not the 2-high crawl space under a deck on stilts
+    cols = cols if cols else set(m.I)
+    edges = collections.defaultdict(list)
+    for (x, z) in cols:
+        for d in DIRS4:
+            if any((x + d[0] * k, z + d[1] * k) in cols for k in range(1, 5)):
+                continue
+            if d[0]:
+                edges[(d, x)].append(z)
+            else:
+                edges[(d, z)].append(x)
+    runs = []
+    for (d, plane), along in edges.items():
+        along.sort()
+        start = prev = along[0]
+        w = plane + (d[0] or d[1])                                   # the wall line
+        for v in along[1:] + [None]:
+            if v is not None and (v == prev + 1 or (v - prev <= 4 and all(
+                    q in m.cy and q not in cols for q in (((w, g) if d[0] else (g, w)) for g in range(prev + 1, v))))):
+                prev = v                                             # the same wall goes on past an inner wall
+                continue
+            n = prev - start + 3                                     # the wall cells: the room's edge and both corners
+            a, b = ((w, start - 1), (w, prev + 1)) if d[0] else ((start - 1, w), (prev + 1, w))
+            runs.append((n, SIDE_OF[d], a, b))
+            if v is not None:
+                start = prev = v
+    runs.sort(reverse=True)
+    m.runs = runs
+    return runs
+
+
+def _entrance(m):
+    """The side of the main door: the lowest outside doors, the side most of them face. None without a door."""
+    doors = _doors(m)
+    if not doors:
+        return None
+    low = min(p[1] for p, d in doors)
+    cnt = collections.Counter(SIDE_OF[d] for p, d in doors if p[1] <= low + 1)
+    return cnt.most_common(1)[0][0]
+
+
+def _front_feature(m, side):
+    """What the entrance side shows: a gable end facing that way (a sharp peak of the outline with the gable fill, not
+    roof stairs, under its top), a porch (posts and a roof 2-8 blocks in front of the wall line) and a stair or steps
+    (3+ bottom stairs there). Returns (gable, porch, stair)."""
+    s = _silhouettes(m).get(side)
+    gable = False
+    if s:
+        for h, a, b, pr in s["peaks"]:
+            if pr < 3 or b - a > 3:
+                continue
+            col = s["across"][(a + b) // 2]
+            below = [s["view"].get((col, h - k)) for k in (2, 3, 4)]
+            if sum(1 for c in below if c and m.K[c[1]] in ("full", "frame")) >= 2:
+                gable = True
+                break
+    d = {v: k for k, v in SIDE_OF.items()}[side]
+    sign = d[0] or d[1]
+    front = {}
+    for (x, z) in m.I:
+        key, out = (z, x) if d[0] else (x, z)
+        if key not in front or out * sign > front[key] * sign:
+            front[key] = out
+    posts = roofs = steps = 0
+    for p, k in m.K.items():
+        x, y, z = p
+        key, out = (z, x) if d[0] else (x, z)
+        dist = (out - front[key]) * sign if key in front else 0   # 1 = the wall, 2 = its frame, 2-3 = the eaves
+        if not 2 <= dist <= 9 or y < m.g - 1:
+            continue
+        if k == "frame" and y >= m.g + 1 and dist >= 3:
+            posts += 1
+        elif k in ("stairs", "slab") and y >= m.g + 3 and dist >= 4:
+            roofs += 1
+        elif k == "stairs" and "half=top" not in m.S[p]:
+            steps += 1
+    return gable, posts >= 3 and roofs >= 5, steps >= 3
+
+
+def _shape(m):
+    """Massing and silhouette, on the render: several gables and roof heights seen from every side (no long single
+    ridge), a taller central block with lower wings either side in the entrance view, no straight wall run over 9
+    blocks, a gable, porch or stair on the entrance side. A small house (one storey is fine) needs no wings."""
+    sil = _silhouettes(m)
+    if not sil:
+        return 0, [], []
+    runs = _wall_runs(m)
+    x1, z1, x2, z2 = m.box
+    small = m.small or len(m.I) <= SHAPE_SMALL
+    find, fix = [], []
+    # 1. silhouette variety: roof heights and gables from each side (3 gables on the entrance side and its back), the
+    #    longest flat ridge seen from any side
+    ent = _entrance(m) or max(sil, key=lambda k: sil[k]["width"])
+    var = []
+    for side, s in sil.items():
+        need = 1 if small or side not in (ent, OPP_SIDE[ent]) else 3
+        var.append(0.6 * (1.0 if small else _clamp((len(s["levels"]) - 1) / 2)) + 0.4 * _clamp(len(s["peaks"]) / need))
+    longest = max(sil.items(), key=lambda kv: kv[1]["ridge"])
+    rr = _clamp((SHAPE_RIDGE[1] - longest[1]["ridge"]) / (SHAPE_RIDGE[1] - SHAPE_RIDGE[0]))
+    pitched = any(_sloped(s["top"], a, b) for s in sil.values() for h, a, b, pr in s["peaks"])
+    sil_v = (0.6 * sum(var) / len(var) + 0.4 * rr) * (1.0 if pitched else 0.4)      # a flat top is no gable at all
+    # 2. height spread: the roof heights over all sides, tallest against lowest
+    levels = []
+    for h in sorted({h for s in sil.values() for h in s["levels"]}):
+        if not levels or h - levels[-1] >= 2:
+            levels.append(h)
+    spread = (levels[-1] - levels[0]) if levels else 0
+    spr = 1.0 if small else 0.5 * _clamp((len(levels) - 1) / 2) + 0.5 * _clamp(spread / 5)
+    # 3. the longest straight wall run, and the share of the wall in runs over 9
+    top_run = runs[0] if runs else (0, "", (0, 0), (0, 0))
+    total = sum(r[0] for r in runs) or 1
+    over = sum(r[0] for r in runs if r[0] > SHAPE_RUN[0]) / total
+    wr = 0.6 * _clamp((SHAPE_RUN[1] - top_run[0]) / (SHAPE_RUN[1] - SHAPE_RUN[0])) + 0.4 * (1 - over)
+    # 4. a front feature on the entrance side
+    gable, porch, stair = _front_feature(m, ent)
+    fr = 0.45 * gable + 0.3 * porch + 0.25 * stair
+    if small:
+        fr = min(1.0, 0.5 * gable + 0.6 * porch + 0.4 * stair)      # a cottage: a porch or a gable over the door
+    # 5. hierarchy: the tallest peak in the middle of the entrance view, lower wings with peaks on both sides
+    hier, cen, wings = (1.0 if small else 0.0), False, 0
+    s = sil.get(ent)
+    if s and s["peaks"]:
+        H, a, b, pr = max(s["peaks"], key=lambda p: (p[0], -abs((p[1] + p[2]) / 2 - s["width"] / 2)))
+        cen = 0.3 <= (a + b) / 2 / max(1, s["width"] - 1) <= 0.7 and b - a + 1 <= 0.5 * s["width"]
+        lows = _lower_tops(s["top"], H, m.g)
+        left = [h for h, i in lows if i < a]
+        right = [h for h, i in lows if i > b]
+        wings = bool(left) + bool(right)
+        sym = (1.0 if abs(max(left) - max(right)) <= 2 else 0.5) if left and right else 0.0
+        if not small:
+            hier = 0.35 * cen + 0.2 * bool(left) + 0.2 * bool(right) + 0.25 * sym
+    if small:                                                        # no wings asked of a cottage: outline, walls, front
+        score = 100 * (0.3 * sil_v + 0.25 * wr + 0.45 * fr)
+    else:
+        score = 100 * (0.25 * sil_v + 0.2 * spr + 0.25 * wr + 0.15 * fr + 0.15 * hier)
+    # a small house still needs some massing: a porch, lean-to or dormer, a chimney, 2 storeys or a loft, a pale fill
+    levels_ = _levels(m, set(m.I))
+    ceil = levels_[0][2] if levels_ else m.g
+    loft = len({(p[0], p[2]) for p in m.IN if p[1] > ceil}) >= 0.3 * len(m.I)
+    v = _view(m)
+    needs = {"a porch, lean-to or dormer": porch or len(levels) >= 2 or any(len(t["peaks"]) >= 2 for t in sil.values()),
+             "a chimney": bool(m.chimneys), "2 storeys or a loft": len(levels_) >= 2 or loft,
+             "a pale wall fill": m.dark or v["fill_share"] >= SMALL_FILL}
+    m.shape = {"score": round(score), "small_missing": [k for k, ok in needs.items() if not ok], "silhouette": round(sil_v, 2), "peaks": {k: len(v["peaks"]) for k, v in sil.items()},
+               "longest_ridge": longest[1]["ridge"], "roof_heights": len(levels), "height_spread": spread,
+               "longest_wall": top_run[0], "wall_over_9": round(over, 2), "entrance": ent, "front_gable": gable,
+               "porch": porch, "front_stair": stair, "central_block": cen, "wings": wings, "small": small}
+    if sil_v < 0.75:
+        find.append(f"Shape: the outline is plain: a flat ridge of {longest[1]['ridge']} blocks seen from the "
+                    f"{longest[0]}; " + ", ".join(f"{len(v['peaks'])} gable or peak{'s' if len(v['peaks']) != 1 else ''}"
+                                                  f" from the {k}" for k, v in sil.items())
+                    + " (the reference manors: 3+ gables at several heights from every side, no ridge over 12).")
+        fix.append(f"Break the roof over x {x1}..{x2}, z {z1}..{z2} into several gables: a taller central block with a "
+                   f"big front gable and lower wings with their own gables (pattern manor_layout), cross gables or "
+                   f"dormers on long roofs (patterns cross_gable_roof, dormer).")
+    if not small and spr < 0.75:
+        find.append(f"Shape: roof peaks at {', '.join(f'y {h}' for h in levels) or 'no height'} ({spread} blocks from "
+                    f"the lowest to the tallest; the references: 3 heights, 5+ apart).")
+        fix.append(f"Make the central block one storey taller than the wings round x {x1}..{x2}, z {z1}..{z2} and give "
+                   f"each wing a lower ridge (pattern manor_layout: 3 storeys in the middle, 2 in the wings).")
+    if wr < 0.75 and runs:
+        n, side, a, b = top_run
+        find.append(f"Shape: a straight {side} wall of {n} blocks from x {a[0]}, z {a[1]} to x {b[0]}, z {b[1]} with no "
+                    f"step, bay or wing (good: 9 or less).")
+        fix.append(f"Step the {side} wall between x {a[0]}, z {a[1]} and x {b[0]}, z {b[1]}: set a wing back 2-3 blocks "
+                   f"or push a bay or the central block out 2 (patterns bay_window, manor_layout).")
+    if fr < 0.75:
+        miss = [w for w, ok in (("front gable", gable), ("porch", porch), ("front stair", stair)) if not ok]
+        find.append(f"Shape: the entrance ({ent}) side has no {', no '.join(miss)}.")
+        fix.append(f"Give the {ent} side a big gable over the door, a porch with posts and a grand stair with landings "
+                   f"up to it (patterns manor_layout, porch, external_stair).")
+    if not small and hier < 0.75:
+        find.append(f"Shape: no clear central block with wings on the {ent} side (tallest roof in the middle: "
+                    f"{'yes' if cen else 'no'}; lower wings beside it: {wings} of 2).")
+        fix.append(f"Build a central block one storey taller than two stepped wings, one each side of the entrance "
+                   f"(pattern manor_layout).")
+    return score, find, fix
+
+
 PARTS = (("contrast", _contrast), ("looks", _looks), ("storeys", _storeys), ("windows", _windows), ("balcony", _balcony),
          ("roof_style", _roof_style), ("facade", _facade), ("roof", _roof), ("massing", _massing), ("palette", _palette),
-         ("detail", _detail), ("surroundings", _surroundings))
+         ("detail", _detail), ("surroundings", _surroundings), ("shape", _shape))
 
 
 # ------------------------------------------------------------------ towns (3+ buildings)
@@ -1454,6 +1789,7 @@ def _town(m, bs):
 TOWN_WEIGHTS = {"roads": 25, "variety": 25, "open_space": 20, "landmark": 15, "density": 15}
 LABELS.update({"roads": "Streets", "variety": "Variety", "open_space": "Open space", "landmark": "Landmark",
                "density": "Density"})
+LABELS["shape"] = "Shape (massing and outline)"
 
 
 def score(blocks, size=None, prompt=None):
@@ -1489,6 +1825,27 @@ def score(blocks, size=None, prompt=None):
              round(v["frame_l"], 1), "fill_lightness": round(v["fill_l"], 1), "roof_lightness": round(v["roof_l"], 1),
              "roof_colour": round(v["roof_colour"], 2), "closeness": round(v["closeness"], 2), "nearest_ref": v["ref"],
              "dark_asked": m.dark, "cap": None}
+    sh = getattr(m, "shape", None)
+    looks["shape_cap"] = None
+    if sh and not town and not sh["small"]:
+        cap = int(round(SHAPE_CAP[0] + SHAPE_CAP[1] * sh["score"] / 100))
+        if cap < total:
+            looks["shape_cap"] = cap
+            findings.insert(0, f"Shape: a big house that reads as one long box (shape {sh['score']}/100: longest wall "
+                               f"{sh['longest_wall']}, longest ridge {sh['longest_ridge']}, {sh['roof_heights']} roof "
+                               f"height{'s' if sh['roof_heights'] != 1 else ''}), so the total is held at {cap} (it would "
+                               f"be {total}). A taller central block with a front gable and stepped wings lifts it "
+                               f"(pattern manor_layout).")
+            total = cap
+    if sh and not town and sh["small"] and sh["small_missing"]:
+        k = len(sh["small_missing"])
+        cap = QUALITY_MIN - 1 - 8 * (k - 1)
+        if cap < total:
+            looks["shape_cap"] = cap
+            findings.insert(0, f"Shape: a small house that is a plain box: it has no {', no '.join(sh['small_missing'])}, "
+                               f"so the total is held at {cap} (it would be {total}). Add a porch or lean-to, a chimney, "
+                               f"a loft or second storey and a birch or plaster fill between the logs.")
+            total = cap
     if not m.dark:
         cap = int(round(DARK_CAP[0] + DARK_CAP[1] * _bright(v)))
         if cap < total:

@@ -7,7 +7,7 @@ have an unknown licence: nothing from them is copied or shipped, only the rules 
 
 ## The score
 
-`quality.score(blocks, size=None, prompt=None)` gives every building twelve parts, each 0-100, and a weighted total.
+`quality.score(blocks, size=None, prompt=None)` gives every building thirteen parts, each 0-100, and a weighted total.
 Round 2 (27 Nov) added contrast, storeys, windows, balconies and roof style after the owner's reviewer found the score
 too generous: two bench builds that look nothing like the references (long, low, all dark-brown wood) scored 87 and 94.
 Round 3 (27 Nov, "looks") followed the owner's verdict on the 1.13.0 manor: it scored 85 but "the whole house reads
@@ -33,38 +33,78 @@ the eye saw black. So the colours are now measured on the render, not on block l
   the contrast, the looks part and the roof colourfulness. The prompt reaches the score from the engine, `bench/score.py`,
   the MCP session title and the chat/loop self-improvement.
 
+Round 4 (28 Nov, "shape") followed the owner's next point: the 1.14-light manor had the right colours and scored 89,
+but it is long, low and boxy with one long ridge, unlike reference houses 2 and 5 (a taller central block with a big
+front gable, wings stepping down on both sides, varied roof heights, a grand front stair, balconies on the wings). The
+shape is now measured on the render too (`quality._shape`, weight 20):
+
+- `_silhouettes`: the outline of the house against the sky from each side, from `render.nearest` of the house cells
+  (structural blocks on the building's columns and 2 round them; chimneys, lights, fences left out; 1-2 column spikes
+  2+ over both neighbours - finials, posts - cut down). On each outline: the peaks (a top higher than both sides by
+  2+, the ridge counted within 1 block of the top), the roof heights (peaks and flat runs of 3+ columns, 2+ apart) and
+  the longest flat ridge.
+- Silhouette variety (25%): 3 roof heights from each side, 3 gables on the entrance side and its back (1 on the
+  others), no ridge longer than 13 blocks seen from any side (none of the points from 25); a flat top with no sloped
+  peak anywhere keeps 40%.
+- Height spread (20%): 3 roof heights over all sides and 5+ blocks from the lowest to the tallest.
+- Longest straight wall (25%): the outline of the rooms seen from each side (`_wall_runs`; inner walls left out). A step
+  of the wall line - a wing, a bay, a set-back - ends a run; log posts in the wall do not. 9 blocks or less is full,
+  18 or more nothing (60%), and the share of the wall in runs over 9 (40%).
+- Front feature (15%): on the entrance side (the side the lowest doors face) a gable end facing out (a sharp peak with
+  the gable fill under it), a porch (posts and a roof 2-8 blocks out) and a stair or steps (3+ bottom stairs there).
+- Hierarchy (15%): in the entrance view the tallest peak is in the middle (30-70% across, at most half the width),
+  with a lower top (a gable or a flat wing ridge, 2+ lower) on the left and on the right, the two within 2 blocks of
+  each other (symmetry with hierarchy).
+- A small house (size or prompt small, or 100 room columns or fewer) is not asked for wings: its shape is 30%
+  silhouette, 25% wall runs and 45% front feature (a gable or a porch over the door). But it still needs some
+  massing (the reviewer, 28 Nov: the 1.14.0 chat cottage, a plain one-storey box with mostly brown walls, scored 75):
+  a porch, lean-to or dormer, a chimney, 2 storeys or a loft (rooms under the roof over 30% of the plan), and a pale
+  fill (birch, stripped birch, plaster: lightness 62+ on 30% of the seen wall; oak planks and logs do not count). With
+  one of them missing the total is held at 59, each more 8 lower. A dark build asked for needs no pale fill.
+- Wall runs bridge an inner wall that meets the outside wall (rooms side by side are one straight wall) and leave out
+  the 2-high crawl space under a deck on stilts.
+- The shape cap: a big house (not small, not a town) scores at most 30 + 70 x shape / 100, so one long box with one
+  ridge can not pass the gate whatever its colours ("reads as one long box ... held at N").
+- `patterns.manor_layout` builds the reference shape in one call (see below); `bay_window` and `dormer` break walls and
+  roof planes.
+
 | Part | Weight | Good (from the references) | Penalised |
 | --- | --- | --- | --- |
-| Wall contrast | 16 | On the render (`_view`): the fill (CIE lightness 45+: oak 57, birch 72, stripped birch/oak, white terracotta 75) against the log frame (oak log 38, spruce or dark oak log 18-20), 20+ apart; 60%+ of the seen wall light | One wood tone everywhere; walls mostly dark (spruce planks 38, dark oak) |
-| Looks (colours) | 14 | On the render: mean wall lightness 50+ (40%), a coloured roof - teal, green, warm wood (25%), the colour histogram close to the nearest reference photo, 0.60+ (35%) | Near-black walls (mean lightness 35 or less), a deepslate or grey roof, a colour mix unlike the references; plus the dark cap on the total |
-| Storeys | 14 | 2 floors (0.8) or 3+ (1.0), each a level with walls round it and a flat ceiling (an attic under the roof slopes is not a storey); height to the top of the walls / length of the top storey 0.45+ | One floor on a house that is not small; long and low (0.2 or less gets nothing for the height). Small houses (size or prompt says tiny, small, little, hut, cottage, cabin or shed, or 36 room columns or fewer) may have one floor |
-| Windows | 11 | Glass on 15%+ of every facade (a missing side counts as blank), framed (shutters, sill, box), big: 4+ panes together (2 x 2) | A few 1 x 2 windows; blank sides |
-| Balconies | 10 | Outdoor floors 3+ blocks above the ground with a fence railing: one (35), a second (25), 24+ cells in all (25), an outside stair of 4+ steps (landings allowed) climbing to one (15) | None |
-| Roof colour and layers | 10 | The main roof a colour of its own (60): far from the wall colours (RGB distance 50+) and another hue (60 degrees apart, or grey against coloured) - teal, green, red - and colourful on the render (a near-black or grey roof keeps only 30% of these points unless a dark build was asked); roof planes (bottom stairs open to the sky) at 3+ heights 2+ apart (40): storey bands, wing and porch roofs, the main roof | A roof in the wall wood (spruce on spruce); one roof height |
-| Facade depth | 5 | Log posts and beams stick out 1 block from the wall plane on 10%+ of the wall surface; a frame in a different wood than the infill | Flat wall runs longer than 5 blocks with no post, window or step; shutters and boxes alone count less than real posts |
-| Roof | 5 | Pitched stair/slab roof, eaves overhang the walls on 60%+ of the outline (2 blocks over a framed wall), trim (barge boards, eave row, ridge) in a second material | Flat box top (0 for the pitch); one roof plane over 140 blocks with no cross gable or dormer (up to -25) |
-| Massing | 4 | A main volume plus a wing, porch, balcony or annex; 2-3 different ridge heights; an L or T plan | A single box with one roof height |
-| Palette | 3 | 3-6 main materials with roles: logs for the frame, one wall fill, a different roof, 4+ accents (glass, trapdoors, lanterns, fences, pots) | One material; the roof in the wall material; 9+ main materials (random) |
-| Detail | 4 | A glass pane per 4 metres of wall or more, windows framed (shutters, flower box, sill), 5+ kinds of outside detail, a chimney 2+ above the roof | Bare walls, no chimney |
-| Surroundings | 4 | A path of 4+ cells to the door; fence, plants, farm, water, outdoor light, paving around the house | A house standing on nothing |
+| Wall contrast | 15 | On the render (`_view`): the fill (CIE lightness 45+: oak 57, birch 72, stripped birch/oak, white terracotta 75) against the log frame (oak log 38, spruce or dark oak log 18-20), 20+ apart; 60%+ of the seen wall light | One wood tone everywhere; walls mostly dark (spruce planks 38, dark oak) |
+| Looks (colours) | 15 | On the render: mean wall lightness 50+ (40%), a coloured roof - teal, green, warm wood (25%), the colour histogram close to the nearest reference photo, 0.60+ (35%) | Near-black walls (mean lightness 35 or less), a deepslate or grey roof, a colour mix unlike the references; plus the dark cap on the total |
+| Shape (massing and outline) | 20 | On the render: 3 roof heights and no ridge over 13 from every side, 3 gables on the entrance side, a central block taller than wings on both sides, no straight wall over 9 blocks, a front gable, porch and grand stair | One long box with one long ridge (capped at 30 + 70 x shape for a big house); long straight walls |
+| Storeys | 10 | 2 floors (0.8) or 3+ (1.0), each a level with walls round it and a flat ceiling (an attic under the roof slopes is not a storey); height to the top of the walls / length of the top storey 0.45+ | One floor on a house that is not small; long and low (0.2 or less gets nothing for the height). Small houses (size or prompt says tiny, small, little, hut, cottage, cabin or shed, or 36 room columns or fewer) may have one floor |
+| Windows | 10 | Glass on 15%+ of every facade (a missing side counts as blank), framed (shutters, sill, box), big: 4+ panes together (2 x 2) | A few 1 x 2 windows; blank sides |
+| Balconies | 8 | Outdoor floors 3+ blocks above the ground with a fence railing: one (35), a second (25), 24+ cells in all (25), an outside stair of 4+ steps (landings allowed) climbing to one (15) | None |
+| Roof colour and layers | 8 | The main roof a colour of its own (60): far from the wall colours (RGB distance 50+) and another hue (60 degrees apart, or grey against coloured) - teal, green, red - and colourful on the render (a near-black or grey roof keeps only 30% of these points unless a dark build was asked); roof planes (bottom stairs open to the sky) at 3+ heights 2+ apart (40): storey bands, wing and porch roofs, the main roof | A roof in the wall wood (spruce on spruce); one roof height |
+| Facade depth | 4 | Log posts and beams stick out 1 block from the wall plane on 10%+ of the wall surface; a frame in a different wood than the infill | Flat wall runs longer than 5 blocks with no post, window or step; shutters and boxes alone count less than real posts |
+| Roof | 3 | Pitched stair/slab roof, eaves overhang the walls on 60%+ of the outline (2 blocks over a framed wall), trim (barge boards, eave row, ridge) in a second material | Flat box top (0 for the pitch); one roof plane over 140 blocks with no cross gable or dormer (up to -25) |
+| Massing | 2 | A main volume plus a wing, porch, balcony or annex; 2-3 different ridge heights; an L or T plan | A single box with one roof height |
+| Palette | 2 | 3-6 main materials with roles: logs for the frame, one wall fill, a different roof, 4+ accents (glass, trapdoors, lanterns, fences, pots) | One material; the roof in the wall material; 9+ main materials (random) |
+| Detail | 2 | A glass pane per 4 metres of wall or more, windows framed (shutters, flower box, sill), 5+ kinds of outside detail, a chimney 2+ above the roof | Bare walls, no chimney |
+| Surroundings | 1 | A path of 4+ cells to the door; fence, plants, farm, water, outdoor light, paving around the house | A house standing on nothing |
 
 The save gate is `QUALITY_MIN = 60`. The size hint and the prompt only decide "small" (one storey is then fine);
 `mcp_server` passes the session title, `engine` the prompt, `bench/score.py` the prompt in meta.json.
 
 Calibration (tests/test_quality.py; tests/data holds the three bench builds):
 
-| Build | Round 1 | Round 2 | Round 3 (looks on the render) |
-| --- | --- | --- | --- |
-| Plain 9 x 9 cobblestone box, flat roof | 8 | 3 | 7 |
-| Plain house shell with a gable roof | 40 | 45 | 54 |
-| Bench 1.16 wooden manor (long, low, dark spruce frame, spruce roof) | 87 | 58 | 35 |
-| Bench 1.16 small cottage (one storey, dark logs, dark oak roof; prompt "A small cottage.") | 94 | 52 | 41 |
-| 1.13.0 wooden manor (dark oak frame, spruce and birch, deepslate roof: "reads near-black") | - | 85 | 52 (capped; 94 if the prompt had asked for a dark/gothic manor) |
-| `light_manor` rebuilt in spruce, dark oak and deepslate (same shape) | - | - | 39 (94 with "a spooky manor") |
-| Pattern cottage (2 storeys, birch in oak logs, green roof with oak trim) | 97 | 85 | 90 |
-| Pattern manor (plaster in oak logs, teal roof with oak trim) | 98 | 86 | 92 |
-| Pattern village, as a town (light fills, teal/red/brick/green/spruce roofs) | 98 | 87 | 89 |
-| Reference-like manor `light_manor` (3 storeys, birch in oak logs, teal layered roof with oak trim, storey bands, balconies, terrace garden, outside stair) | - | 94 | 95 |
+| Build | Round 1 | Round 2 | Round 3 (looks on the render) | Round 4 (shape) |
+| --- | --- | --- | --- | --- |
+| Plain 9 x 9 cobblestone box, flat roof | 8 | 3 | 7 | 14 |
+| Plain house shell with a gable roof | 40 | 45 | 54 | 51 |
+| Bench 1.16 wooden manor (long, low, dark spruce frame, spruce roof) | 87 | 58 | 35 | 35 |
+| Bench 1.16 small cottage (one storey, dark logs, dark oak roof; prompt "A small cottage.") | 94 | 52 | 41 | 41 |
+| 1.13.0 wooden manor (dark oak frame, spruce and birch, deepslate roof: "reads near-black") | - | 85 | 52 (capped; 94 if the prompt had asked for a dark/gothic manor) | 52 (66 with a dark prompt: held by its shape) |
+| Bench 1.14-light manor (light birch in oak logs, teal roof, but one 41-block ridge, a 37-block straight wall) | - | - | 89 | 52 (shape 31, capped) |
+| 1.14.0 chat cottage ("A small timber cottage with a garden.": one storey, no porch, no chimney, mostly oak logs and planks) | - | - | 75 | 43 (capped: 3 small-house needs missing) |
+| `light_manor` rebuilt in spruce, dark oak and deepslate (same shape) | - | - | 39 (94 with "a spooky manor") | 42 (95 with "a spooky manor") |
+| `manor_layout` alone on a plain site (central block, entrance bay, stepped wings, grand stair) | - | - | - | 95 (shape 97) |
+| A one-storey small cottage, 9 x 7, gable and porch at the front (tests/test_quality.py `small_cottage`, "A small cottage.") | - | - | - | 84 (shape 100, no wings asked) |
+| Pattern cottage (rebuilt round 4: 11 x 9, two storeys, front gable, porch, set-back wing, birch gables and boxes) | 97 | 85 | 90 | 92 |
+| Pattern manor (rebuilt round 4: `manor_layout` facing east on stilts, plaster in oak logs, red roofs) | 98 | 86 | 92 | 90 |
+| Pattern village, as a town (light fills, teal/red/brick/green/spruce roofs) | 98 | 87 | 89 | 88 |
+| Reference-like manor `light_manor` (rebuilt round 4 on `manor_layout`, gardens, path, farm plots) | - | 94 | 95 | 96 |
 
 The examples were rebuilt with the round 3 palette (the round 2 versions with dark oak frames and grey roofs would be
 capped). The histogram on its own separates less than the brightness does: the light manor is 0.68 from its nearest
@@ -113,6 +153,13 @@ get their own roof below the main eaves. A soffit (upside-down stairs) under the
 balconies on posts or brackets with fence railings, a terrace (a wing roof as a terrace garden) reached by an outside
 stair with landings. Two or three ridge heights.
 
+**Shape (big houses).** Like references 2 and 5: a taller central block (3 storeys) with a big gable facing the front,
+wings of 2 storeys stepping down on both sides (set back, their own lower gables), roofs at 3 heights and no ridge longer
+than about 13 blocks, no straight wall over 9 blocks (step it with a wing, a bay window or a set-back), a grand front
+stair with landings up to a porch, balconies on the wings, stilts or a stone terrace on uneven ground.
+`patterns.manor_layout(x, y, z, facing)` builds all of it. A small cottage stays one block: short walls, a gable and
+a porch at the front.
+
 **Windows and detail.** Big 2 x 2 panes in every bay of every floor (12-20% of each facade is glass), white-framed:
 a stripped birch lintel over, birch trapdoor shutters on both sides, a flower box directly under the panes (grass block
 with one kind of flower, trapdoors round its front, sides and bottom). Flowers only in those boxes and in the garden,
@@ -132,7 +179,9 @@ stilts (posts down to the ground) under a deck.
   `style='light'`: birch in oak logs; also `'oak'`, `'stripped'`, `'plaster'`, `'classic'`; `'dark'` only when asked), `window_with_box` (`width=2, height=2`), `porch`, `balcony`
   (`gap=` for a stair), `storey_band`, `external_stair`, `gable_roof_trim`, `hip_roof_trim`, `cross_gable_roof` (all
   three default to teal with an oak trim and take `stairs='green'`, `'red'`, `'brick'` ... from `ROOF_COLOURS`), `chimney`, `stilt_base`,
-  `farm_plot`, `fence_garden`, `site`, `road`, `plaza`. Each passes `checks.run` with no path, door or floating
+  `farm_plot`, `fence_garden`, `site`, `road`, `plaza`; `manor_layout` (the whole reference shape: central block,
+  entrance bay, stepped wings, porch, grand stair, wing balconies, terrace or stilts; any facing), `bay_window`,
+  `dormer`. Each passes `checks.run` with no path, door or floating
   problems; every stair pattern (`straight_stair_run`, `external_stair`, `switchback_landing`, `porch(steps=)`, balcony
   access, `storey_band`) has 0 jump steps and 0 corner turns by `checks.run` and by `bench/score.py`
   (tests/test_patterns.py). A jump step, corner turn or wrong facing finding now comes with a line naming those

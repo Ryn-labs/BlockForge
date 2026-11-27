@@ -25,7 +25,14 @@ BENCH = {"manor": ("bench_wooden_manor_blocks.json", "large",
          # the 1.13.0 manor (owner, 27 Nov: "the whole house reads near-black": dark oak frames, spruce and deepslate,
          # a black roof) that scored 85
          "dark": ("bench_dark_manor_1130_blocks.json", "large",
-                  "A wooden manor with log frames, a layered roof, a balcony, window boxes and a terrace garden.")}
+                  "A wooden manor with log frames, a layered roof, a balcony, window boxes and a terrace garden."),
+         # the 1.14-light manor of 28 Nov (quality 89 then): the right colours, but long, low and boxy with one long
+         # ridge - the owner's next point (round 4, shape)
+         "light114": ("bench_light_manor_114_blocks.json", "large",
+                      "A wooden manor with log frames, a layered roof, a balcony, window boxes and a terrace garden."),
+         # the 1.14.0 chat cottage (28 Nov, scored 75): a plain one-storey box with a roof, mostly brown walls, no
+         # porch, no chimney - the reviewer: small houses need massing too
+         "chat_cottage": ("chat_cottage_1140_blocks.json", "small", "A small timber cottage with a garden.")}
 
 
 def blocks_of(code):
@@ -63,9 +70,9 @@ class Calibration(unittest.TestCase):
         self.assertLess(r["total"], quality.QUALITY_MIN, quality.summary(r))
         self.assertGreater(r["parts"]["roof"], r["parts"]["facade"])     # it has a pitched roof, but flat walls
 
-    def test_pattern_cottage_scores_70_or_more(self):
+    def test_pattern_cottage_scores_80_or_more(self):
         r = quality.score(blocks_of(examples.code("good_cottage")))
-        self.assertGreaterEqual(r["total"], 70, quality.summary(r))
+        self.assertGreaterEqual(r["total"], 80, quality.summary(r))
         for part in quality.WEIGHTS:
             self.assertGreaterEqual(r["parts"][part], 60, (part, quality.summary(r)))
 
@@ -73,10 +80,10 @@ class Calibration(unittest.TestCase):
         r = quality.score(blocks_of(examples.code("good_manor")))
         self.assertGreaterEqual(r["total"], 80, quality.summary(r))
 
-    def test_reference_like_manor_scores_80_or_more(self):
+    def test_reference_like_manor_scores_85_or_more(self):
         r = quality.score(blocks_of(examples.code("light_manor")))
-        self.assertGreaterEqual(r["total"], 80, quality.summary(r))
-        for part in ("contrast", "looks", "storeys", "balcony", "roof_style"):
+        self.assertGreaterEqual(r["total"], 85, quality.summary(r))
+        for part in ("contrast", "looks", "storeys", "balcony", "roof_style", "shape"):
             self.assertGreaterEqual(r["parts"][part], 80, (part, quality.summary(r)))
         self.assertIsNone(r["looks"]["cap"])
         self.assertGreaterEqual(r["looks"]["wall_lightness"], 50)                # light walls on the render
@@ -98,7 +105,9 @@ class Calibration(unittest.TestCase):
         r = quality.score(blocks, size, "A dark gothic manor with log frames and a terrace garden.")
         self.assertTrue(r["looks"]["dark_asked"])
         self.assertIsNone(r["looks"]["cap"])
-        self.assertGreaterEqual(r["total"], 80, quality.summary(r))
+        # no longer held by its colours, only by its shape (one long box with a 37-block ridge, round 4)
+        self.assertGreaterEqual(r["total"], quality.QUALITY_MIN, quality.summary(r))
+        self.assertEqual(r["total"], r["looks"]["shape_cap"], quality.summary(r))
         self.assertEqual(r["parts"]["looks"], 100)
         self.assertFalse(any("reads dark" in f for f in r["findings"]))
         for p in ("spooky witch house", "Haunted mansion at night", "a medieval stronghold", "Blackstone fortress"):
@@ -151,9 +160,11 @@ class Parts(unittest.TestCase):
     def test_weights_add_up(self):
         self.assertEqual(sum(quality.WEIGHTS.values()), 100)
         self.assertEqual(set(quality.WEIGHTS), {"facade", "roof", "massing", "palette", "detail", "surroundings",
-                                                "contrast", "looks", "storeys", "windows", "balcony", "roof_style"})
+                                                "contrast", "looks", "storeys", "windows", "balcony", "roof_style",
+                                                "shape"})
         self.assertGreaterEqual(quality.WEIGHTS["contrast"] + quality.WEIGHTS["looks"], 30)    # colours on the render
-        new = sum(quality.WEIGHTS[k] for k in ("contrast", "storeys", "windows", "balcony", "roof_style"))
+        self.assertGreaterEqual(quality.WEIGHTS["shape"], 20)            # the shape on the render (round 4)
+        new = sum(quality.WEIGHTS[k] for k in ("contrast", "storeys", "windows", "balcony", "roof_style", "shape"))
         self.assertGreaterEqual(new, 60)                                 # the reference look carries the score
         self.assertEqual(set(quality.LABELS) >= set(quality.WEIGHTS), True)
 
@@ -315,6 +326,122 @@ class NotBuildings(unittest.TestCase):
         self.assertIs(quality.built_only(blocks, None), blocks)
 
 
+def small_cottage(floors=1):
+    """A one-storey (or taller) small light cottage, 9 x 7, its gable and a porch facing the front, windows on the other
+    sides, a chimney, a garden: no wings, as a small cottage should be."""
+    Y = 2
+    w = dict(width=2, height=2, box="birch_trapdoor")
+    return (patterns.site(-6, -6, 16, 18, Y - 1)
+            + patterns.framed_house(0, 0, 8, 6, Y, floors=floors, storey=4, style="light", spacing=8)
+            + patterns.window_with_box(0, Y + 1, 2, "west", **w) + patterns.window_with_box(8, Y + 1, 2, "east", **w)
+            + patterns.window_with_box(2, Y + 1, 0, "north", **w) + patterns.window_with_box(5, Y + 1, 0, "north", **w)
+            + patterns.gable_roof_trim(0, 0, 8, 6, Y + 5 * floors, ridge="z", overhang=2, fill="birch_planks")
+            + patterns.chimney(-3, Y - 1, 3, height=5 * floors + 9)
+            + patterns.porch(4, Y, 6, "south", width=3, depth=3, path=2)
+            + patterns.lantern_post(1, Y, 11, "medieval")
+            + patterns.fence_garden(-4, 13, 12, 17, Y, gates=("north",)))
+
+
+def shape_of(blocks, small=False):
+    m = quality._Model(blocks)
+    m.small, m.dark = small, False
+    quality._shape(m)
+    return m.shape
+
+
+class Shape(unittest.TestCase):
+    """Round 4 (28 Nov): the shape on the render - several gables and roof heights, a taller central block with stepped
+    wings, no straight wall over 9 blocks, a front gable, porch or stair - and the cap on a big house that reads as one
+    long box."""
+
+    def test_long_low_1_14_manor_is_below_the_gate(self):
+        blocks, size, prompt = bench_build("light114")
+        r = quality.score(blocks, size, prompt)
+        self.assertLess(r["total"], quality.QUALITY_MIN, quality.summary(r))
+        self.assertIsNone(r["looks"]["cap"])                             # the colours are right ...
+        self.assertIsNotNone(r["looks"]["shape_cap"])                    # ... the shape holds it down
+        self.assertGreaterEqual(r["parts"]["contrast"], 90)
+        self.assertLess(r["parts"]["shape"], 40)
+        sh = shape_of(blocks)
+        self.assertGreater(sh["longest_wall"], 20)
+        self.assertGreater(sh["longest_ridge"], 30)
+        self.assertLess(sh["roof_heights"], 3)
+        self.assertTrue(any("straight" in f for f in r["findings"]), r["findings"])
+        self.assertTrue(any("one long box" in f for f in r["findings"]), r["findings"][:3])
+
+    def test_manor_layout_scores_85_or_more_with_the_reference_shape(self):
+        for facing in ("south", "east"):
+            with self.subTest(facing):
+                blocks = blocks_of(patterns.site(-30, -30, 30, 30, 1) + patterns.manor_layout(0, 2, 0, facing))
+                r = quality.score(blocks)
+                self.assertGreaterEqual(r["total"], 85, quality.summary(r))
+                self.assertGreaterEqual(r["parts"]["shape"], 90, quality.summary(r))
+                self.assertIsNone(r["looks"]["shape_cap"])
+                sh = shape_of(blocks)
+                self.assertLessEqual(sh["longest_wall"], 9, sh)
+                self.assertLessEqual(sh["longest_ridge"], 13, sh)
+                self.assertGreaterEqual(sh["roof_heights"], 3, sh)
+                self.assertGreaterEqual(sh["height_spread"], 8, sh)
+                self.assertEqual(sh["entrance"], facing)
+                self.assertTrue(sh["central_block"] and sh["front_gable"] and sh["porch"] and sh["front_stair"], sh)
+                self.assertEqual(sh["wings"], 2, sh)
+                self.assertGreaterEqual(sh["peaks"][facing], 3, sh)
+
+    def test_one_storey_small_cottage_is_not_forced_into_wings(self):
+        r = quality.score(blocks_of(small_cottage()), "small", "A small cottage.")
+        self.assertGreaterEqual(r["total"], 70, quality.summary(r))
+        self.assertGreaterEqual(r["parts"]["shape"], 85, quality.summary(r))
+        self.assertGreaterEqual(r["parts"]["storeys"], 90)
+        self.assertIsNone(r["looks"]["shape_cap"])
+        self.assertFalse(any("central block" in f or "roof peaks" in f for f in r["findings"]), r["findings"])
+        same = quality.score(blocks_of(small_cottage()))                # small by its size alone (35 room columns)
+        self.assertIsNone(same["looks"]["shape_cap"])
+        self.assertEqual(same["parts"]["shape"], r["parts"]["shape"])
+
+    def test_plain_small_chat_cottage_is_below_the_gate(self):
+        blocks, size, prompt = bench_build("chat_cottage")
+        r = quality.score(blocks, size, prompt)
+        self.assertLess(r["total"], quality.QUALITY_MIN, quality.summary(r))
+        self.assertIsNotNone(r["looks"]["shape_cap"])
+        missing = shape_of(blocks, True)["small_missing"]
+        for need in ("a chimney", "a pale wall fill", "a porch, lean-to or dormer"):
+            self.assertIn(need, missing)
+        self.assertTrue(any("small house that is a plain box" in f for f in r["findings"]), r["findings"][:2])
+        # the small houses that have them keep passing
+        self.assertEqual(shape_of(blocks_of(small_cottage()), True)["small_missing"], [])
+        self.assertEqual(shape_of(blocks_of(examples.code("good_cottage")))["small_missing"], [])
+
+    def test_calibration(self):
+        box = quality.score(blocks_of(BOX))["total"]
+        long_manor = quality.score(*bench_build("light114"))["total"]
+        manor = quality.score(blocks_of(patterns.site(-30, -30, 30, 30, 1) + patterns.manor_layout(0, 2, 0)))["total"]
+        self.assertLess(box, 25)
+        self.assertLess(long_manor, 60)
+        self.assertGreaterEqual(manor, 85)
+        for name in ("good_cottage", "good_manor", "light_manor", "good_village"):
+            self.assertGreaterEqual(quality.score(blocks_of(examples.code(name)))["total"], 80, name)
+
+    def test_wall_runs_count_steps_not_posts(self):
+        long_house = patterns.framed_house(0, 0, 30, 8, 1, floors=2, storey=4, spacing=5)
+        runs = quality._wall_runs(quality._Model(blocks_of(long_house)))
+        self.assertEqual(runs[0][0], 31)                                 # posts every 5 do not break the run
+        stepped = (patterns.framed_house(0, 0, 10, 8, 1, floors=2, storey=4, spacing=5, flat=["east"])
+                   + patterns.framed_house(10, 2, 20, 6, 1, floors=2, storey=4, spacing=5, skip=["west"], flat=["east"],
+                                           clear=True)
+                   + patterns.framed_house(20, 0, 30, 8, 1, floors=2, storey=4, spacing=5, flat=["west"]))
+        self.assertLessEqual(quality._wall_runs(quality._Model(blocks_of(stepped)))[0][0], 11)
+        bay = long_house + patterns.bay_window(15, 1, 8, "south", 5, floors=2, depth=2)
+        south = [n for n, side, a, b in quality._wall_runs(quality._Model(blocks_of(bay))) if side == "south"]
+        self.assertLess(max(south), 31)                                  # a bay window steps the wall
+
+    def test_silhouette_peaks_and_spikes(self):
+        self.assertEqual([p[0] for p in quality._profile_peaks([1, 2, 3, 4, 3, 2, 1], 0)], [4])
+        self.assertEqual(len(quality._profile_peaks([5, 5, 5, 5], 0)), 1)            # a flat ridge is one peak
+        two = quality._profile_peaks([3, 4, 5, 4, 3, 4, 7, 4, 3], 0)
+        self.assertEqual(sorted(p[0] for p in two if p[3] >= 2), [5, 7])
+        self.assertEqual(quality._despike([5, 5, 9, 5, 5]), [5, 5, 5, 5, 5])          # a finial, not a gable
+        self.assertEqual(quality._despike([3, 4, 5, 4, 3]), [3, 4, 5, 4, 3])          # a gable seen end-on stays
+
 ROW = ("for i in range(5):\n"                                     # five identical flat boxes on one straight road
        "    x = i * 12\n"
        "    fill(x,0,0,x+8,0,8,'cobblestone')\n"
@@ -335,11 +462,11 @@ class Towns(unittest.TestCase):
         self.assertEqual(r["parts"]["landmark"], 0)
         self.assertTrue(any("straight line" in f for f in r["findings"]))
 
-    def test_varied_pattern_village_scores_70_or_more(self):
+    def test_varied_pattern_village_scores_80_or_more(self):
         r = quality.score(blocks_of(examples.code("good_village")))
         self.assertTrue(r["town"])
         self.assertGreaterEqual(r["buildings"], 5)
-        self.assertGreaterEqual(r["total"], 70, quality.summary(r))
+        self.assertGreaterEqual(r["total"], 80, quality.summary(r))
         for part in quality.TOWN_WEIGHTS:
             self.assertGreaterEqual(r["parts"][part], 60, (part, quality.summary(r)))
 
