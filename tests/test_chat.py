@@ -51,7 +51,7 @@ class Ai:
     """A queue of (tool calls, final text) replies standing in for the AI process of each turn."""
 
     def __init__(self, test_case, replies):
-        self.replies, self.cmds, self.users, self.cid = list(replies), [], [], None
+        self.replies, self.cmds, self.procs, self.cid = list(replies), [], [], None
         self.patches = [mock.patch.object(engine, "find_claude", return_value="claude"), mock.patch.object(loop, "_spawn", self.spawn)]
         for p in self.patches:
             p.start()
@@ -61,8 +61,13 @@ class Ai:
         self.cmds.append(cmd)
         script, text = self.replies.pop(0)
         proc = FakeProc(chat.load(self.cid)["session"], script, text)
-        proc.stdin.close = lambda: self.users.append(proc.stdin.getvalue().decode())
+        proc.stdin.close = lambda: None
+        self.procs.append(proc)
         return proc
+
+    @property
+    def users(self):
+        return [p.stdin.getvalue().decode() for p in self.procs]
 
 
 class ChatFlow(unittest.TestCase):
