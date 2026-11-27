@@ -471,7 +471,7 @@ def _look(cid, force=False):
     c = load(cid)
     s = session.load(c["session"])
     finished = force or all(p.get("status") == "done" for p in c["plan"])
-    return selfimprove.assess(s.blocks, s.ground(), s.terrain_blocks, s.size_hint, with_quality=finished)
+    return selfimprove.assess(s.blocks, s.ground(), s.terrain_blocks, s.size_hint, with_quality=finished, prompt=s.title)
 
 
 def _auto_improve(cid, log, rounds=selfimprove.CHAT_ROUNDS, force=False):

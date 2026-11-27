@@ -136,7 +136,7 @@ def _look(sid):
     from . import selfimprove, session as _ss
     try:
         s = _ss.load(sid)
-        return selfimprove.assess(s.blocks, s.ground(), s.terrain_blocks, s.size_hint)
+        return selfimprove.assess(s.blocks, s.ground(), s.terrain_blocks, s.size_hint, prompt=s.title)
     except Exception:
         return None
 
