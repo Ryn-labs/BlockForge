@@ -126,7 +126,7 @@ def run(text, model, usage, exe, log=print, image_path=None):
         allowed = ",".join([PREFIX + t for t in TOOLS] + ["Read"])
         cmd = [exe, "-p", "--output-format", "stream-json", "--verbose", "--model", model,
                "--system-prompt", system_prompt(text), "--mcp-config", mcp_config(work), "--strict-mcp-config",
-               "--tools", "Read", "--allowedTools", allowed, "--max-turns", str(MAX_TURNS), "--no-session-persistence"]
+               "--tools", "Read", "--allowedTools", allowed, "--disallowedTools", ",".join(PREFIX + t for t in ("create_build", "update_build", "app_open", "app_close", "export_build")), "--max-turns", str(MAX_TURNS), "--no-session-persistence"]
         log("Asking Claude to build it step by step (via Claude Code)...")
         proc = _spawn(cmd, work, dict(os.environ))
         proc.stdin.write(user_text(text).encode("utf-8"))
@@ -141,9 +141,12 @@ def run(text, model, usage, exe, log=print, image_path=None):
                 except ValueError:
                     continue
                 kind = ev.get("type")
-                content = (ev.get("message") or {}).get("content")
+                if not isinstance(ev, dict): continue
+                msg = ev.get("message")
+                content = msg.get("content") if isinstance(msg, dict) else None
+                if not isinstance(content, list): content = None
                 if kind == "assistant":
-                    for c in content or []:
+                    for c in [x for x in (content or []) if isinstance(x, dict)]:
                         if c.get("type") == "tool_use":
                             uses[c.get("id")] = c.get("name", "")
                             line = _describe(c.get("name", ""), c.get("input") or {})
