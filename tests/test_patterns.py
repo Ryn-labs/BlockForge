@@ -120,9 +120,22 @@ class Patterns(unittest.TestCase):
         self.assertEqual(patterns._full("dark_oak"), "dark_oak_planks")
         house = patterns.framed_house(0, 0, 8, 8, 1, style="light")
         self.assertIn("birch_planks", house)
-        self.assertIn("dark_oak_log", house)
-        self.assertIn("oak_planks", patterns.framed_house(0, 0, 8, 8, 1))              # the default is unchanged
-        self.assertIn("spruce_log", patterns.framed_house(0, 0, 8, 8, 1))
+        self.assertIn("'oak_log'", house)
+        self.assertNotIn("dark_oak", house)
+        self.assertEqual(patterns.framed_house(0, 0, 8, 8, 1), house)                  # the reference look is the default
+        dark = patterns.framed_house(0, 0, 8, 8, 1, style="dark")                     # only when a dark build is asked
+        self.assertIn("dark_oak_log", dark)
+        self.assertIn("spruce_planks", dark)
+        roof = patterns.gable_roof_trim(0, 0, 6, 4, 1)                                 # teal with an oak trim by default
+        self.assertIn("prismarine_brick_stairs", roof)
+        self.assertIn("'oak_stairs'", roof)
+        for code in (roof, patterns.hip_roof_trim(0, 0, 6, 4, 1), patterns.cross_gable_roof(0, 0, 12, 8, 1),
+                     patterns.window_with_box(0, 2, 0, "south", 2, 2), patterns.porch(0, 1, 0, "south"),
+                     patterns.balcony(0, 5, 0, "south"), patterns.storey_band(0, 0, 8, 8, 4)):
+            self.assertNotIn("dark_oak", code)
+            self.assertNotIn("deepslate", code)
+        self.assertIn("birch_trapdoor", patterns.window_with_box(0, 2, 0, "south"))   # white-framed windows
+        self.assertIn("stripped_birch_log", patterns.window_with_box(0, 2, 0, "south"))
         self.assertIn("white_terracotta", patterns.framed_wall(0, 0, 8, 0, 1, 4, "north", style="plaster"))
         with self.assertRaises(ValueError):
             patterns.framed_house(0, 0, 8, 8, 1, style="neon")
@@ -148,9 +161,25 @@ class Patterns(unittest.TestCase):
 
     def test_framed_wall_sticks_out(self):
         blocks, _ = sandbox.run_safe(patterns.framed_wall(0, 0, 8, 0, 1, 4, "north"))
-        self.assertIn("spruce_log", blocks[(0, 2, -1)])                  # a post one block out of the wall
+        self.assertIn("minecraft:oak_log", blocks[(0, 2, -1)])           # a post one block out of the wall
         self.assertIn("axis=x", blocks[(3, 4, -1)])                      # the top beam
-        self.assertIn("oak_planks", blocks[(2, 2, 0)])
+        self.assertIn("birch_planks", blocks[(2, 2, 0)])
+
+    def test_window_boxes_only_directly_under_windows(self):
+        for facing in ("north", "south", "east", "west"):
+            for width, height in ((1, 1), (1, 2), (2, 2), (3, 2)):
+                with self.subTest(facing=facing, width=width):
+                    blocks, _ = sandbox.run_safe(patterns.window_with_box(5, 4, 5, facing, width, height,
+                                                                          wall="oak_planks"))
+                    dx, dz = patterns.DIRS[facing]
+                    glass = {p for p, s in blocks.items() if "glass" in s}
+                    bottom = {p for p in glass if (p[0], p[1] - 1, p[2]) not in glass}
+                    self.assertEqual(len(bottom), width)
+                    flowers = {p for p, s in blocks.items() if "poppy" in s}
+                    soil = {p for p, s in blocks.items() if "grass_block" in s}
+                    self.assertEqual(flowers, {(x + dx, y, z + dz) for x, y, z in bottom})    # in front of each bottom pane
+                    self.assertEqual(soil, {(x + dx, y - 1, z + dz) for x, y, z in bottom})   # the box right under it
+                    self.assertEqual(len({s for p, s in blocks.items() if "poppy" in s}), 1)  # one flower kind
 
     def test_stilts_reach_the_ground(self):
         code = "fill(-2, 0, -2, 10, 0, 8, 'dirt')\nfill(4, 1, -2, 10, 2, 8, 'dirt')\n" + patterns.stilt_base(0, 0, 8, 6, 8)

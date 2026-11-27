@@ -23,10 +23,14 @@ ROOF_COLOURS = {"teal": "prismarine_brick_stairs", "green": "oxidized_cut_copper
                 "copper": "cut_copper_stairs", "gray": "deepslate_tile_stairs", "grey": "deepslate_tile_stairs",
                 "red": "red_nether_brick_stairs", "brick": "brick_stairs", "blue": "warped_stairs",
                 "dark": "dark_oak_stairs", "brown": "spruce_stairs", "mud": "mud_brick_stairs"}
-# Wall styles for framed_house / framed_wall: (fill, frame). "light" is the reference look: a light fill in a dark frame.
-WALL_STYLES = {"light": ("birch_planks", "dark_oak_log"), "oak": ("oak_planks", "dark_oak_log"),
-               "stripped": ("stripped_birch_log", "dark_oak_log"), "plaster": ("white_terracotta", "spruce_log"),
-               "classic": ("oak_planks", "spruce_log")}
+# Wall styles for framed_house / framed_wall: (fill, frame). "light" is the reference look and the default: a light
+# birch fill in an oak log frame. "dark" (spruce in dark oak) only when the user asks for a dark, gothic or spooky build.
+WALL_STYLES = {"light": ("birch_planks", "oak_log"), "oak": ("oak_planks", "spruce_log"),
+               "stripped": ("stripped_birch_log", "oak_log"), "plaster": ("white_terracotta", "oak_log"),
+               "classic": ("oak_planks", "spruce_log"), "dark": ("spruce_planks", "dark_oak_log")}
+DEFAULT_STYLE = "light"
+# The reference roof: teal slopes with an oak trim (the default of gable_roof_trim, hip_roof_trim, cross_gable_roof).
+ROOF_DEFAULT, TRIM_DEFAULT = "teal", "oak"
 
 
 def _stairs(name):
@@ -46,7 +50,7 @@ def _full(stairs):
 
 def _style(style, fill, frame):
     if style is None:
-        return fill or "oak_planks", frame or "spruce_log"
+        style = DEFAULT_STYLE
     if style not in WALL_STYLES:
         raise ValueError(f"style must be one of {', '.join(sorted(WALL_STYLES))} (got {style!r})")
     f, r = WALL_STYLES[style]
@@ -477,7 +481,7 @@ def framed_wall(x1, z1, x2, z2, y, h, facing, fill=None, frame=None, spacing=4, 
     """A timber-framed wall: `fill` infill from y to y+h-1 on the straight line (x1, z1)-(x2, z2), log posts in the wall
     at both ends and every `spacing` blocks, and a frame that sticks out 1 block on the `facing` side: posts from y-1 to
     the top and log beams along the bottom (y-1) and top (y+h-1) rows. Leave the cells between posts for windows/doors.
-    style = a WALL_STYLES name ('light': birch planks in a dark oak frame) for fill and frame not given."""
+    style = a WALL_STYLES name for fill and frame not given (default 'light': birch planks in an oak log frame)."""
     fill, frame = _style(style, fill, frame)
     cells, (dx, dz) = _wall_cells(x1, z1, x2, z2, facing)
     along = _AXIS[facing]
@@ -501,8 +505,9 @@ def framed_house(x1, z1, x2, z2, y, floors=1, storey=4, fill=None, frame=None, f
     y + floors * (storey + 1) - 1: the roof's eaves go one higher. skip = sides without a wall (a wing joined to another
     building, e.g. ['east']); flat = sides whose frame stays in the wall (where a lower wing and its roof join);
     clear=True empties the rooms first. Then add windows, a porch or door, and the roof.
-    style = a WALL_STYLES name for fill and frame not given: 'light' (birch planks in dark oak logs, the reference
-    look), 'oak', 'stripped', 'plaster', 'classic' (oak planks in spruce logs, the default).
+    style = a WALL_STYLES name for fill and frame not given: 'light' (birch planks in oak logs, the reference look and
+    the default), 'oak' (oak planks in spruce logs), 'stripped', 'plaster', 'classic'; 'dark' (spruce planks in dark
+    oak logs) only when the user asks for a dark build.
     Tip: a side of 4k+1 blocks with spacing 4 leaves 3-block bays, a window or door in the middle of each; 5k+1 blocks
     with spacing 5 leaves 4-block bays for 2-wide windows."""
     fill, frame = _style(style, fill, frame)
@@ -548,11 +553,13 @@ def framed_house(x1, z1, x2, z2, y, floors=1, storey=4, fill=None, frame=None, f
     return _code(out)
 
 
-def window_with_box(x, y, z, facing, width=1, height=2, glass="glass_pane", shutter="spruce_trapdoor",
-                    box="spruce_trapdoor", flower="poppy", lintel="stripped_spruce_log", wall=None):
-    """A framed window in a wall: `width` x `height` panes, the lowest-left pane at (x, y, z) (width runs east or south
-    along the wall), a log lintel over it, open trapdoor shutters on both sides and a flower box under it (grass block
-    with flowers, trapdoors round its front, sides and bottom), all on the `facing` (outside) side.
+def window_with_box(x, y, z, facing, width=1, height=2, glass="glass_pane", shutter="birch_trapdoor",
+                    box="oak_trapdoor", flower="poppy", lintel="stripped_birch_log", wall=None):
+    """A white-framed window in a wall: `width` x `height` panes, the lowest-left pane at (x, y, z) (width runs east or
+    south along the wall), a light (stripped birch) lintel over it, open birch trapdoor shutters on both sides and a
+    flower box directly under the panes (a grass block in front of each bottom pane with one `flower` kind, trapdoors
+    round its front, sides and bottom), all on the `facing` (outside) side. Flowers go only in these boxes under
+    windows, one kind per window, never scattered over the walls.
     wall = a block for a small wall piece round it (a window on its own); None keeps the wall already built."""
     dx, dz = _dir(facing)
     ax, az = (1, 0) if _AXIS[facing] == "x" else (0, 1)
@@ -580,7 +587,7 @@ def window_with_box(x, y, z, facing, width=1, height=2, glass="glass_pane", shut
     return _code(out)
 
 
-def porch(x, y, z, facing, width=5, depth=3, wood="spruce", post="spruce_log", roof="spruce_stairs", steps=0, path=2,
+def porch(x, y, z, facing, width=5, depth=3, wood="oak", post="oak_log", roof="oak_stairs", steps=0, path=2,
           path_block="dirt_path", door=True):
     """A covered porch at a door: the door at (x, y, z) in the wall (facing out), a plank deck at y-1 in front of it
     (`width` wide, `depth` deep), log posts on the front corners, beams at y+3, a low roof at y+4 with stair edges, a
@@ -653,7 +660,7 @@ def porch(x, y, z, facing, width=5, depth=3, wood="spruce", post="spruce_log", r
     return _code(out)
 
 
-def balcony(x, y, z, facing, length=5, depth=2, wood="spruce", post="spruce_log", ground_y=None, door=False, gap=None):
+def balcony(x, y, z, facing, length=5, depth=2, wood="oak", post="oak_log", ground_y=None, door=False, gap=None):
     """A balcony: a plank floor at height y sticking out `depth` blocks on the `facing` side of a wall, `length` blocks
     along it from (x, z) (the floor cell next to the wall; length runs east or south). A fence railing round the open
     edges, log posts with lanterns on the outer corners, upside-down stair brackets under the floor at both ends, and
@@ -745,7 +752,7 @@ def external_stair(x, y, z, dir, height, width=2, flight=4, landing=2, block="oa
     return _code(out)
 
 
-def storey_band(x1, z1, x2, z2, y, stairs="dark_oak_stairs", out=2, skip=(), gaps=()):
+def storey_band(x1, z1, x2, z2, y, stairs="spruce_stairs", out=2, skip=(), gaps=()):
     """A storey band (pent roof, jetty skirt) round the walls x1..x2, z1..z2: a row of stairs at height y, `out` blocks
     outside the walls (2 for a framed_house, whose frame sticks out 1), the high side against the wall, slabs on the
     corners. Put it at or 1 below a floor line between two storeys: it splits a tall facade into layers like the reference
@@ -907,10 +914,11 @@ def _gable_args(x1, z1, x2, z2, ridge, open_end):
     return x1, z1, x2, z2, ridge, ends
 
 
-def gable_roof_trim(x1, z1, x2, z2, y, stairs="spruce_stairs", trim="dark_oak", ridge=None, overhang=1, fill="oak_planks",
+def gable_roof_trim(x1, z1, x2, z2, y, stairs=ROOF_DEFAULT, trim=TRIM_DEFAULT, ridge=None, overhang=1, fill="oak_planks",
                     open_end=None):
-    """A gable roof with a trim over the walls x1..x2, z1..z2 (eaves at y): `stairs` slopes; the eave row, the barge
-    boards on the gable ends and the ridge in `trim`; eaves `overhang` blocks past the walls (2 when the walls have a
+    """A gable roof with a trim over the walls x1..x2, z1..z2 (eaves at y): `stairs` slopes (default teal, the reference
+    look; a dark or grey roof only when the user asks); the eave row, the barge boards on the gable ends and the ridge
+    in `trim` (default oak); eaves `overhang` blocks past the walls (2 when the walls have a
     frame sticking out); gable triangles filled with `fill`. ridge 'x' or 'z' (default: along the longer side).
     open_end = 'west'/'east' (ridge x) or 'north'/'south' (ridge z): that end joins a taller building, so no overhang,
     barge or gable there and the roof stops 1 block short of that wall."""
@@ -921,7 +929,7 @@ def gable_roof_trim(x1, z1, x2, z2, y, stairs="spruce_stairs", trim="dark_oak", 
                  + _emit(_settle(cells)))
 
 
-def hip_roof_trim(x1, z1, x2, z2, y, stairs="spruce_stairs", trim="dark_oak", overhang=1, fill="oak_planks"):
+def hip_roof_trim(x1, z1, x2, z2, y, stairs=ROOF_DEFAULT, trim=TRIM_DEFAULT, overhang=1, fill="oak_planks"):
     """A four-sided (hip) roof over the walls x1..x2, z1..z2, eaves at y, `overhang` past the walls; the eave ring and the
     ridge cap in `trim`; each ring of stairs stands on a ring of `fill` so nothing floats."""
     x1, x2 = sorted((x1, x2))
@@ -962,7 +970,7 @@ def hip_roof_trim(x1, z1, x2, z2, y, stairs="spruce_stairs", trim="dark_oak", ov
     return _code([f"# hip roof, {tst[:-7]} trim, x {x1}..{x2}, z {z1}..{z2}, eaves at y={y}"] + _emit(_settle(cells)))
 
 
-def cross_gable_roof(x1, z1, x2, z2, y, stairs="spruce_stairs", trim="dark_oak", fill="oak_planks", front="south",
+def cross_gable_roof(x1, z1, x2, z2, y, stairs=ROOF_DEFAULT, trim=TRIM_DEFAULT, fill="oak_planks", front="south",
                      wing=None, overhang=1):
     """A layered roof: a trimmed gable roof along the long side of x1..x2, z1..z2 plus a lower cross gable over the
     middle of the `front` wall with its own gable end facing out, `wing` blocks wide (odd; default about a third of the
