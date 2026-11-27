@@ -588,10 +588,25 @@ def _generate_loop(text, size, model, usage, prompt, image_path, log, terrain=No
     checks_meta = {"total": checks.total(found), "by_check": checks.counts(found)}
     log("Checks: " + (checks.summary(found) if found else "no problems"))
     _record_mistakes(found, bid)
+    from . import quality
+    land = None
+    if terrain:
+        from . import terrain as terr
+        try:
+            land = terr.load(terrain)
+        except terr.TerrainError:
+            land = None
+    q = quality.score(quality.built_only(blocks, land), size)
+    if q["building"]:
+        log("Quality: " + quality.summary(q))
     rec = usage.record()
     cost = f" (about ${rec['cost_usd']:.2f})" if rec["cost_usd"] else ""
     log(f"Done: {len(blocks):,} blocks. {engine_label('claude_loop')} used {rec['total_tokens']:,} tokens{cost}.")
-    return store.update_meta(bid, checks=checks_meta, usage=rec, model=model, prompt=prompt)
+    extra = {}
+    if q["building"]:
+        kept = (store.get_meta(bid).get("quality") or {}).get("kept_by_user", False)
+        extra["quality"] = {"total": q["total"], "parts": q["parts"], "town": q["town"], "kept_by_user": kept}
+    return store.update_meta(bid, checks=checks_meta, usage=rec, model=model, prompt=prompt, **extra)
 
 
 def _ground_of(blocks, terrain):
@@ -804,6 +819,29 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                     log("Kept the first version (the second didn't have fewer check problems).")
             except EngineError as e:
                 log(f"Kept the first version ({e}).")
+        from . import quality
+
+        def _quality(b):
+            return quality.score(quality.built_only(b, land), size)
+        q = _quality(blocks)
+        if q["building"] and q["total"] < quality.QUALITY_MIN:
+            log(f"Quality: {quality.summary(q)}, below {quality.QUALITY_MIN}.")
+            log(f"Asking {who} to make it look better (frames, roof, windows, porch, garden)...")
+            try:
+                _, code2, _ = extract(convo.follow_up(prompts.quality_fix_message(q), code))
+                code2, blocks2, meta2 = build(code2)
+                q2 = _quality(blocks2)
+                found2 = checks.run(blocks2, size, ground=_ground(blocks2))
+                sized = not parent_id and not base
+                size_ok = not sized or (prompts.size_error(size, prompts.dims_of(blocks2))[0]
+                                        <= prompts.size_error(size, prompts.dims_of(blocks))[0])
+                if q2["building"] and q2["total"] > q["total"] and size_ok and checks.total(found2) <= checks.total(found):
+                    code, blocks, meta, found, q = code2, blocks2, meta2, found2, q2
+                    log(f"Quality after the fix: {quality.summary(q)}.")
+                else:
+                    log("Kept the first version (the second didn't score higher, or broke the size or the checks).")
+            except EngineError as e:
+                log(f"Kept the first version ({e}).")
         final = placement.process(blocks, final=True, **popts, only=sandbox.scope(meta))   # last resort: nothing impossible is left
         sandbox.restore_modules(blocks, meta)
         if base:
@@ -869,6 +907,10 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
 
         found = checks.run(blocks, size, ground=_ground(blocks))                  # final state (the test lab may have changed the build)
         checks_meta = {"total": checks.total(found), "by_check": checks.counts(found)}
+        q = _quality(blocks)
+        quality_meta = {"total": q["total"], "parts": q["parts"], "town": q["town"]} if q["building"] else None
+        if q["building"]:
+            log("Quality: " + quality.summary(q))
         if found:
             log("Checks: " + checks.summary(found))
         title = meta.get("name") or title or prompt[:60] or "Build"
@@ -890,6 +932,8 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                                  data_version=mods.data_version(version), modpack=(pack or {}).get("name"),
                                  tiles=sandbox.tiles_of(meta), modules=meta.get("modules"), base=base_id,
                                  entities=meta.get("entities"), tested=tested, checks=checks_meta)
+        if quality_meta:
+            saved = store.update_meta(saved["id"], quality=quality_meta)
         status = "done"
         learn.log_generation(saved, fixes, list(meta.get("redstone_warnings") or []))
         return saved

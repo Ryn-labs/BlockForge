@@ -409,6 +409,20 @@ def checks_fix_message(findings):
             "\n\nFix these and keep everything else exactly as it is. Reply with the complete corrected script in one ```python block.")
 
 
+def quality_fix_message(result):
+    """Ask for one round of fixes for a plain-looking building: the score, the weakest parts and what to do where."""
+    from . import quality
+    lines = [f"BlockForge's quality check scores this {'town' if result.get('town') else 'building'} {result['total']}/100; "
+             f"it needs {quality.QUALITY_MIN} or more to look like a good build, not a blocky box. Weakest parts:"]
+    for k, v, fixes in quality.weakest(result, 3):
+        lines.append(f"- {quality.LABELS[k]} {v}/100: " + " ".join(fixes[:2]))
+    lines += ["", "Other findings:"] + ["- " + f for f in result.get("findings", [])[:10]]
+    return ("\n".join(lines) + "\n\nImprove these parts in place: log frames that stick out of the walls, a pitched roof "
+            "with overhang and trim, framed windows with shutters and flower boxes, a porch or balcony, a chimney, a path "
+            "and a garden. Keep the size and keep the paths, doors and stairs working. Reply with the complete improved "
+            "script in one ```python block.")
+
+
 def redstone_fix_message(problems):
     return ("The build ran, but BlockForge's checker found blocks that can't exist or wouldn't work in vanilla Minecraft:\n- "
             + "\n- ".join(problems) +
