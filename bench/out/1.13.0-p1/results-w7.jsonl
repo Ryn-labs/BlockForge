@@ -1,0 +1,1 @@
+{"id": 8, "key": "grove", "version": "1.13.0-p1", "build": "20261127-172215-7ef473", "floating": 0, "removed": 0, "buried_path": 0, "jump_steps": 0, "corner_turns": 0, "blocked_doors": 0, "wrong_facing": 0, "size_off": 0, "overwritten": 85, "cost": 0.338, "size": [44, 20, 40], "script_errors": 0, "fix_rounds": 3, "time_s": 112, "mistakes": 85}

@@ -1,4 +1,4 @@
-"""Benchmark scorer: counts the mistakes in one finished build (lower is better, nothing hidden).
+"""Benchmark scorer (v2, 27 Nov: path blocks must be column tops; buried counts steps only): counts the mistakes in one finished build (lower is better, nothing hidden).
 Works on a build folder in the (temp) data dir: blocks.json, meta.json, code.py.
   floating       solid blocks in groups that never touch the ground layer (y 0)
   removed        lights/signs/plants/doors the final pass deleted (from meta.fixes "Removed ...")
@@ -16,6 +16,7 @@ FULLISH = ("planks", "stone", "bricks", "log", "wood", "cobblestone", "dirt", "g
            "wool", "glass", "deepslate", "andesite", "diorite", "granite", "tuff", "calcite", "basalt", "blackstone", "quartz_block",
            "prismarine", "mud", "clay", "moss_block", "podzol", "netherrack", "obsidian", "ore", "_block", "bookshelf", "hay_block")
 PASS = ("air", "cave_air", "light", "short_grass", "tall_grass", "fern", "large_fern", "dead_bush", "vine", "snow")
+NAT = ("dirt", "grass_block", "stone", "andesite", "diorite", "granite", "tuff", "coarse_dirt", "podzol", "gravel", "rooted_dirt", "deepslate", "sand")
 PATHMAT = ("gravel", "dirt_path", "cobblestone", "stone_bricks", "mossy_cobblestone", "polished_andesite", "packed_mud", "coarse_dirt")
 
 
@@ -95,10 +96,19 @@ def score(d, lo=None, hi=None):
     for (x, y, z), s in C.items():
         n = nm(s)
         if (n.endswith("_stairs") and props(s).get("half") == "bottom") or (n.endswith("_slab") and props(s).get("type") == "bottom") or n in PATHMAT:
+            covered = n in PATHMAT and g(x, y + 1, z) is not None and nm(g(x, y + 1, z)) not in PASS
+            if covered:                                                     # v2: a path running on under natural ground (into a hill) is buried
+                if nm(g(x, y + 1, z)) in NAT:
+                    for a, c in ((1, 0), (0, 1)):
+                        if nm(g(x + a, y, z + c)) in PATHMAT and nm(g(x - a, y, z - c)) in PATHMAT and any(
+                                (x + a * k * sg, z + c * k * sg, y) in stand and nm(g(x + a * k * sg, y, z + c * k * sg)) in PATHMAT
+                                for k in range(1, 9) for sg in (1, -1)):
+                            r["buried_path"] += 1; break
+                continue                                                    # a covered wall/floor block is not a path
             if n in PATHMAT and not any(nm(g(x + a, y + h, z + c)).endswith(("_stairs", "_slab")) for a, c in DV.values() for h in (-1, 0, 1)):
-                continue                                                    # a path material counts only next to steps (a path, not a floor)
+                continue                                                    # an open path material counts only next to steps (a path, not a floor)
             walk[(x, y, z)] = s
-            if solid(g(x, y + 1, z)) or solid(g(x, y + 2, z)): r["buried_path"] += 1
+            if n not in PATHMAT and (solid(g(x, y + 1, z)) or solid(g(x, y + 2, z))): r["buried_path"] += 1   # v2: buried = a step (stair/slab) with a solid block over it
     pairs = set()
     for (x, y, z), s in walk.items():
         if (x, z, y) not in stand: continue

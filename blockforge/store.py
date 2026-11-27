@@ -32,7 +32,7 @@ _migrate_old_data()
 os.makedirs(BUILDS, exist_ok=True)
 
 DEFAULT_SETTINGS = {
-    "engine": "claude_code", "api_key": "", "model": "claude-opus-5-5", "author": "",
+    "engine": "claude_code", "build_mode": "script", "api_key": "", "model": "claude-opus-5-5", "author": "",
     "research": True, "research_sites": None,             # None = the built-in list in prompts.DEFAULT_SITES
     "default_size": "medium", "default_palette": "auto",
     "custom_palettes": [],                                 # [{"name": ..., "description": ...}]

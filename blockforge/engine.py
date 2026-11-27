@@ -148,7 +148,7 @@ class Usage:
         r["cost_usd"] = round(r["cost_usd"], 4)
         r["seconds"] = round(r["seconds"], 1)
         r["total_tokens"] = r["input_tokens"] + r["output_tokens"] + r["cache_read_tokens"] + r["cache_write_tokens"]
-        if r["engine"] == "claude_code":
+        if r["engine"] in ("claude_code", "claude_loop"):
             r["billing"] = "Included in your Claude plan (cost shown at API list price)"
         elif r["engine"] == "api":
             r["billing"] = "Charged to your Anthropic API key"
@@ -370,7 +370,7 @@ PROVIDERS = {
     "ollama": {"name": "Ollama (on this PC, free)", "base": "http://localhost:11434/v1", "key": False, "local": True},
     "custom": {"name": "Custom (any OpenAI-compatible API)", "base": "", "key": None},
 }
-CLAUDE_ENGINES = ("claude_code", "api")
+CLAUDE_ENGINES = ("claude_code", "api", "claude_loop")
 
 
 def engine_label(engine):
@@ -378,6 +378,8 @@ def engine_label(engine):
         return "Claude (your account)"
     if engine == "api":
         return "Claude (API key)"
+    if engine == "claude_loop":
+        return "Claude (your account, step by step)"
     return PROVIDERS.get(engine, {}).get("name", engine).split(" (")[0]
 
 
@@ -550,6 +552,42 @@ def _overwrite_note(meta):
             f"If that was not intended, fix the order or the boxes. Examples: {ex}")
 
 
+def _iter_blocks(d):
+    pal, flat = d["palette"], d["blocks"]
+    for i in range(0, len(flat), 4):
+        yield (flat[i], flat[i + 1], flat[i + 2]), pal[flat[i + 3]]
+
+
+def _with_lessons(learned, engine):
+    """The one-shot script path also gets the top build lessons (short; the step loop has them in its system prompt)."""
+    if engine == "claude_loop":
+        return learned
+    from . import lessons
+    text = ""
+    for ln in lessons.top(40):
+        if len(text) + len(ln) > 2900:
+            break
+        text += "- " + ln + "\n"
+    if not text:
+        return learned
+    section = "## Lessons from earlier builds (get these right in the script)\n" + text.rstrip()
+    return (learned + "\n\n" + section) if learned else section
+
+
+def _generate_loop(text, size, model, usage, prompt, image_path, log):
+    """Step-by-step build: Claude Code uses the session tools. Returns the saved build's meta."""
+    from . import checks, loop
+    bid = loop.run(text, model, usage, find_claude(), log, image_path)
+    blocks = dict(_iter_blocks(store.get_blocks(bid)))
+    found = checks.run(blocks, size)
+    checks_meta = {"total": checks.total(found), "by_check": checks.counts(found)}
+    log("Checks: " + (checks.summary(found) if found else "no problems"))
+    rec = usage.record()
+    cost = f" (about ${rec['cost_usd']:.2f})" if rec["cost_usd"] else ""
+    log(f"Done: {len(blocks):,} blocks. {engine_label('claude_loop')} used {rec['total_tokens']:,} tokens{cost}.")
+    return store.update_meta(bid, checks=checks_meta, usage=rec, model=model, prompt=prompt)
+
+
 def generate(prompt, size="medium", palette="auto", model=None, engine=None, image=None, parent_id=None,
              research=None, redstone=None, use_mods=None, log=print):
     """image: (bytes, mime). Returns the saved build's meta."""
@@ -560,6 +598,10 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
     engine = engine or settings.get("engine", "claude_code")
     if engine not in CLAUDE_ENGINES and engine not in PROVIDERS:
         engine = "claude_code"
+    if engine == "claude_code" and settings.get("build_mode") == "loop" and not parent_id:
+        engine = "claude_loop"
+    if engine == "claude_loop" and (parent_id or find_claude() is None):
+        engine = "claude_code"                       # edits keep the script path; no Claude Code means no loop
     if engine in CLAUDE_ENGINES:
         model = model if model in MODELS else settings.get("model", "claude-opus-5-5")
     else:
@@ -579,6 +621,8 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
         log(f"Editing on top of the existing build ({len(base[0]):,} blocks): only the changes get written.")
     if research is None:
         research = settings.get("research", True) and not parent_id
+    if engine == "claude_loop":
+        research = False                             # the step tools replace the web research round
     if research and engine not in CLAUDE_ENGINES:
         log(f"Online research needs Claude, so {who} will design this one without it.")
         research = False
@@ -601,7 +645,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
     text = prompts.user_message(prompt, size, palette, prev_code, has_image=bool(user_image),
                                 research_sites=sites if research else None, palette_text=palette_text,
                                 redstone=redstone, version=version, mods_text=mods_text,
-                                learned_text=learn.prompt_section(prompt), base_text=base_text)
+                                learned_text=_with_lessons(learn.prompt_section(prompt), engine), base_text=base_text)
     usage = Usage(engine, model)
     started = time.time()
     status, title, saved = "error", None, None
@@ -619,6 +663,10 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
             f.write(image[0])
 
     try:
+        if engine == "claude_loop":
+            saved = _generate_loop(text, size, model, usage, prompt, image_path, log)
+            status = "done"
+            return saved
         convo = _Conversation(engine, model, settings, usage, text, image, image_path, research, log, pack)
         title, code, refs = extract(convo.first())
         if refs:
@@ -678,10 +726,21 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
             log("Checks: " + checks.summary(found))
             log(f"Asking {who} to fix the walking, door and floating problems...")
             try:
-                _, code2, _ = extract(convo.follow_up(prompts.checks_fix_message(found), code))
+                sized = not parent_id and not base
+                msg = prompts.checks_fix_message(found)
+                if sized:                                   # the fix round must not grow or shrink the build (size drifted here before)
+                    w_, h_, l_ = prompts.dims_of(blocks)
+                    msg += (f"\n\nKeep the overall size as it is now ({w_} wide, {h_} high, {l_} long): "
+                            "fix these problems in place, don't add or remove whole sections.")
+                _, code2, _ = extract(convo.follow_up(msg, code))
                 code2, blocks2, meta2 = build(code2)
                 found2 = checks.run(blocks2, size)
-                if checks.total(found2) < checks.total(found):
+                size_ok = True
+                if sized:
+                    size_ok = prompts.size_error(size, prompts.dims_of(blocks2))[0] <= prompts.size_error(size, prompts.dims_of(blocks))[0]
+                    if not size_ok:
+                        log("Kept the first version (the fix moved the build further from the size you asked for).")
+                if size_ok and checks.total(found2) < checks.total(found):
                     code, blocks, meta, found = code2, blocks2, meta2, found2
                     log("Checks after the fix: " + (checks.summary(found) if found else "no problems"))
                 else:

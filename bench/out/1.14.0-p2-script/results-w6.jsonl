@@ -1,0 +1,1 @@
+{"id": 7, "key": "village_street", "version": "1.14.0-p2-script", "build": "20261127-185759-d66da0", "floating": 0, "removed": 0, "buried_path": 0, "jump_steps": 0, "corner_turns": 0, "blocked_doors": 0, "wrong_facing": 0, "size_off": 1, "overwritten": 653, "cost": 0.821, "size": [49, 16, 36], "script_errors": 0, "fix_rounds": 3, "time_s": 347, "mistakes": 654}
