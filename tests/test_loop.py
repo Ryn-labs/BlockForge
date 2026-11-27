@@ -65,7 +65,8 @@ class LoopEngine(unittest.TestCase):
                 captured["cfg"] = json.load(f)
             return FakeProc(SCRIPT)
 
-        with mock.patch.object(engine, "find_claude", return_value="claude"), mock.patch.object(loop, "_spawn", spawn):
+        with mock.patch.object(engine, "find_claude", return_value="claude"), mock.patch.object(loop, "_spawn", spawn), \
+                mock.patch.object(loop, "newest_build", lambda since: None):     # the id must come from the save result itself
             meta = engine.generate("A small stone well", size="tiny", engine="claude_loop", research=False, log=lines.append)
         self.assertEqual(store.get_meta(meta["id"])["title"], "Test well")
         self.assertGreater(meta["block_count"], 40)
