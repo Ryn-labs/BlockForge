@@ -8,11 +8,14 @@ sys.path.insert(0, ROOT)
 from blockforge.version import VERSION
 VERSION = os.environ.get("BENCH_LABEL") or VERSION
 OUT = os.path.join(ROOT, "bench", "out", VERSION); os.makedirs(OUT, exist_ok=True)
+REAL_DATA = os.environ.get("BLOCKFORGE_DATA") or os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "BlockForge")
 os.environ["BLOCKFORGE_DATA"] = os.environ.get("BLOCKFORGE_DATA") or os.path.join(tempfile.gettempdir(), f"bf-bench-{VERSION}")
 os.environ.setdefault("BLOCKFORGE_PORT", "8799")
 from blockforge import engine, store, prompts as P
 sys.path.insert(0, os.path.join(ROOT, "bench"))
 import score as SC, render as RD
+from blockforge import mistake_stats as MS
+MS.PATH = os.environ.get("BENCH_STATS") or os.path.join(REAL_DATA, "mistake_stats.json")   # the app's real stats, not the temp data
 
 args = sys.argv[1:]
 ONLY = {int(v) for v in args[args.index("--only") + 1].split(",")} if "--only" in args else None
@@ -50,6 +53,8 @@ for p in PROMPTS:
     r["fix_rounds"] = sum(1 for l in logs if l.startswith("Asking "))
     r["time_s"] = round(time.time() - t0)
     r["mistakes"] = sum(max(0, r.get(k, 0)) for k in KEYS if k not in ("fix_rounds",)) + (1 if r.get("error") else 0)
+    try: MS.record_bench_row(r)                                             # top mistakes come back as lessons
+    except Exception: traceback.print_exc()
     open(os.path.join(OUT, f"{p['id']:02d}-{p['key']}.log"), "w", encoding="utf-8").write("\n".join(logs))
     done[p["id"]] = r
     with open(res_path, "w", encoding="utf-8") as f:
