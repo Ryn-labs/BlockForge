@@ -115,7 +115,8 @@ def size_fix_message(issue):
 
 PALETTES = {
     "auto": "Choose whatever palette suits the build best.",
-    "medieval": "Medieval: stone bricks, cobblestone, spruce and dark oak wood, deepslate tiles roofs, lanterns.",
+    "medieval": "Medieval: stone bricks, cobblestone, oak and spruce log frames with white plaster or birch infill, oak "
+                "or spruce stair roofs, lanterns (dark oak and deepslate only for a stronghold or a dark build).",
     "modern": "Modern: white and light gray concrete, smooth quartz, glass, black concrete accents, birch.",
     "fantasy": "Fantasy: purpur, amethyst, prismarine, end stone, cherry wood, glowing accents.",
     "nature": "Natural/rustic: oak and spruce logs, moss, mud bricks, packed mud, leaves, flowers.",
@@ -418,9 +419,11 @@ def quality_fix_message(result):
     for k, v, fixes in quality.weakest(result, 3):
         lines.append(f"- {quality.LABELS[k]} {v}/100: " + " ".join(fixes[:2]))
     lines += ["", "Other findings:"] + ["- " + f for f in result.get("findings", [])[:10]]
-    return ("\n".join(lines) + "\n\nImprove these parts in place: 2+ storeys, a light wall fill in a dark log frame "
-            "that sticks out of the walls, a pitched roof in its own colour (teal, green, gray, red) with overhang, trim "
-            "and lower roofs at other heights, big 2 x 2 framed windows with shutters and flower boxes, a porch and "
+    return ("\n".join(lines) + "\n\nImprove these parts in place: 2+ storeys, a light wall fill (birch, oak or "
+            "stripped wood) in an oak or spruce log frame that sticks out of the walls (no dark oak or deepslate walls "
+            "unless the request asks for a dark look), a pitched roof in its own colour (teal, green, red) with an oak "
+            "trim, overhang and lower roofs at other heights, big 2 x 2 white-framed windows with a flower box directly "
+            "under each, a porch and "
             "balconies, a chimney, a path and a garden. Keep the size and keep the paths, doors and stairs working. Reply "
             "with the complete improved script in one ```python block.")
 
