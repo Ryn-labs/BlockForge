@@ -678,10 +678,21 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
             log("Checks: " + checks.summary(found))
             log(f"Asking {who} to fix the walking, door and floating problems...")
             try:
-                _, code2, _ = extract(convo.follow_up(prompts.checks_fix_message(found), code))
+                sized = not parent_id and not base
+                msg = prompts.checks_fix_message(found)
+                if sized:                                   # the fix round must not grow or shrink the build (size drifted here before)
+                    w_, h_, l_ = prompts.dims_of(blocks)
+                    msg += (f"\n\nKeep the overall size as it is now ({w_} wide, {h_} high, {l_} long): "
+                            "fix these problems in place, don't add or remove whole sections.")
+                _, code2, _ = extract(convo.follow_up(msg, code))
                 code2, blocks2, meta2 = build(code2)
                 found2 = checks.run(blocks2, size)
-                if checks.total(found2) < checks.total(found):
+                size_ok = True
+                if sized:
+                    size_ok = prompts.size_error(size, prompts.dims_of(blocks2))[0] <= prompts.size_error(size, prompts.dims_of(blocks))[0]
+                    if not size_ok:
+                        log("Kept the first version (the fix moved the build further from the size you asked for).")
+                if size_ok and checks.total(found2) < checks.total(found):
                     code, blocks, meta, found = code2, blocks2, meta2, found2
                     log("Checks after the fix: " + (checks.summary(found) if found else "no problems"))
                 else:
