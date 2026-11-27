@@ -579,12 +579,12 @@ def _with_lessons(learned, engine):
     return (learned + "\n\n" + section) if learned else section
 
 
-def _generate_loop(text, size, model, usage, prompt, image_path, log):
+def _generate_loop(text, size, model, usage, prompt, image_path, log, terrain=None):
     """Step-by-step build: Claude Code uses the session tools. Returns the saved build's meta."""
     from . import checks, loop
-    bid = loop.run(text, model, usage, find_claude(), log, image_path)
+    bid = loop.run(text, model, usage, find_claude(), log, image_path, terrain=terrain, title=prompt[:60])
     blocks = dict(_iter_blocks(store.get_blocks(bid)))
-    found = checks.run(blocks, size)
+    found = checks.run(blocks, size, ground=_ground_of(blocks, terrain))
     checks_meta = {"total": checks.total(found), "by_check": checks.counts(found)}
     log("Checks: " + (checks.summary(found) if found else "no problems"))
     _record_mistakes(found, bid)
@@ -594,10 +594,26 @@ def _generate_loop(text, size, model, usage, prompt, image_path, log):
     return store.update_meta(bid, checks=checks_meta, usage=rec, model=model, prompt=prompt)
 
 
+def _ground_of(blocks, terrain):
+    """The Ground the checks use when a build stands on terrain (None without terrain, or when it cannot be loaded)."""
+    if not terrain:
+        return None
+    from . import terrain as terr
+    try:
+        land = terr.load(terrain)
+    except terr.TerrainError:
+        return None
+    return terr.Ground(blocks, land)
+
+
 def generate(prompt, size="medium", palette="auto", model=None, engine=None, image=None, parent_id=None,
-             research=None, redstone=None, use_mods=None, log=print, build_mode=None):
+             research=None, redstone=None, use_mods=None, log=print, build_mode=None, terrain=None):
     """image: (bytes, mime). Returns the saved build's meta.
+    terrain: a build id or the path of a .schem/.litematic file: a NEW build on that land (not an edit). The land is part
+    of the saved build.
     build_mode: "step_by_step" or "script" (default: the setting). engine="claude_loop" means step by step with Claude Code."""
+    if terrain and parent_id:
+        raise EngineError("A build on terrain is a new build: use either terrain or parent_id, not both.")
     if len(prompt or "") > 500_000:
         raise EngineError(f"That prompt is about {len(prompt):,} characters. That's more than fits in one request, even for "
                           "the largest models (about 500,000 characters). Keep the most important parts and try again.")
@@ -632,7 +648,23 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
     base_id, base = store.edit_base(parent_id) if parent_id else (None, None)
     user_image = image
     base_text = None
-    if base:
+    terrain_text = None
+    land = None
+    if terrain and mode != "step_by_step":
+        from . import terrain as terr
+        try:
+            land = terr.load(terrain)
+        except terr.TerrainError as e:
+            raise EngineError("Could not use that terrain: " + str(e)) from None
+        base = (land, {})                                   # the land is the base, like an edit, but the build is NEW (no parent)
+        top = terr.ground_top(land, land)
+        span = max(max(c[0] for c in top) - min(c[0] for c in top), max(c[1] for c in top) - min(c[1] for c in top)) + 1
+        terrain_text = ("## You are building ON terrain\nThe land is ALREADY placed when your script starts (it keeps its own "
+                        "coordinates). Write ONLY what you build on it, plus the cuts and fills it needs: fill(..., 'air') digs, "
+                        "fill(..., 'dirt') raises. Do not rebuild the land. Use get(x, y, z) to read it.\n" + terr.summary(land, land, top)
+                        + "\n" + terr.ground_text(top, step=max(1, -(-span // 32))))
+        log(f"Building on the terrain ({len(land):,} blocks): only what is built on it gets written.")
+    if base and not terrain_text:
         from . import describe
         thumb = os.path.join(store._dir(parent_id), "thumb.jpg")
         if not image and os.path.isfile(thumb):
@@ -666,7 +698,8 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
     text = prompts.user_message(prompt, size, palette, prev_code, has_image=bool(user_image),
                                 research_sites=sites if research else None, palette_text=palette_text,
                                 redstone=redstone, version=version, mods_text=mods_text,
-                                learned_text=_with_lessons(learn.prompt_section(prompt), engine), base_text=base_text)
+                                learned_text=_with_lessons(learn.prompt_section(prompt), engine), base_text=base_text,
+                                terrain_text=terrain_text)
     usage = Usage(engine, model)
     started = time.time()
     status, title, saved = "error", None, None
@@ -685,7 +718,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
 
     try:
         if engine == "claude_loop":
-            saved = _generate_loop(text, size, model, usage, prompt, image_path, log)
+            saved = _generate_loop(text, size, model, usage, prompt, image_path, log, terrain)
             status = "done"
             return saved
         convo = _Conversation(engine, model, settings, usage, text, image, image_path, research, log, pack)
@@ -741,8 +774,11 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                     problems = meta.get("warnings") or []
             except EngineError as e:
                 log(f"Kept the first version ({e}).")
-        from . import checks
-        found = checks.run(blocks, size)
+        from . import checks, terrain as terr
+
+        def _ground(b):
+            return terr.Ground(b, land) if land else None
+        found = checks.run(blocks, size, ground=_ground(blocks))
         if found and MAX_CHECK_FIXES > 0:
             log("Checks: " + checks.summary(found))
             log(f"Asking {who} to fix the walking, door and floating problems...")
@@ -755,7 +791,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                             "fix these problems in place, don't add or remove whole sections.")
                 _, code2, _ = extract(convo.follow_up(msg, code))
                 code2, blocks2, meta2 = build(code2)
-                found2 = checks.run(blocks2, size)
+                found2 = checks.run(blocks2, size, ground=_ground(blocks2))
                 size_ok = True
                 if sized:
                     size_ok = prompts.size_error(size, prompts.dims_of(blocks2))[0] <= prompts.size_error(size, prompts.dims_of(blocks))[0]
@@ -831,7 +867,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
                     log(f"Kept the earlier version ({e}).")
                     break
 
-        found = checks.run(blocks, size)                  # final state (the test lab may have changed the build)
+        found = checks.run(blocks, size, ground=_ground(blocks))                  # final state (the test lab may have changed the build)
         checks_meta = {"total": checks.total(found), "by_check": checks.counts(found)}
         if found:
             log("Checks: " + checks.summary(found))

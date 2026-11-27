@@ -57,10 +57,17 @@ def system_prompt(text=None):
     return out
 
 
-def user_text(text):
-    """text = prompts.user_message(...) (request, size, palette, version, mods...). Adds the instructions for the loop."""
+def user_text(text, session_id=None):
+    """text = prompts.user_message(...) (request, size, palette, version, mods...). Adds the instructions for the loop.
+    session_id = a session that already stands on the terrain (do not call start_build)."""
+    if session_id:
+        start = (f"Build session {session_id} is ALREADY started and holds the terrain: do not call start_build, pass "
+                 f"session=\"{session_id}\" to every tool. Read its ground first (describe, ground), then plan_layout for whole "
+                 "districts, and build part by part (build_step with parts for several independent houses at once) ON the land. ")
+    else:
+        start = "Start with start_build (give it a title and the size). "
     return (text + "\n\n## How to work\n"
-            "Do not write one big script. Start with start_build (give it a title and the size). Plan the build in parts, then for "
+            "Do not write one big script. " + start + "Plan the build in parts, then for "
             "each part: build_step it (about 10-40 lines), view it, and check it. Fix every problem the check lists with "
             "another build_step (or undo and redo the part). When paths, stairs or doors exist, walk_test the routes people "
             "will use and fix what it finds. Keep the overall size asked for. Finish with save_build and tell the user the "
@@ -117,12 +124,23 @@ def newest_build(since):
     return best
 
 
-def run(text, model, usage, exe, log=print, image_path=None):
-    """Run the loop. Returns the id of the build that save_build stored. Raises engine.EngineError."""
+def run(text, model, usage, exe, log=print, image_path=None, terrain=None, title=None):
+    """Run the loop. Returns the id of the build that save_build stored. Raises engine.EngineError.
+    terrain = a build id or a .schem/.litematic path: the session is started on that land before the AI begins."""
     from .engine import EngineError
     work = tempfile.mkdtemp(prefix="blockforge_loop_")
     started = time.time()
     try:
+        pre = None
+        if terrain:
+            from . import session as _ss, terrain as _tr
+            try:
+                pre = _ss.start(str(title or "Build on terrain")[:80], "", terrain)
+            except _ss.SessionError as e:
+                raise EngineError("Could not start on that terrain: " + str(e)) from None
+            text += ("\n\n## The terrain\n" + _tr.summary(pre.blocks, pre.terrain_blocks, _tr.ground_top(pre.blocks, pre.terrain_blocks))
+                     + "\nThe land is already in the build (it is saved with it). Never rebuild it; cut and fill only where the "
+                     "buildings and roads need it, and say how much.")
         if image_path:
             shutil.copy(image_path, work)
             text += (f"\n\nThe reference image is the file {os.path.basename(image_path)} in the current folder - "
@@ -133,11 +151,11 @@ def run(text, model, usage, exe, log=print, image_path=None):
                "--tools", "Read", "--allowedTools", allowed, "--disallowedTools", ",".join(PREFIX + t for t in ("create_build", "update_build", "app_open", "app_close", "export_build")), "--max-turns", str(MAX_TURNS), "--no-session-persistence"]
         log("Asking Claude to build it step by step (via Claude Code)...")
         proc = _spawn(cmd, work, dict(os.environ))
-        proc.stdin.write(user_text(text).encode("utf-8"))
+        proc.stdin.write(user_text(text, pre.id if pre else None).encode("utf-8"))
         proc.stdin.close()
         timer = threading.Timer(TIMEOUT, proc.kill)
         timer.start()
-        res, uses, saved_id, sid = None, {}, None, None
+        res, uses, saved_id, sid = None, {}, None, (pre.id if pre else None)
         try:
             for raw in proc.stdout:
                 try:

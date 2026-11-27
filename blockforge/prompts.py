@@ -332,12 +332,14 @@ def wants_redstone(prompt, previous_code=None):
 
 
 def user_message(prompt, size="medium", palette="auto", previous_code=None, has_image=False,
-                 research_sites=None, palette_text=None, redstone=None, version=None, mods_text=None, learned_text=None, base_text=None):
+                 research_sites=None, palette_text=None, redstone=None, version=None, mods_text=None, learned_text=None, base_text=None, terrain_text=None):
     parts = []
     if redstone is None:
         redstone = wants_redstone(prompt, previous_code)
     if base_text:
         parts.append(base_text)
+    if terrain_text:
+        parts.append(terrain_text)
     if previous_code:
         parts.append(("Here is the current script of changes (it runs on top of the build above):" if base_text else
                       "Here is the current build script:") + "\n```python\n" + previous_code + "\n```\n")
@@ -345,12 +347,15 @@ def user_message(prompt, size="medium", palette="auto", previous_code=None, has_
     elif base_text:
         parts.append("Change request: " + (prompt.strip() or "Improve this build.") +
                      "\nReply with a one-line title, then ONE ```python block containing only the changes.")
+    elif terrain_text:
+        parts.append("Build request: " + prompt.strip() + "\nReply with a one-line title, then ONE ```python block containing only "
+                     "what you build ON the terrain (and the cuts and fills it needs). The terrain is already there.")
     else:
         parts.append("Build request: " + (prompt.strip() or "Recreate the attached image as a 3D build."))
     if has_image:
         parts.append("Reference image attached: reconstruct it as a real 3D Minecraft structure "
                      "(not flat pixel art, unless it is clearly flat art), matching its colours and shapes.")
-    if not previous_code and not base_text:
+    if not previous_code and not base_text and not terrain_text:
         parts.append("Target size: " + size_text(size) + ".")
     pal = palette_text or PALETTES.get(palette)
     if pal and palette != "auto":
