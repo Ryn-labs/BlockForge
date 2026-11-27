@@ -1,0 +1,1 @@
+{"id": 6, "key": "round_tower", "version": "1.13.0-p1", "build": "20261127-174037-1e8a07", "floating": 0, "removed": 0, "buried_path": 157, "jump_steps": 2, "corner_turns": 0, "blocked_doors": 0, "wrong_facing": 0, "size_off": 0, "overwritten": 33, "cost": 1.203, "size": [23, 33, 23], "script_errors": 0, "fix_rounds": 7, "time_s": 517, "mistakes": 192}

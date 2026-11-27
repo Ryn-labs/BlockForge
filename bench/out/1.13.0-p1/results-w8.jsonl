@@ -1,0 +1,1 @@
+{"id": 9, "key": "furnished_room", "version": "1.13.0-p1", "build": "20261127-172212-8c3aa4", "floating": 0, "removed": 1, "buried_path": 0, "jump_steps": 0, "corner_turns": 0, "blocked_doors": 0, "wrong_facing": 0, "size_off": 7, "overwritten": 81, "cost": 0.37, "size": [31, 15, 28], "script_errors": 0, "fix_rounds": 5, "time_s": 109, "mistakes": 89}

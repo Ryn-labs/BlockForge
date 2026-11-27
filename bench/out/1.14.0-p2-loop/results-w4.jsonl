@@ -1,0 +1,1 @@
+{"id": 5, "key": "arch_bridge", "version": "1.14.0-p2-loop", "build": "20261127-185333-6f3dc4", "floating": 0, "removed": 0, "buried_path": 65, "jump_steps": 2, "corner_turns": 0, "blocked_doors": 0, "wrong_facing": 0, "size_off": 0, "overwritten": 543, "cost": 0.498, "size": [41, 13, 17], "script_errors": 0, "fix_rounds": 1, "time_s": 102, "mistakes": 610}

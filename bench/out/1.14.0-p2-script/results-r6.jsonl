@@ -1,0 +1,1 @@
+{"id": 6, "key": "round_tower", "version": "1.14.0-p2-script", "build": "20261127-191011-9feac9", "floating": 0, "removed": 4, "buried_path": 323, "jump_steps": 22, "corner_turns": 0, "blocked_doors": 0, "wrong_facing": 0, "size_off": 1, "overwritten": 4, "cost": 1.336, "size": [25, 38, 25], "script_errors": 0, "fix_rounds": 5, "time_s": 526, "mistakes": 354}

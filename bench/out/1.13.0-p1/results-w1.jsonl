@@ -1,0 +1,1 @@
+{"id": 2, "key": "machiya", "version": "1.13.0-p1", "build": "20261127-171940-2e16d7", "floating": 0, "removed": 0, "buried_path": 0, "jump_steps": 0, "corner_turns": 0, "blocked_doors": 0, "wrong_facing": 0, "size_off": 8, "overwritten": 512, "cost": 0.891, "size": [25, 19, 32], "script_errors": 0, "fix_rounds": 5, "time_s": 344, "mistakes": 520}

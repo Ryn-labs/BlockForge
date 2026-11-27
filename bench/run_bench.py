@@ -18,6 +18,7 @@ args = sys.argv[1:]
 ONLY = {int(v) for v in args[args.index("--only") + 1].split(",")} if "--only" in args else None
 MODEL = args[args.index("--model") + 1] if "--model" in args else None
 RESEARCH = "--research" in args
+ENGINE = args[args.index("--engine") + 1] if "--engine" in args else "claude_code"
 PROMPTS = json.load(open(os.path.join(ROOT, "bench", "prompts.json")))
 TAG = os.environ.get("BENCH_TAG", "")
 res_path = os.path.join(OUT, f"results{'-' + TAG if TAG else ''}.jsonl")   # parallel workers write their own file
@@ -32,7 +33,7 @@ for p in PROMPTS:
     logs = []; t0 = time.time(); r = {"id": p["id"], "key": p["key"], "version": VERSION}
     parent = done.get(p.get("edit_of"), {}).get("build") if p.get("edit_of") else None
     try:
-        meta = engine.generate(p["prompt"], size=p["size"], palette="auto", model=MODEL, engine="claude_code", parent_id=parent,
+        meta = engine.generate(p["prompt"], size=p["size"], palette="auto", model=MODEL, engine=ENGINE, parent_id=parent,
                                research=RESEARCH, redstone=False, use_mods=False, log=lambda m: logs.append(str(m)))
         r["build"] = meta["id"]; d = os.path.join(str(store.BUILDS), meta["id"])
         lo, hi = P.PRESET_RANGES.get(p["size"], (None, None)) if not p.get("edit_of") else (None, None)

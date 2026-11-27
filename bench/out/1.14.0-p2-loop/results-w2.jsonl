@@ -1,0 +1,1 @@
+{"id": 3, "key": "stair_road", "version": "1.14.0-p2-loop", "build": "20261127-185150-8d00c4", "floating": 0, "removed": 0, "buried_path": 29, "jump_steps": 12, "corner_turns": 0, "blocked_doors": 0, "wrong_facing": 0, "size_off": 0, "overwritten": 138, "cost": 0.844, "size": [38, 29, 32], "script_errors": 0, "fix_rounds": 1, "time_s": 234, "mistakes": 179}

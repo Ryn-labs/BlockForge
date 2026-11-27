@@ -8,7 +8,7 @@ from blockforge.version import VERSION
 VERSION = os.environ.get("BENCH_LABEL") or VERSION
 args = sys.argv[1:]
 N = int(args[args.index("--workers") + 1]) if "--workers" in args else 5
-extra = ["--model", args[args.index("--model") + 1]] if "--model" in args else []
+extra = (["--model", args[args.index("--model") + 1]] if "--model" in args else []) + (["--engine", args[args.index("--engine") + 1]] if "--engine" in args else [])
 groups = [[1, 10], [2], [3], [4], [5], [6], [7], [8], [9]]
 procs = []; running = []
 def start(k, g):

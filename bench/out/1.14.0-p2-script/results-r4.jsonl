@@ -1,0 +1,1 @@
+{"id": 4, "key": "hill_castle", "version": "1.14.0-p2-script", "build": "20261127-191234-ebc982", "floating": 0, "removed": 2, "buried_path": 538, "jump_steps": 2, "corner_turns": 0, "blocked_doors": 4, "wrong_facing": 0, "size_off": 0, "overwritten": 3041, "cost": 1.615, "size": [95, 39, 95], "script_errors": 0, "fix_rounds": 5, "time_s": 672, "mistakes": 3587}

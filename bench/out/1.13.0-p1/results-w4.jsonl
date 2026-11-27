@@ -1,0 +1,1 @@
+{"id": 5, "key": "arch_bridge", "version": "1.13.0-p1", "build": "20261127-171808-2c054a", "floating": 0, "removed": 0, "buried_path": 48, "jump_steps": 8, "corner_turns": 0, "blocked_doors": 0, "wrong_facing": 0, "size_off": 1, "overwritten": 1265, "cost": 0.607, "size": [49, 15, 37], "script_errors": 0, "fix_rounds": 3, "time_s": 251, "mistakes": 1322}

@@ -1,4 +1,4 @@
-"""Benchmark scorer: counts the mistakes in one finished build (lower is better, nothing hidden).
+"""Benchmark scorer (v2, 27 Nov: path blocks must be column tops; buried counts steps only): counts the mistakes in one finished build (lower is better, nothing hidden).
 Works on a build folder in the (temp) data dir: blocks.json, meta.json, code.py.
   floating       solid blocks in groups that never touch the ground layer (y 0)
   removed        lights/signs/plants/doors the final pass deleted (from meta.fixes "Removed ...")
@@ -97,8 +97,10 @@ def score(d, lo=None, hi=None):
         if (n.endswith("_stairs") and props(s).get("half") == "bottom") or (n.endswith("_slab") and props(s).get("type") == "bottom") or n in PATHMAT:
             if n in PATHMAT and not any(nm(g(x + a, y + h, z + c)).endswith(("_stairs", "_slab")) for a, c in DV.values() for h in (-1, 0, 1)):
                 continue                                                    # a path material counts only next to steps (a path, not a floor)
+            if n in PATHMAT and (g(x, y + 1, z) not in (None,) and nm(g(x, y + 1, z)) not in PASS):
+                continue                                                    # scorer v2: a path block must be the top of its column (walls/floors under roofs are not paths)
             walk[(x, y, z)] = s
-            if solid(g(x, y + 1, z)) or solid(g(x, y + 2, z)): r["buried_path"] += 1
+            if n not in PATHMAT and (solid(g(x, y + 1, z)) or solid(g(x, y + 2, z))): r["buried_path"] += 1   # v2: buried = a step (stair/slab) with a solid block over it
     pairs = set()
     for (x, y, z), s in walk.items():
         if (x, z, y) not in stand: continue
