@@ -17,9 +17,10 @@ write down the rules in `docs/QUALITY.md`.
 
 | Example | What it is | Quality | Source | Licence |
 | --- | --- | --- | --- | --- |
-| `good_cottage` | Timber-framed cottage with a lower wing, trimmed gable roofs, framed windows with flower boxes, porch, chimney, fenced front garden, farm plot | 97 | Made in this project from `blockforge/patterns.py` | Owned by the BlockForge project |
-| `good_manor` | Two-storey manor, cross-gable roof, two wings with chimneys, porch with a balcony over it, garden, three farm plots | 98 | Made in this project from `blockforge/patterns.py` | Owned by the BlockForge project |
-| `good_village` | Five buildings (a hall as landmark, four varied houses), plaza with a well, winding streets, trees, garden, farm | 98 (town) | Made in this project from `blockforge/patterns.py` | Owned by the BlockForge project |
+| `good_cottage` | Two-storey timber-framed cottage (oak fill in a dark oak frame) with a storey band, a lower wing, green trimmed gable roofs, 2 x 2 framed windows with flower boxes, porch with a balcony over it, a side balcony, chimney, fenced front garden, farm plot | 85 | Made in this project from `blockforge/patterns.py` | Owned by the BlockForge project |
+| `good_manor` | Two-storey manor (plaster in a spruce frame), storey band, gray cross-gable roof, two wings with chimneys, porch with a balcony over it, a back balcony, garden, three farm plots | 86 | Made in this project from `blockforge/patterns.py` | Owned by the BlockForge project |
+| `good_village` | Five buildings (a light-framed hall with a teal roof and a balcony as landmark, four varied houses with red, gray and green roofs), plaza with a well, winding streets, trees, garden, farm | 87 (town) | Made in this project from `blockforge/patterns.py` | Owned by the BlockForge project |
+| `light_manor` | The reference look: three storeys of birch in a dark oak frame, storey bands, teal layered cross-gable roof, 2 x 2 framed windows with boxes, porch with a balcony, back balcony, a wing roof as a terrace garden reached by an outside stair with a landing, teal-roofed east wing, chimney, garden, farm plots | 94 | Made in this project from `blockforge/patterns.py` | Owned by the BlockForge project |
 
-The quality numbers come from `blockforge.quality.score`; `tests/test_quality.py` keeps the cottage at 70 or more and
-the manor at 80 or more, and the village at 70 or more as a town.
+The quality numbers come from `blockforge.quality.score`; `tests/test_quality.py` keeps the cottage at 70 or more,
+the manor and `light_manor` at 80 or more, and the village at 70 or more as a town.
