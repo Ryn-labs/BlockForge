@@ -247,6 +247,96 @@ def system_prompt(text=""):
     return out + CHAT_RULES
 
 
+DEFAULT_PLAN = ("Base and walls", "Roof and chimney", "Windows and details", "Garden and path")
+_PART_LINE = re.compile(r"\bpart\s*(\d{1,2})\s*[:\-\u2013]\s*([^\n.;]+)", re.I)
+_MULTI = re.compile(r"\b(next (is|part|up|i will|comes)|part\s*\d{1,2}\b|then i will|after that)", re.I)
+_NEXT_LINE = re.compile(r"Next is part \d+[^\n.]*\.|Next is [^\n.]*\.|Every part of the plan is done\.")
+
+
+def derive_plan(text):
+    """A plan when the AI described a build in parts but gave no plan block: the parts it names ("Next is part 2: a
+    steep gable roof ...") over the default house plan (base and walls, roof, details, garden). None for a one-part
+    reply (it names no parts and no next step)."""
+    if not _MULTI.search(text or ""):
+        return None
+    named = {}
+    for n, name in _PART_LINE.findall(text or ""):
+        name = re.sub(r"^(a|an|the)\s+", "", name.strip(" ,:-"), flags=re.I)
+        if name:
+            named.setdefault(int(n), (name[0].upper() + name[1:])[:60])
+    count = max([len(DEFAULT_PLAN)] + list(named))
+    return [{"id": f"p{i}", "name": named.get(i) or (DEFAULT_PLAN[i - 1] if i <= len(DEFAULT_PLAN) else f"Part {i}"),
+             "status": "pending", "derived": True} for i in range(1, min(count, 8) + 1)]
+
+
+# what a plan part's words ask for, and how to see it in the build (quality's model of the blocks)
+_COVER = (("roof", "roof"), ("gable", "roof"), ("chimney", "chimney"), ("window", "windows"), ("glass", "windows"),
+          ("garden", "garden"), ("path", "garden"), ("fence", "garden"), ("yard", "garden"), ("farm", "garden"),
+          ("flower", "garden"), ("balcon", "balcony"), ("terrace", "balcony"), ("porch", "porch"), ("wall", "walls"),
+          ("base", "walls"), ("body", "walls"), ("floor", "walls"), ("foundation", "walls"), ("detail", "details"),
+          ("lantern", "details"), ("shutter", "details"))
+
+
+def covered(name, blocks):
+    """True when the build already has what a plan part's name asks for (an improvement round may have built it): the
+    first thing it names and at least half of the things it names. Parts with no known words are never guessed."""
+    from . import quality
+    want = []
+    low = str(name or "").lower()
+    for word, what in sorted(_COVER, key=lambda t: low.find(t[0]) if t[0] in low else 10 ** 6):
+        if word in low and what not in want:
+            want.append(what)
+    if not want or not blocks:
+        return False
+    m = quality._Model(blocks)
+    if not m.building:
+        return False
+    m.small, m.dark = True, False
+    tops = [m.top_state(c) for c in m.I]
+    have = {"walls": True, "chimney": bool(m.chimneys),
+            "roof": sum(1 for p in tops if p and m.K[p] in ("stairs", "slab")) >= 0.6 * len(tops),
+            "windows": sum(1 for k in m.K.values() if k == "glass") >= 4}
+    for what, fn, need in (("garden", quality._surroundings, 58), ("balcony", quality._balcony, 35),
+                           ("details", quality._detail, 60)):
+        if what in want:
+            have[what] = fn(m)[0] >= need
+    if "porch" in want:
+        side = quality._entrance(m)
+        have["porch"] = bool(side) and quality._front_feature(m, side)[1]
+    ok = [have.get(w, False) for w in want]
+    return ok[0] and sum(ok) * 2 >= len(ok)
+
+
+def next_line(plan):
+    """The next-step sentence, from the plan as it is now."""
+    nxt = next(((i, p) for i, p in enumerate(plan or [], 1) if p.get("status") != "done"), None)
+    if not plan:
+        return ""
+    if not nxt:
+        return "Every part of the plan is done."
+    name = nxt[1]["name"]
+    return f"Next is part {nxt[0]}: {name[0].lower() + name[1:] if name[:2] != name[:2].upper() else name}."
+
+
+def refresh_plan(c, blocks):
+    """After automatic improvement rounds: mark the plan parts the rounds built as done and put the next-step line of the
+    last AI message (and c["next"]) in line with the plan, so no message points at a part that is already built.
+    Returns the parts marked done."""
+    marked = []
+    for p in c.get("plan") or []:
+        if p.get("status") != "done" and covered(p["name"], blocks):
+            p["status"] = "done"
+            marked.append(p)
+    line = next_line(c.get("plan"))
+    c["next"] = line
+    if line:
+        for m in reversed(c["messages"]):
+            if m.get("role") == "ai" and not m.get("improved") and _NEXT_LINE.search(m.get("text") or ""):
+                m["text"] = _NEXT_LINE.sub(line, m["text"], count=1)
+                break
+    return marked
+
+
 def _plan_text(plan):
     if not plan:
         return "(no plan yet)"
@@ -516,6 +606,11 @@ def _auto_improve(cid, log, rounds=selfimprove.CHAT_ROUNDS, force=False):
             extra["change"].update({"version": v["id"], "part": "Improvements", "kept": None})
         if not done:
             extra["keep_improving"] = True
+        if c.get("plan") and used:                          # the rounds may have built planned parts: update the plan
+            marked = refresh_plan(c, session.load(c["session"]).blocks)
+            if marked:
+                text += " That also built " + ", ".join(p["name"][0].lower() + p["name"][1:] for p in marked) + "."
+            text += " " + c["next"]
         _msg(c, "ai", text, **extra)
         save_state(c)
     log("Improved: " + text)
@@ -598,6 +693,8 @@ def _finish_turn(c, before, reply, part, text, usage, log, improve=None):
     clean, questions, plan, status = parse_reply(reply)
     if improve:                                          # an improvement round never changes the plan or asks questions
         questions = plan = status = None
+    if not plan and not improve and not questions and not c["plan"] and pos:
+        plan = derive_plan(clean)                        # the AI named parts but gave no plan block: the card still shows
     if plan:
         old = {p["id"]: p for p in c["plan"]}
         c["plan"] = [{**p, **{k: old[p["id"]][k] for k in ("status", "bbox") if k in old.get(p["id"], {})}} for p in plan]
