@@ -558,6 +558,22 @@ def _iter_blocks(d):
         yield (flat[i], flat[i + 1], flat[i + 2]), pal[flat[i + 3]]
 
 
+def _with_lessons(learned, engine):
+    """The one-shot script path also gets the top build lessons (short; the step loop has them in its system prompt)."""
+    if engine == "claude_loop":
+        return learned
+    from . import lessons
+    text = ""
+    for ln in lessons.top(40):
+        if len(text) + len(ln) > 2900:
+            break
+        text += "- " + ln + "\n"
+    if not text:
+        return learned
+    section = "## Lessons from earlier builds (get these right in the script)\n" + text.rstrip()
+    return (learned + "\n\n" + section) if learned else section
+
+
 def _generate_loop(text, size, model, usage, prompt, image_path, log):
     """Step-by-step build: Claude Code uses the session tools. Returns the saved build's meta."""
     from . import checks, loop
@@ -629,7 +645,7 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
     text = prompts.user_message(prompt, size, palette, prev_code, has_image=bool(user_image),
                                 research_sites=sites if research else None, palette_text=palette_text,
                                 redstone=redstone, version=version, mods_text=mods_text,
-                                learned_text=learn.prompt_section(prompt), base_text=base_text)
+                                learned_text=_with_lessons(learn.prompt_section(prompt), engine), base_text=base_text)
     usage = Usage(engine, model)
     started = time.time()
     status, title, saved = "error", None, None
