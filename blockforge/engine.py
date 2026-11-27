@@ -148,7 +148,7 @@ class Usage:
         r["cost_usd"] = round(r["cost_usd"], 4)
         r["seconds"] = round(r["seconds"], 1)
         r["total_tokens"] = r["input_tokens"] + r["output_tokens"] + r["cache_read_tokens"] + r["cache_write_tokens"]
-        if r["engine"] == "claude_code":
+        if r["engine"] in ("claude_code", "claude_loop"):
             r["billing"] = "Included in your Claude plan (cost shown at API list price)"
         elif r["engine"] == "api":
             r["billing"] = "Charged to your Anthropic API key"
@@ -370,7 +370,7 @@ PROVIDERS = {
     "ollama": {"name": "Ollama (on this PC, free)", "base": "http://localhost:11434/v1", "key": False, "local": True},
     "custom": {"name": "Custom (any OpenAI-compatible API)", "base": "", "key": None},
 }
-CLAUDE_ENGINES = ("claude_code", "api")
+CLAUDE_ENGINES = ("claude_code", "api", "claude_loop")
 
 
 def engine_label(engine):
@@ -378,6 +378,8 @@ def engine_label(engine):
         return "Claude (your account)"
     if engine == "api":
         return "Claude (API key)"
+    if engine == "claude_loop":
+        return "Claude (your account, step by step)"
     return PROVIDERS.get(engine, {}).get("name", engine).split(" (")[0]
 
 
@@ -550,6 +552,26 @@ def _overwrite_note(meta):
             f"If that was not intended, fix the order or the boxes. Examples: {ex}")
 
 
+def _iter_blocks(d):
+    pal, flat = d["palette"], d["blocks"]
+    for i in range(0, len(flat), 4):
+        yield (flat[i], flat[i + 1], flat[i + 2]), pal[flat[i + 3]]
+
+
+def _generate_loop(text, size, model, usage, prompt, image_path, log):
+    """Step-by-step build: Claude Code uses the session tools. Returns the saved build's meta."""
+    from . import checks, loop
+    bid = loop.run(text, model, usage, find_claude(), log, image_path)
+    blocks = dict(_iter_blocks(store.get_blocks(bid)))
+    found = checks.run(blocks, size)
+    checks_meta = {"total": checks.total(found), "by_check": checks.counts(found)}
+    log("Checks: " + (checks.summary(found) if found else "no problems"))
+    rec = usage.record()
+    cost = f" (about ${rec['cost_usd']:.2f})" if rec["cost_usd"] else ""
+    log(f"Done: {len(blocks):,} blocks. {engine_label('claude_loop')} used {rec['total_tokens']:,} tokens{cost}.")
+    return store.update_meta(bid, checks=checks_meta, usage=rec, model=model, prompt=prompt)
+
+
 def generate(prompt, size="medium", palette="auto", model=None, engine=None, image=None, parent_id=None,
              research=None, redstone=None, use_mods=None, log=print):
     """image: (bytes, mime). Returns the saved build's meta."""
@@ -560,6 +582,10 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
     engine = engine or settings.get("engine", "claude_code")
     if engine not in CLAUDE_ENGINES and engine not in PROVIDERS:
         engine = "claude_code"
+    if engine == "claude_code" and settings.get("build_mode") == "loop" and not parent_id:
+        engine = "claude_loop"
+    if engine == "claude_loop" and (parent_id or find_claude() is None):
+        engine = "claude_code"                       # edits keep the script path; no Claude Code means no loop
     if engine in CLAUDE_ENGINES:
         model = model if model in MODELS else settings.get("model", "claude-opus-5-5")
     else:
@@ -579,6 +605,8 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
         log(f"Editing on top of the existing build ({len(base[0]):,} blocks): only the changes get written.")
     if research is None:
         research = settings.get("research", True) and not parent_id
+    if engine == "claude_loop":
+        research = False                             # the step tools replace the web research round
     if research and engine not in CLAUDE_ENGINES:
         log(f"Online research needs Claude, so {who} will design this one without it.")
         research = False
@@ -619,6 +647,10 @@ def generate(prompt, size="medium", palette="auto", model=None, engine=None, ima
             f.write(image[0])
 
     try:
+        if engine == "claude_loop":
+            saved = _generate_loop(text, size, model, usage, prompt, image_path, log)
+            status = "done"
+            return saved
         convo = _Conversation(engine, model, settings, usage, text, image, image_path, research, log, pack)
         title, code, refs = extract(convo.first())
         if refs:
