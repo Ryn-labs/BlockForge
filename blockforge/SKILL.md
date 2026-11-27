@@ -23,6 +23,7 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 - Call lessons(). Call style_sheet(<style>) for the style asked (or the one the palette in the request matches).
 - Use pattern() for stairs, landings, doors, windows, lantern posts, roofs, bridges and trees instead of inventing them;
   pass the text it returns to build_step and change the arguments, not the proven shape.
+- For spiral stairs use pattern('spiral_stair' ...) (round tower) or pattern('square_spiral_stair' ...); round_tower_with_stair adds the shell, door and windows.
 - Unsure about a block (needs support? stairs facing? properties)? Call block_info before you place it.
 
 ## HOW TO BUILD, PART BY PART

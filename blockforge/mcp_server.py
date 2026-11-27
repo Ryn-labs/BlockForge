@@ -124,7 +124,7 @@ TOOLS = [
     },
     {
         "name": "pattern",
-        "description": 'A proven build part (stairs, landings, doorway, window, lantern post, roof house shell, bridge, tree) as buildkit text you pass to build_step. Unknown or empty name lists the patterns with their arguments.',
+        "description": 'A proven build part (stairs, landings, doorway, window, lantern post, roof house shell, bridge, tree, spiral stair in a round or square tower) as buildkit text you pass to build_step. Unknown or empty name lists the patterns with their arguments.',
         "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "args": {"type": "object", "description": "Keyword arguments of the pattern, e.g. {\"x\": 3, \"y\": 1, \"z\": 4, \"facing\": \"south\"}"}}, "additionalProperties": False},
     },
     {
