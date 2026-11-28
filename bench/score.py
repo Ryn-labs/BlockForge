@@ -9,6 +9,8 @@ Works on a build folder in the (temp) data dir: blocks.json, meta.json, code.py.
   blocked_doors  doors with a solid block right in front of or behind them
   wrong_facing   walkable stairs whose high side points downhill
   size_off       how far the largest side is outside the asked size range (blocks)
+  house          blockforge.house problems: buildings nobody can walk into or through, dark spawn spots inside, roof holes,
+                 walls over air, land piled against walls (one per building and kind; dark spots and holes one per patch)
   terrain_floating / terrain_buried   (builds on a terrain) floating groups with ground under them, and path blocks / steps with
                  untouched terrain on top of them. They are counted INSTEAD of floating / buried_path, never twice.
   terrain_score  blockforge.terrain_quality total 0-100 of AI-made land (HIGHER is better; null when the build is not mostly land)
@@ -167,13 +169,21 @@ def score(d, lo=None, hi=None, terrain=None):
             if dv and (solid(g(x + dv[0], y, z + dv[1])) or solid(g(x - dv[0], y, z - dv[1]))): r["blocked_doors"] += 1
     if lo:
         big = max(size[0], size[2]); r["size_off"] = max(0, lo - big, big - hi)
-    keys = ["floating", "removed", "buried_path", "jump_steps", "corner_turns", "blocked_doors", "wrong_facing", "size_off"]
+    r["house"] = house_count(C, T)
+    keys = ["floating", "removed", "buried_path", "jump_steps", "corner_turns", "blocked_doors", "wrong_facing", "size_off", "house"]
     if T:
         keys += ["terrain_floating", "terrain_buried"]
     out = {k: r.get(k, 0) for k in keys}
     out["quality"] = quality_total(C, T, meta.get("prompt"))
     out["terrain_score"] = terrain_total(C, T)
     return out
+
+
+def house_count(C, T=None):
+    """Number of blockforge.house findings of the build (on a terrain the land counts as the ground)."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+    from blockforge import house
+    return len(house.findings(C, ground=T or None))
 
 
 def quality_total(C, T=None, prompt=None):

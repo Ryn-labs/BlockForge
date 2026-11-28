@@ -31,7 +31,7 @@ if os.path.exists(res_path):
     for l in open(res_path, encoding="utf-8"):
         r = json.loads(l); done[r["id"]] = r
 KEYS = ("floating", "removed", "overwritten", "buried_path", "jump_steps", "corner_turns", "blocked_doors", "wrong_facing", "size_off",
-        "terrain_floating", "terrain_buried", "script_errors", "fix_rounds")
+        "house", "terrain_floating", "terrain_buried", "script_errors", "fix_rounds")
 
 
 def terrain_file(rel):
