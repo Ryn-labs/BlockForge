@@ -121,7 +121,7 @@ addEventListener('dragleave', () => { if (--depth <= 0) { depth = 0; document.bo
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', e => { e.preventDefault(); depth = 0; document.body.classList.remove('dragging'); openFile(e.dataTransfer.files[0]); });
 
-// hover / tap to see what a block is; click highlights every block of that kind
+// hover / tap to see what a block is; double-click highlights every block of that kind
 viewer.enablePicking({
   onHover(info, cx, cy) {
     const tip = $('#tip');

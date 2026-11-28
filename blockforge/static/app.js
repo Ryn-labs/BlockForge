@@ -1042,7 +1042,7 @@ viewer.enablePicking({
     tip.innerHTML = `<div class="bt-head"><span class="sw" style="background:${hexOf(info.color)}"></span><b>${esc(prettyBlock(info.name))}</b></div>
       <div class="bt-id">minecraft:${esc(info.name)}</div>
       ${props.length ? `<div class="bt-props">${props.map(([k, v]) => `<span>${esc(k)}: ${esc(v)}</span>`).join('')}</div>` : ''}
-      <div class="bt-foot">At x ${info.x}, y ${info.y}, z ${info.z} · ${info.count.toLocaleString()} in this build<br>${viewer.focusName ? 'Click to show everything again' : 'Click to highlight every one'}</div>`;
+      <div class="bt-foot">At x ${info.x}, y ${info.y}, z ${info.z} · ${info.count.toLocaleString()} in this build<br>${viewer.focusName ? 'Double-click (or Esc) to show everything again' : 'Double-click to highlight every one'}</div>`;
     tip.hidden = false;
     const st = document.querySelector('.stage').getBoundingClientRect();
     let x = cx - st.left + 16, y = cy - st.top + 16;
