@@ -94,7 +94,19 @@ def is_soft(n):
     return n in SOFT or n.startswith("potted_") or n.endswith(SOFT_SUFFIX)
 
 
+_KIND = {}
+
+
 def kind(n):
+    k = _KIND.get(n)
+    if k is None:
+        if len(_KIND) > 50000:
+            _KIND.clear()
+        k = _KIND[n] = _kind(n)
+    return k
+
+
+def _kind(n):
     if n in AIR:
         return "air"
     if n in CROPS or n == "farmland":
@@ -151,12 +163,12 @@ def _fmt(p):
 
 # ------------------------------------------------------------------ geometry
 def _dilate(cols, r):
-    out = set(cols)
-    for (x, z) in cols:
-        for a in range(-r, r + 1):
-            for c in range(-r, r + 1):
-                out.add((x + a, z + c))
-    return out
+    """Every (x, z) within r (a square) of a column of `cols`: grown along x, then along z."""
+    if r <= 0:
+        return set(cols)
+    rng = range(-r, r + 1)
+    row = {(x + a, z) for (x, z) in cols for a in rng}
+    return {(x, z + c) for (x, z) in row for c in rng}
 
 
 def _components(cols):
@@ -187,15 +199,19 @@ class _Model:
     """Everything the parts need, worked out once."""
 
     def __init__(self, blocks):
-        N, S = {}, {}
+        N, S, K = {}, {}, {}
+        nk = {}                                                      # state -> (name, kind): few states, many blocks
         for p, s in blocks.items():
-            n = _name(s)
-            if n in AIR:
+            got = nk.get(s)
+            if got is None:
+                n = _name(s)
+                got = nk[s] = (n, kind(n))
+            if got[0] in AIR:
                 continue
-            N[p] = n
+            N[p] = got[0]
             S[p] = s
-        self.N, self.S = N, S
-        self.K = {p: kind(n) for p, n in N.items()}
+            K[p] = got[1]
+        self.N, self.S, self.K = N, S, K
         st = {p for p, k in self.K.items() if k not in ("nature", "farm", "soft")}
         self.ST = st
         rx, rz, cy = collections.defaultdict(list), collections.defaultdict(list), collections.defaultdict(list)
