@@ -362,6 +362,7 @@ def plan_text(plan):
                    "(x,z,y) corners, landings flat: " + " -> ".join(f"({p[0]},{p[1]},{p[2]})" for p in s["points"]))
     for w in plan["warnings"]:
         out.append("Warning: " + w)
+    out.append("Build every house of the plan in ONE build_step with parts (one part per house, 4 run at the same time).")
     out.append("Full plan as JSON follows (each street has 'cells' with every x,z,y):")
     import json
     slim = dict(plan, streets=[{k: v for k, v in s.items() if k != "cells"} for s in plan["streets"]])

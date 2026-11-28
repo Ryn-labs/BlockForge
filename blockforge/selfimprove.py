@@ -7,6 +7,8 @@ from . import checks, quality
 
 CHAT_ROUNDS = 3                 # improvement rounds per user request in the chat panel
 LOOP_ROUNDS = 2                 # extra turns of the step-by-step engine before it saves
+LOOP_SECONDS = 22 * 60          # the step-by-step build and its improvement rounds aim to be done within this
+ROUND_MIN_SECONDS = 4 * 60      # an improvement round starts only with this much of the budget left
 SHOW = 6                        # findings listed per check kind in a message
 
 

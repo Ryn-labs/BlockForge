@@ -161,6 +161,13 @@ class LoopSelfImprove(unittest.TestCase):
         self.assertTrue(meta["id"])                                      # still saved, as before (with its check results)
         self.assertEqual(meta["checks"]["total"], 1)
 
+    def test_no_round_starts_when_the_time_is_used_up(self):
+        with mock.patch.object(selfimprove, "LOOP_SECONDS", 0):
+            meta, procs, lines = self.run_engine([([], "never used")])
+        self.assertEqual(len(procs), 1)
+        self.assertTrue(any(l.startswith("No time left for improvement round 1") for l in lines), lines)
+        self.assertTrue(meta["id"])                                      # still saved, with its check results
+
     def test_prompt_states_the_rule(self):
         self.assertIn("check -> fix -> check", loop.system_prompt("x"))
 
