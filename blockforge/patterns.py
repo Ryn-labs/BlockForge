@@ -557,7 +557,7 @@ def window_with_box(x, y, z, facing, width=1, height=2, glass="glass_pane", shut
                     box="oak_trapdoor", flower="poppy", lintel="stripped_birch_log", wall=None):
     """A white-framed window in a wall: `width` x `height` panes, the lowest-left pane at (x, y, z) (width runs east or
     south along the wall), a light (stripped birch) lintel over it, open birch trapdoor shutters on both sides and a
-    flower box directly under the panes (a grass block in front of each bottom pane with one `flower` kind, trapdoors
+    flower box directly under the panes (a grass block in front of the wall row under each bottom pane with one `flower` kind on it, never in front of a pane, trapdoors
     round its front, sides and bottom), all on the `facing` (outside) side. Flowers go only in these boxes under
     windows, one kind per window, never scattered over the walls.
     wall = a block for a small wall piece round it (a window on its own); None keeps the wall already built."""
@@ -574,10 +574,10 @@ def window_with_box(x, y, z, facing, width=1, height=2, glass="glass_pane", shut
         cx, cz = x + ax * i, z + az * i
         for k in range(height):
             out.append(f"block({cx}, {y + k}, {cz}, {_st(glass, **conn) if glass.endswith('_pane') else repr(glass)})")
-        out.append(f"block({cx + dx}, {y - 1}, {cz + dz}, 'grass_block')")
-        out.append(f"block({cx + dx}, {y}, {cz + dz}, {flower!r})")
-        out.append(f"block({cx + 2 * dx}, {y - 1}, {cz + 2 * dz}, {_st(box, facing=facing, half='bottom', open=True)})")
-        out.append(f"block({cx + dx}, {y - 2}, {cz + dz}, {_st(box, facing=facing, half='top', open=False)})")
+        out.append(f"block({cx + dx}, {y - 2}, {cz + dz}, 'grass_block')")      # the box sits under the sill row,
+        out.append(f"block({cx + dx}, {y - 1}, {cz + dz}, {flower!r})")         # so no flower hides a pane
+        out.append(f"block({cx + 2 * dx}, {y - 2}, {cz + 2 * dz}, {_st(box, facing=facing, half='bottom', open=True)})")
+        out.append(f"block({cx + dx}, {y - 3}, {cz + dz}, {_st(box, facing=facing, half='top', open=False)})")
     out.append(f"fill({x - ax}, {y + height}, {z - az}, {x + width * ax}, {y + height}, {z + width * az}, "
                f"{_st(lintel, axis=_AXIS[facing])})")
     for side, (sx, sz) in ((neg, (x - ax, z - az)), (pos, (x + width * ax, z + width * az))):

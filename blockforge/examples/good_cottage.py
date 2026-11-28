@@ -40,7 +40,7 @@ def code():
         # roofs: the wing's lower roof tucks under the main roof's eaves; the main gable faces the front
         P.gable_roof_trim(10, 1, 16, 6, Y + 4, "green", "oak", "x", overhang=1, fill="birch_planks", open_end="west"),
         P.gable_roof_trim(0, 0, 10, 8, Y + 10, "green", "oak", "z", overhang=2, fill="birch_planks"),
-        P.chimney(-3, Y - 1, 4, height=20, block="bricks"),
+        P.chimney(5, Y - 1, -1, height=20, block="bricks"),
         # front door with a porch under the gable and a balcony over it (door from the upper floor)
         P.porch(5, Y, 8, "south", width=3, depth=3, path=2),
         P.balcony(4, Y + 4, 9, "south", length=3, depth=2, door=True),
