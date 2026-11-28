@@ -526,16 +526,24 @@ export class Viewer {
       });
     });
     el.addEventListener('pointerleave', () => { showBox(null); this.onHover?.(null); });
-    el.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; });
+    const touching = new Set();                                         // fingers down now; 2+ = pinch, never a tap
+    let multi = false;
+    el.addEventListener('pointerdown', e => { touching.add(e.pointerId); if (touching.size > 1) multi = true; down = [e.clientX, e.clientY]; });
+    el.addEventListener('pointercancel', e => { touching.delete(e.pointerId); down = null; });
     // a single click only shows what a block is; a DOUBLE click (or the materials list) highlights every block of that kind,
     // so a stray click while looking around never turns the rest of the build into ghosts
     let lastUp = null;
     el.addEventListener('pointerup', e => {
-      if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5 || e.button !== 0) { down = null; return; }
+      touching.delete(e.pointerId);
+      const wasMulti = multi; if (!touching.size) multi = false;
+      if (wasMulti || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5 || e.button !== 0) { down = null; return; }
       down = null;
       const now = performance.now(), dbl = lastUp && now - lastUp.t < 450 && Math.hypot(e.clientX - lastUp.x, e.clientY - lastUp.y) < 8;
       lastUp = dbl ? null : { t: now, x: e.clientX, y: e.clientY };
-      if (dbl) this.onPick?.(pick(e));
+      if (dbl) { this.onPick?.(pick(e)); return; }
+      if (e.pointerType !== 'mouse' && this.hoverEnabled !== false) {   // touch / pen: no hover, so a tap shows the block's name
+        const info = pick(e); showBox(info); this.onHover?.(info, e.clientX, e.clientY);
+      }
     });
   }
 
