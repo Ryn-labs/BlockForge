@@ -66,11 +66,12 @@ def _code(lines):
 
 
 def straight_stair_run(x, y, z, dir, length, width=3, block="stone_brick_stairs", support="stone", path="stone_bricks",
-                       landing=2):
+                       landing=2, clear=3):
     """A straight climb: `length` bottom stairs facing uphill, rising 1 per cell from y, then `landing` flat path cells.
 
     The first stair is at (x, y, z); `width` cells wide to the right-hand side of the direction. Solid support below each
-    step down to y-1."""
+    step down to y-1, and `clear` blocks of air over every step and landing cell (a run cut into a slope is never
+    buried under the ground)."""
     dx, dz = _dir(dir)
     px, pz = -dz, dx
     stairs = _stairs(block)
@@ -86,12 +87,15 @@ def straight_stair_run(x, y, z, dir, length, width=3, block="stone_brick_stairs"
                 top = y + length - 1
                 out.append(f"fill({cx}, {y - 1}, {cz}, {cx}, {top - 1}, {cz}, {support!r})")
                 out.append(f"block({cx}, {top}, {cz}, {path!r})")
+            if clear:
+                out.append(f"clear({cx}, {top + 1}, {cz}, {cx}, {top + max(2, int(clear))}, {cz})")
     return _code(out)
 
 
 def switchback_landing(x, y, z, dir, length=4, width=2, block="stone_brick_stairs", support="stone", path="stone_bricks"):
     """Two stair runs joined by a flat landing: climb `length` steps along `dir`, turn on the landing, climb `length`
-    more back the other way beside the first run (a stone wall separates them). Climbs 2*length blocks in total."""
+    more back the other way beside the first run (a stone wall separates them). Climbs 2*length blocks in total.
+    3 blocks of air are cleared over every step and landing cell."""
     dx, dz = _dir(dir)
     px, pz = -dz, dx
     stairs = _stairs(block)
@@ -111,21 +115,25 @@ def switchback_landing(x, y, z, dir, length=4, width=2, block="stone_brick_stair
             cx, cz = cell(i, w)
             out.append(f"fill({cx}, {y - 1}, {cz}, {cx}, {y + i - 1}, {cz}, {support!r})")
             out.append(f"block({cx}, {y + i}, {cz}, {_st(stairs, facing=dir, half='bottom', shape='straight')})")
+            out.append(f"clear({cx}, {y + i + 1}, {cz}, {cx}, {y + i + 3}, {cz})")
     for off in range(L, L + depth):                                 # landing, same height as the last stair of run A
         for lat in range(2 * W + 1):
             cx, cz = cell(off, lat)
             out.append(f"fill({cx}, {y - 1}, {cz}, {cx}, {y + L - 2}, {cz}, {support!r})")
             out.append(f"block({cx}, {y + L - 1}, {cz}, {path!r})")
+            out.append(f"clear({cx}, {y + L}, {cz}, {cx}, {y + L + 2}, {cz})")
     back = OPP[dir]
     for j in range(L):                                              # run B climbs back toward the start
         for w in range(W):
             cx, cz = cell(L - 1 - j, W + 1 + w)
             out.append(f"fill({cx}, {y - 1}, {cz}, {cx}, {y + L + j - 1}, {cz}, {support!r})")
             out.append(f"block({cx}, {y + L + j}, {cz}, {_st(stairs, facing=back, half='bottom', shape='straight')})")
+            out.append(f"clear({cx}, {y + L + j + 1}, {cz}, {cx}, {y + L + j + 3}, {cz})")
     for w in range(W):                                              # exit platform at the top of run B
         cx, cz = cell(-1, W + 1 + w)
         out.append(f"fill({cx}, {y - 1}, {cz}, {cx}, {y + 2 * L - 2}, {cz}, {support!r})")
         out.append(f"block({cx}, {y + 2 * L - 1}, {cz}, {path!r})")
+        out.append(f"clear({cx}, {y + 2 * L}, {cz}, {cx}, {y + 2 * L + 2}, {cz})")
     return _code(out)
 
 
@@ -1161,28 +1169,233 @@ def site(x1, z1, x2, z2, y, top="grass_block", under="dirt"):
                   f"fill({x1}, {y}, {z1}, {x2}, {y}, {z2}, {top!r})"])
 
 
-def road(points, y, width=3, block="dirt_path", under="dirt"):
-    """A street or garden path through `points` ([[x, z], ...], at least 2): `block` at y with `under` below it,
-    `width` wide, straight or diagonal between the points. Several points make it bend; follow the ground and the
-    houses instead of one straight line. For a climb use straight_stair_run between two flat parts."""
-    pts = [(int(p[0]), int(p[1])) for p in points or []]
-    if len(pts) < 2:
-        raise ValueError("a road needs at least 2 points [x, z]")
-    width = max(1, int(width))
-    lo = -((width - 1) // 2)
-    cells = set()
+# Road builder (round 5): the hill town had path blocks with ground or blocks right on top of them - streets cut into
+# the slope without clearing above. A road now clears the room above every cell, fills the gap under it and takes a
+# half step (a bottom slab) where it rises, so it can follow the ground.
+ROAD_SKIP = ("air", "cave_air", "void_air", "light", "water", "lava", "short_grass", "tall_grass", "fern", "large_fern",
+             "dead_bush", "snow", "vine", "poppy", "dandelion", "azure_bluet", "oxeye_daisy", "cornflower", "allium",
+             "lily_of_the_valley", "blue_orchid", "pink_petals", "azalea", "flowering_azalea", "sweet_berry_bush",
+             "moss_carpet", "glow_lichen", "bamboo", "sugar_cane", "seagrass", "kelp", "lily_pad", "wildflowers",
+             "leaf_litter", "bush", "firefly_bush", "short_dry_grass", "tall_dry_grass")
+ROAD_SKIP_END = ("_leaves", "_log", "_wood", "_sapling", "_tulip", "_carpet", "_flower", "_mushroom", "_roots",
+                 "_fungus", "_bush", "_vines", "_vine", "torch", "lantern", "_sign", "_banner", "_button",
+                 "_pressure_plate", "_fence", "_fence_gate", "_wall", "_pane", "_door", "_trapdoor", "rail")
+
+
+# The height profile of a road, as source: road() uses it on given heights and writes it into the build script for
+# heights read from the ground there. At most 1 block up in 2 cells (the middle of the highest and the lowest profile
+# that keep it; a profile that keeps it already is unchanged) through the given heights (`fixed`, where they fit) with a
+# flat landing round every corner (where it fits), so the cells round a corner (they belong to centre cells a few
+# apart) never step up twice in a row.
+ROAD_PROFILE = """def road_profile(ry, corners, ext, fixed):
+    n_ = len(ry)
+    cap = lambda k: (k + 1) // 2
+    up = [min(ry[j] + cap(abs(i - j)) for j in range(n_)) for i in range(n_)]
+    lo = [max(ry[j] - cap(abs(i - j)) for j in range(n_)) for i in range(n_)]
+    mid = [(up[i] + lo[i]) // 2 for i in range(n_)]
+    pins = {0: mid[0], n_ - 1: mid[n_ - 1]}
+    for j, v in sorted(fixed.items()):
+        if all(abs(v - pv) <= cap(abs(j - pj)) for pj, pv in pins.items() if pj != j):
+            pins[j] = v
+    for c in corners:
+        zone = [j for j in range(max(1, c - ext), min(n_ - 1, c + ext + 1)) if j not in pins or j == c]
+        if not zone:
+            continue
+        others = {pj: pv for pj, pv in pins.items() if pj not in zone}
+        hi = min([pv + cap(abs(j - pj)) for j in zone for pj, pv in others.items()] + [10 ** 6])
+        lw = max([pv - cap(abs(j - pj)) for j in zone for pj, pv in others.items()] + [-10 ** 6])
+        if lw <= hi:
+            v = min(max(pins.get(c, mid[c]), lw), hi)
+            for j in zone:
+                pins[j] = v
+    out = []
+    for i in range(n_):
+        hi = min(pv + cap(abs(i - pj)) for pj, pv in pins.items())
+        lw = max(pv - cap(abs(i - pj)) for pj, pv in pins.items())
+        out.append(min(max(mid[i], lw), hi))
+    return out
+"""
+_ns = {}
+exec(ROAD_PROFILE, _ns)
+_road_profile = _ns["road_profile"]
+
+
+ROAD_LAND = ("dirt", "grass_block", "stone", "andesite", "diorite", "granite", "tuff", "gravel", "coarse_dirt", "podzol",
+             "rooted_dirt", "deepslate", "sand", "red_sand", "snow_block", "powder_snow", "calcite", "moss_block", "clay",
+             "mud", "ice", "packed_ice", "blue_ice", "mycelium", "mossy_cobblestone", "cobblestone", "dripstone_block",
+             "smooth_basalt", "basalt", "terracotta")
+PATH_LIKE = ("dirt_path", "stone_bricks", "polished_andesite", "packed_mud", "stone_brick_slab", "cobblestone_slab",
+             "mossy_cobblestone_slab", "polished_andesite_slab", "mud_brick_slab", "mud_bricks", "bricks", "brick_slab",
+             "smooth_stone", "smooth_stone_slab")     # built paths and squares (not gravel or cobble: the land has those)
+
+
+def _road_cells(pts, width):
+    """(centre line [(x, z)] in order, {column: (distance, centre index)}) of a road through pts, `width` wide."""
+    centre = []
     for (ax, az), (bx, bz) in zip(pts, pts[1:]):
         n = max(abs(bx - ax), abs(bz - az), 1)
         for i in range(n + 1):
-            cx = ax + round((bx - ax) * i / n)
-            cz = az + round((bz - az) * i / n)
-            for w in range(lo, lo + width):
-                cells.add((cx + w, cz))
-                cells.add((cx, cz + w))
-    out = [f"# road through {len(pts)} points, {width} wide"]
-    for (cx, cz) in sorted(cells):
-        out.append(f"block({cx}, {y - 1}, {cz}, {under!r})")
-        out.append(f"block({cx}, {y}, {cz}, {block!r})")
+            c = (ax + round((bx - ax) * i / n), az + round((bz - az) * i / n))
+            if not centre or centre[-1] != c:
+                centre.append(c)
+    lo = -((width - 1) // 2)
+    cols = {}
+    for k, (cx, cz) in enumerate(centre):
+        for w in range(lo, lo + width):
+            for c in ((cx + w, cz), (cx, cz + w)):
+                d = abs(w)
+                if c not in cols or d < cols[c][0]:
+                    cols[c] = (d, k)
+    return centre, cols
+
+
+def road(points, y=None, width=3, block="dirt_path", under="dirt", step="cobblestone_slab", clear=3):
+    """A street or garden path through `points` ([[x, z], ...] or [[x, z, y], ...], at least 2), `width` wide,
+    straight or diagonal between the points: `block` on top with `under` below it, `clear` blocks of air cleared over
+    every cell (no ground, wall or leaves left on the path) and the gap under it filled with `under` down to the ground.
+    Heights: with `y` given, the road is flat at y (or a straight slope between points given as [x, z, y]); with
+    y=None it FOLLOWS THE GROUND (the top ground block of each centre cell, trees and plants skipped) and passes
+    through the heights of the [x, z, y] points, smoothed to rise at most 1 block in 2 with flat landings at corners. Where the road rises by 1 the higher
+    cells get a bottom `step` slab (a half step, no jump). Several points make it bend; follow the ground and the
+    houses instead of one straight line. A climb steeper than 1 in 2 needs straight_stair_run between two flat parts.
+    The streets of plan_layout: road(the street's corner points [[x, z, y], ...], width=street width)."""
+    raw = [p for p in points or [] if isinstance(p, (list, tuple)) and len(p) in (2, 3)]
+    if len(raw) < 2 or len(raw) != len(points or []):
+        raise ValueError("a road needs at least 2 points [x, z] or [x, z, y]")
+    pts = [(int(p[0]), int(p[1])) for p in raw]
+    hs = [int(p[2]) if len(p) == 3 else (None if y is None else int(y)) for p in raw]
+    width, clear = max(1, int(width)), max(2, int(clear))
+    centre, cols = _road_cells(pts, width)
+    # heights along the centre line: with y given, straight slopes between the point heights (flat at y); with y=None
+    # the ground there, held at the points' own heights
+    known = {}
+    for (ax, az), (bx, bz), ha, hb in zip(pts, pts[1:], hs, hs[1:]):
+        n = max(abs(bx - ax), abs(bz - az), 1)
+        for i in range(n + 1):
+            c = (ax + round((bx - ax) * i / n), az + round((bz - az) * i / n))
+            if ha is not None and hb is not None:
+                known.setdefault(c, ha + round((hb - ha) * i / n))
+            elif i == 0 and ha is not None:
+                known.setdefault(c, ha)
+            elif i == n and hb is not None:
+                known[c] = hb
+    given = [known.get(c) for c in centre] if y is not None else [None] * len(centre)
+    follows = any(v is None for v in given)
+    corners = [i for i in range(1, len(centre) - 1) if (centre[i][0] - centre[i - 1][0], centre[i][1] - centre[i - 1][1])
+               != (centre[i + 1][0] - centre[i][0], centre[i + 1][1] - centre[i][1])]
+    ext = width // 2 + 1
+    at = {c: i for i, c in enumerate(centre)}
+    fixed = {at[pt]: hv for pt, hv in zip(pts, hs) if hv is not None and pt in at}   # the points' own heights
+    if not follows:
+        given = _road_profile(given, corners, ext, fixed)
+    out = [f"# road through {len(pts)} points, {width} wide, {clear} clear above"
+           + (", following the ground" if follows else ""),
+           f"rc = {centre!r}",
+           f"ry = {given!r}",
+           f"rk = {dict((c, k) for c, (_d, k) in sorted(cols.items()))!r}"]
+    out.append(f"skip, skip_end = {ROAD_SKIP!r}, {ROAD_SKIP_END!r}")
+    out.append(f"land = {ROAD_LAND!r}")
+    if follows:
+        out += ["top = bounds()[4] + 1",
+                "def ground_at(x, z):",
+                "    for yy in range(top, top - 400, -1):",
+                "        st = get(x, yy, z)",
+                "        if st is None:",
+                "            continue",
+                "        n = st.split('[')[0].replace('minecraft:', '')",
+                "        if n in skip or n.endswith(skip_end):",
+                "            continue",
+                "        return yy",
+                "    return None",
+                "ry = [v if v is not None else ground_at(x, z) for v, (x, z) in zip(ry, rc)]",
+                "have = [v for v in ry if v is not None]",
+                "base = have[0] if have else 0",
+                "for i in range(len(ry)):",
+                "    if ry[i] is None:",
+                "        ry[i] = ry[i - 1] if i else base",
+                ROAD_PROFILE.rstrip(),
+                f"ry = road_profile(ry, {corners!r}, {ext}, {fixed!r})"]
+    out += ["tree_cut = []",
+            "for (x, z), k in rk.items():",
+            "    h = ry[k]",
+            f"    for yy in range(h + 1, h + {clear} + 1):",
+            "        st = get(x, yy, z)",
+            "        if st and st.split('[')[0].endswith(('_log', '_wood', '_leaves')):",
+            "            tree_cut.append((x, yy, z))",
+            "near4 = lambda x, z: ((x + 1, z), (x - 1, z), (x, z + 1), (x, z - 1))",
+            "for (x, z), k in rk.items():                  # loose gravel at the road's edge becomes plain ground",
+            "    h = ry[k]",
+            "    for c in near4(x, z):",
+            "        if c not in rk:",
+            "            for yy in range(h + 2, h - 9, -1):",
+            "                st = get(c[0], yy, c[1])",
+            "                if st and st.split('[')[0].replace('minecraft:', '') in ('gravel', 'coarse_dirt'):",
+            f"                    block(c[0], yy, c[1], {under!r})",
+            f"pathlike = {sorted(set(PATH_LIKE) | {block, step}) !r}",
+            "def surface(c, yy):",
+            "    st = get(c[0], yy, c[1])",
+            "    return bool(st) and st.split('[')[0].replace('minecraft:', '') in pathlike and get(c[0], yy + 1, c[1]) is None",
+            "for (x, z), k in rk.items():",
+            "    h = ry[k]",
+            "    low = any((ry[rk[c]] == h - 1) if c in rk else surface(c, h - 1) for c in near4(x, z))",
+            f"    clear(x, h + 1, z, x, h + {clear}, z)",
+            f"    yy = h + {clear + 1}                          # a deep cut is open to the sky: ground, snow, plants and",
+            "    while yy < h + 96:                             # trees left over the road would hang there or float",
+            "        st = get(x, yy, z)",
+            "        n = st.split('[')[0].replace('minecraft:', '') if st else ''",
+            "        if not n or n in ('water', 'lava') or not (n in land or n in skip or n.endswith(skip_end)):",
+            "            break",
+            "        if n.endswith(('_log', '_wood', '_leaves')):",
+            "            tree_cut.append((x, yy, z))",
+            "        block(x, yy, z, 'air')",
+            "        yy += 1",
+            f"    block(x, h, z, B({step!r}, type='bottom') if low else {block!r})",
+            "    below = get(x, h - 1, z)",
+            "    nb = below.split('[')[0].replace('minecraft:', '') if below else ''",
+            "    filled = not nb or nb in skip or nb.endswith(skip_end)",
+            "    if filled:                                     # keep solid ground under the road as it is",
+            f"        block(x, h - 1, z, {under!r})",
+            "    d = h - 2",
+            "    while filled and d > h - 20 and get(x, d, z) is None:",
+            f"        block(x, d, z, {under!r})",
+            "        d -= 1",
+            "    if filled:                                     # loose gravel the fill now covers becomes ground too",
+            "        while d > h - 30 and (get(x, d, z) or '').split('[')[0].replace('minecraft:', '') in ('gravel', 'coarse_dirt'):",
+            f"            block(x, d, z, {under!r})",
+            "            d -= 1",
+            "for (x, z), k in rk.items():                  # a street or square met 1 higher gets a half step at its edge",
+            "    h = ry[k]",
+            "    if (get(x, h, z) or '').split('[')[0].endswith('_slab'):",
+            "        continue",
+            "    for c in near4(x, z):",
+            "        st = get(c[0], h + 1, c[1])",
+            "        if c not in rk and surface(c, h + 1) and not st.split('[')[0].endswith(('_slab', '_stairs')):",
+            f"            block(c[0], h + 1, c[1], B({step!r}, type='bottom'))",
+            "# what is left of a tree cut by the road: a crown that no longer touches the ground or a building goes too",
+            "def tree_part(st):",
+            "    return bool(st) and st.split('[')[0].endswith(('_log', '_wood', '_leaves'))",
+            "near6 = lambda x, y, z: ((x + 1, y, z), (x - 1, y, z), (x, y + 1, z), (x, y - 1, z), (x, y, z + 1), (x, y, z - 1))",
+            "done = set()",
+            "for c in tree_cut:",
+            "    for s0 in near6(*c):",
+            "        if s0 in done or not tree_part(get(*s0)):",
+            "            continue",
+            "        group, todo, held = {s0}, [s0], False",
+            "        while todo and not held and len(group) < 3000:",
+            "            for q in near6(*todo.pop()):",
+            "                if q in group:",
+            "                    continue",
+            "                st = get(*q)",
+            "                if tree_part(st):",
+            "                    group.add(q)",
+            "                    todo.append(q)",
+            "                elif st and st.split('[')[0].replace('minecraft:', '') not in skip:",
+            "                    held = True                  # still on the ground or a building",
+            "                    break",
+            "        done |= group",
+            "        if not held and not todo:",
+            "            for q in group:",
+            "                block(q[0], q[1], q[2], 'air')"]
     return _code(out)
 
 
