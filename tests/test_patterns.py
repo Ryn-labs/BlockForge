@@ -194,8 +194,8 @@ class Patterns(unittest.TestCase):
                     self.assertEqual(len(bottom), width)
                     flowers = {p for p, s in blocks.items() if "poppy" in s}
                     soil = {p for p, s in blocks.items() if "grass_block" in s}
-                    self.assertEqual(flowers, {(x + dx, y, z + dz) for x, y, z in bottom})    # in front of each bottom pane
-                    self.assertEqual(soil, {(x + dx, y - 1, z + dz) for x, y, z in bottom})   # the box right under it
+                    self.assertEqual(flowers, {(x + dx, y - 1, z + dz) for x, y, z in bottom})    # under each bottom pane, never in front of a pane
+                    self.assertEqual(soil, {(x + dx, y - 2, z + dz) for x, y, z in bottom})   # the box right under it
                     self.assertEqual(len({s for p, s in blocks.items() if "poppy" in s}), 1)  # one flower kind
 
     def test_stilts_reach_the_ground(self):
@@ -226,3 +226,75 @@ class Patterns(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DirectCalls(unittest.TestCase):
+    """Every pattern is callable by name inside a build script (the runner runs the text the pattern returns)."""
+
+    SITE = "site(-30, -30, 30, 30, 1)\n"
+
+    def _build(self, code):
+        from blockforge import quality
+        blocks, _ = sandbox.run_safe(self.SITE + code)
+        return blocks, checks.run(blocks), quality.score(blocks)
+
+    def test_manor_layout_by_name_equals_the_pattern_text(self):
+        direct, found, q = self._build("manor_layout(0, 2, 0)\n")
+        text, _ = sandbox.run_safe(self.SITE + patterns.manor_layout(0, 2, 0))
+        self.assertEqual(direct, text)
+        self.assertEqual([f for f in found if f["check"] in KINDS], [])
+        self.assertGreaterEqual(q["total"], 85)
+
+    def test_framed_house_by_name(self):
+        direct, found, q = self._build("framed_house(0, 0, 12, 8, 2, 2, 4)\n")
+        text, _ = sandbox.run_safe(self.SITE + patterns.framed_house(0, 0, 12, 8, 2, 2, 4))
+        self.assertEqual(direct, text)
+        self.assertEqual([f for f in found if f["check"] in KINDS], [])
+
+    def test_keywords_and_variables_stay_separate(self):
+        blocks, _ = sandbox.run_safe("x = 5\nwindow_with_box(0, 3, 0, 'south', width=2, height=2, wall='oak_planks')\n"
+                                     "block(x, 0, 0, 'stone')\n")
+        self.assertIn("stone", blocks[(5, 0, 0)])
+
+    def test_unknown_name_still_errors(self):
+        with self.assertRaises(sandbox.ScriptError) as c:
+            sandbox.run_safe("not_a_pattern(0, 0, 0)\n")
+        self.assertIn("not_a_pattern", str(c.exception))
+
+    def test_private_helpers_are_not_exposed(self):
+        with self.assertRaises(sandbox.ScriptError):
+            sandbox.run_safe("_code(['x'])\n")
+
+    def test_build_step_with_only_a_pattern_call(self):
+        from blockforge import session
+        s = session.start("Manor", "large")
+        session.step(s, self.SITE)
+        session.step(s, "manor_layout(0, 2, 0)\n", "manor")
+        self.assertGreater(len(session.load(s.id).blocks), 1000)
+
+
+class WindowsReadAsGlass(unittest.TestCase):
+    def test_pattern_houses_have_no_bad_windows(self):
+        from blockforge import quality
+        for code in (patterns.manor_layout(0, 2, 0), patterns.framed_house(0, 0, 12, 8, 2, 2, 4)):
+            blocks, _ = sandbox.run_safe("site(-30, -30, 30, 30, 1)\n" + code)
+            m = quality._Model(blocks)
+            self.assertEqual(quality._bad_window_cells(m), [])
+            self.assertFalse(any("do not read as clear glass" in f for f in quality.score(blocks)["findings"]))
+
+    def test_red_filled_windows_score_lower(self):
+        from blockforge import quality
+        code = "site(-30, -30, 30, 30, 1)\n" + patterns.manor_layout(0, 2, 0)
+        blocks, _ = sandbox.run_safe(code)
+        good = quality.score(blocks)
+        red = dict(blocks)
+        n = 0
+        for p, s in blocks.items():
+            if "glass_pane" in s:
+                red[p] = "minecraft:red_stained_glass"
+                n += 1
+        self.assertGreater(n, 10)
+        bad = quality.score(red)
+        self.assertLess(bad["parts"]["windows"], good["parts"]["windows"])
+        self.assertTrue(any("do not read as clear glass" in f for f in bad["findings"]), bad["findings"])
+        self.assertTrue(any("red glass at x" in f for f in bad["findings"]))
