@@ -429,11 +429,13 @@ EXPORTS += _testkit.EXPORTS
 
 # ------------------------------------------------------------------ natural terrain (see terrain_gen.py)
 def natural_terrain(x1, z1, x2, z2, y=0, height=40, kind="mountain", seed=0, snowline=None, trees=True, river=None,
-                    boulders=True, solid=None):
+                    boulders=True, solid=None, ruggedness=None, ledges=None, snow_mix=None):
     """Real-looking land in the box x1..x2, z1..z2: kind 'mountain' (one massif), 'range' (a ridge along the long side),
     'valley' (two ridges with a river) or 'hills'. y = ground level at the box edges, height = rise of the highest ground.
     Smooth slopes (no steps over 3 except real cliffs), rock strata on steep faces, scree, snow above the snowline,
     trees that thin out with height. Use this for every mountain, hill or valley instead of cones and stacked boxes.
+    ruggedness / ledges / snow_mix (0..1, default 0.6): several summits and crags / irregular benches and shoulders /
+    snow on ledges with dark rock on steep faces (0 = smooth slopes and a clean snow cap).
     Returns a dict: peak_y, snowline, water_y (valley river), trees."""
     from . import terrain_gen as _tg
     xa, xb, za, zb = int(min(x1, x2)), int(max(x1, x2)), int(min(z1, z2)), int(max(z1, z2))
@@ -441,7 +443,8 @@ def natural_terrain(x1, z1, x2, z2, y=0, height=40, kind="mountain", seed=0, sno
     dy = int(y) - base
     snow = (snowline - dy) if isinstance(snowline, (int, float)) and not isinstance(snowline, bool) else snowline
     blocks, info = _tg.generate(xb - xa + 1, zb - za + 1, kind, int(height), seed=seed, base=base, snowline=snow,
-                                trees=trees, river=river, boulders=boulders, solid=solid)
+                                trees=trees, river=river, boulders=boulders, solid=solid, ruggedness=ruggedness,
+                                ledges=ledges, snow_mix=snow_mix)
     for (x, yy, z), st in blocks.items():
         block(xa + x, yy + dy, za + z, st)
     return {"peak_y": info["peak_y"] + dy, "snowline": (info["snowline"] + dy) if info["snowline"] else None,

@@ -164,7 +164,8 @@ y=0 is the ground level the build sits on. All ranges are inclusive.
 - copy(x1,y1,z1, x2,y2,z2, dx, dy, dz)
 - tree(x, y, z, kind='oak', height=None)               quick decorative tree
 - noise(x, z, scale=8, seed=0) -> 0..1                 smooth noise for terrain / weathering
-- natural_terrain(x1, z1, x2, z2, y=0, height=40, kind='mountain'|'range'|'valley'|'hills', seed=0, snowline=None, river=None)
+- natural_terrain(x1, z1, x2, z2, y=0, height=40, kind='mountain'|'range'|'valley'|'hills', seed=0, snowline=None, river=None,
+      ruggedness=None, ledges=None, snow_mix=None)   (0..1, default 0.6: summits and crags, benches, snow / dark rock mix)
       real-looking land (smooth slopes, rock faces, scree, snow, trees). ALWAYS use it for mountains, hills and valleys;
       never build land from cones, cylinders or stacked boxes (that looks like a house, not a mountain).
 - pick(*blocks, weights=None)                          random texture choice
