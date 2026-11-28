@@ -18,18 +18,43 @@ COL = [("red_maple", (170, 50, 30)), ("orange_maple", (215, 120, 30)), ("leaves"
        ("chest", (150, 105, 50)), ("bed", (170, 40, 40)), ("carpet", (170, 60, 60)), ("iron", (200, 200, 200)), ("gold", (230, 200, 60))]
 
 
+_COLS = {}
+_TABLE = []                                                                 # [block_color] once imported, [None] when it can't be
+
+
+def _block_color():
+    if not _TABLE:
+        root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+        if root not in sys.path:                                            # once: inserting per block grew sys.path by
+            sys.path.insert(0, root)                                        # millions and made a big render take an hour
+        try:
+            from blockforge.render import block_color
+            _TABLE.append(block_color)
+        except Exception as e:                                              # report, never hide
+            print(f"bench render: no colour table ({e}), using the short list", file=sys.stderr)
+            _TABLE.append(None)
+    return _TABLE[0]
+
+
 def col(n):
     """The colour of a block: the maples by name, everything else from blockforge/render.py (the 3D preview's table), so
-    white terracotta is pale, not brick red, and prismarine or copper roofs show their own colour."""
+    white terracotta is pale, not brick red, and prismarine or copper roofs show their own colour. Cached per name."""
+    c = _COLS.get(n)
+    if c is None:
+        c = _COLS[n] = _col(n)
+    return c
+
+
+def _col(n):
     if "maple" in n:
         for k, c in COL:
             if k in n: return c
-    try:
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-        from blockforge.render import block_color
-        return block_color(n)
-    except Exception as e:                                                  # report, never hide
-        print(f"bench render: no colour table ({e}), using the short list", file=sys.stderr)
+    bc = _block_color()
+    if bc:
+        try:
+            return bc(n)
+        except Exception as e:                                              # report, never hide
+            print(f"bench render: no colour for {n} ({e}), using the short list", file=sys.stderr)
     for k, c in COL:
         if k in n: return c
     h = zlib.crc32(n.encode()); return (90 + h % 120, 90 + (h >> 8) % 120, 90 + (h >> 16) % 120)
