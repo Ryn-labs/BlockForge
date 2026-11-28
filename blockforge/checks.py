@@ -414,7 +414,12 @@ def run(blocks, size=None, ground=None):
                         break
 
     from . import house                                    # every building: way in, walk through, light, roof, ground
-    found += house.findings(C, ground)
+    try:
+        found += house.findings(C, ground)
+    except Exception as e:                                 # a bug in the house check must never break every build's checks
+        house.NOTES[:] = [f"house check skipped after an internal error ({type(e).__name__})"]
+        import logging
+        logging.getLogger(__name__).exception("house check failed")
     return _cap(found)
 
 
@@ -479,4 +484,6 @@ def total(findings):
 
 def summary(findings):
     by = counts(findings)
-    return f"{sum(by.values())} problems (" + ", ".join(f"{CHECK_LABELS.get(k, k)} {v}" for k, v in by.items()) + ")"
+    from . import house
+    note = ("; " + "; ".join(house.NOTES)) if house.NOTES else ""
+    return f"{sum(by.values())} problems (" + ", ".join(f"{CHECK_LABELS.get(k, k)} {v}" for k, v in by.items()) + ")" + note

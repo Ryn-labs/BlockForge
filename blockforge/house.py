@@ -31,6 +31,7 @@ The ground: the walk areas outside under the open sky (streets, yards, the land)
 A build without terrain stands on its lowest layer: where that layer is empty the world's ground is assumed level with
 it. Pure Python (the app ships without numpy); the session caches checks.run per build content."""
 import collections
+import time
 
 from . import checks
 
@@ -737,21 +738,53 @@ def _post_near(B, x, z, base, r=4):
     return False
 
 
-def findings(C, ground=None):
-    """The house findings of a build: [(check, (x, y, z), text)]."""
+MAX_BLOCKS = 2_000_000          # bigger builds skip the house check (it says so) instead of freezing the checks
+TIME_BUDGET = 3.0               # seconds; the check stops early after this and says how far it got
+MAX_AREA = 4_000_000            # footprint (x by z) of the build's bounding box; wider builds are skipped
+MAX_LIGHT_CELLS = 60_000_000    # the light grid over all buildings; bigger is skipped
+NOTES = []                      # plain-text notes of the last run (skipped / stopped early); checks.summary shows them
+
+
+def findings(C, ground=None, max_blocks=None, budget=None):
+    """The house findings of a build: [(check, (x, y, z), text)]. Giant builds are skipped and slow ones stop after the
+    time budget; both leave a note in NOTES instead of a finding (a skipped check never blocks a save)."""
+    del NOTES[:]
     if not C:
         return []
+    max_blocks = MAX_BLOCKS if max_blocks is None else max_blocks
+    budget = TIME_BUDGET if budget is None else budget
+    if len(C) > max_blocks:
+        NOTES.append(f"house check skipped: {len(C):,} blocks is over the {max_blocks:,} limit")
+        return []
+    xs = [p[0] for p in C]; zs = [p[2] for p in C]
+    area = (max(xs) - min(xs) + 1) * (max(zs) - min(zs) + 1)
+    if area > MAX_AREA:
+        NOTES.append(f"house check skipped: the build spreads over {area:,} columns (over the {MAX_AREA:,} limit)")
+        return []
+    t0 = time.monotonic()
+    def late(stage):
+        if time.monotonic() - t0 > budget:
+            NOTES.append(f"house check stopped after {budget:g} s ({stage})")
+            return True
+        return False
     B = _Build(C, ground)
     rooms = _rooms(B)
-    if not rooms:
+    if not rooms or late("finding the rooms"):
         return []
     blds = _buildings(B, rooms)
-    if not blds:
+    if not blds or late("finding the buildings"):
+        return []
+    bx = [B.nodes[i][0] for c in blds for i in c]; by = [B.nodes[i][1] for c in blds for i in c]; bz = [B.nodes[i][2] for c in blds for i in c]
+    cells = (max(bx) - min(bx) + 2 * LIGHT_MARGIN + 4) * (max(by) - min(by) + 13) * (max(bz) - min(bz) + 2 * LIGHT_MARGIN + 4)
+    if cells > MAX_LIGHT_CELLS:
+        NOTES.append(f"house check skipped: the buildings spread over {cells:,} cells (over the {MAX_LIGHT_CELLS:,} limit)")
         return []
     light = _Light(B, blds)
     out = []
     holes_seen = set()
-    for comp in blds:
+    for n, comp in enumerate(blds):
+        if late(f"checked {n} of {len(blds)} buildings"):
+            break
         out += _one(B, comp, light, holes_seen)
     return out
 
