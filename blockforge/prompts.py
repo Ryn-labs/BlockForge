@@ -239,6 +239,10 @@ BlockForge checks all of this after your script runs; anything that can't exist 
   cracked/mossy variants, andesite/tuff, gradients on roofs and towers.
 - Interior: hollow rooms with floors, stairs between levels, furniture, lighting (lanterns, candles),
   bookshelves, beds, tables (fence + pressure plate / trapdoor), carpets. Doors must be walkable.
+- Houses (BlockForge's house check): the door at the level of the ground outside or one bottom-stair step above it,
+  a walkable floor inside with 2+ free blocks over it (3 is better) and every storey reached by a stair, a light every
+  6 blocks or so inside so no floor is dark, a closed roof, and the foundation flush with the land (no wall over air,
+  no land piled up the walls).
 - Grounding: base sits on y=0 with a little landscaping (paths, grass, flowers, bushes, rocks) unless the
   prompt is an object/statue/pixel-art. Nothing floats unless it is meant to.
 - Organic forms (statues, creatures, trees, ships): build from ellipsoids/spheres/lines; use colour to

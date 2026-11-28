@@ -127,6 +127,16 @@ Every step sees the same coordinates, so write down key numbers (floor level, wa
 - Nothing solid in front of or behind a door: keep the doorway clear both sides, and the door half=lower / upper pair.
 - Stairs inside rooms need a hole in the floor above them and 2 free blocks over every step.
 
+## Houses (what the house check wants)
+check finds every building (covered rooms with walls) and wants, for each one:
+- A door (or a 2-high opening) at the level of the ground outside, or one bottom stair step above it (porch(steps=n)).
+  No step up right inside a 2-high door: the first stair starts one flat cell further in.
+- A walkable floor inside with 2 free blocks over it everywhere (3 is better, also under the eaves); every storey
+  reached by a stair; one floor level per storey (a 2-block step splits the room).
+- A light every 6 blocks or so inside (framed_house hangs lanterns under its ceilings): no floor at block light 0.
+- A closed roof, and the foundation flush with the land: walls on the ground or on posts, never over air, and no land
+  piled up the walls.
+
 ## Quality habits
 - Use 3-5 materials with a pattern (corner posts, a base course, different roof). Plain boxes look boring.
 - Windows, a door, a roof overhang, depth on the walls (pillars, trim) and light (lanterns) make a build feel real.
