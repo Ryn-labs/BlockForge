@@ -144,7 +144,7 @@ TOOLS = [
     },
     {
         "name": "check",
-        "description": 'Run all build checks (floating parts, buried or jumpy paths, wrong stair facing, corner turns, blocked doors, head room) and list every problem with coordinates.',
+        "description": 'Run all build checks (floating parts, buried or jumpy paths, wrong stair facing, corner turns, blocked doors, head room, and the house check: every building walkable in from the ground and through, lit inside, roof closed, walls on the ground) and list every problem with coordinates.',
         "inputSchema": {"type": "object", "properties": {"session": {"type": "string", "description": "Session id from start_build"}}, "required": ["session"], "additionalProperties": False},
     },
     {

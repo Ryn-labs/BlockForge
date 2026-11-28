@@ -472,6 +472,7 @@ ROW = ("for i in range(5):\n"                                     # five identic
        "    fill(x,5,0,x+8,5,8,'cobblestone')\n"
        "    block(x+4,1,8,B('oak_door',facing='south',half='lower'))\n"
        "    block(x+4,2,8,B('oak_door',facing='south',half='upper'))\n"
+       "    block(x+4,4,4,B('lantern',hanging=True))\n"                  # lit inside: plain, but no check problem
        "fill(0,0,10,56,0,12,'gravel')\n")
 
 

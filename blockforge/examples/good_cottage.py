@@ -13,6 +13,12 @@ LICENCE = "Owned by the BlockForge project (same licence as the code)"
 Y = 2                                   # ground floor walls start here; the grass is at y 1
 
 
+def _door(x, y, z, facing):
+    """A door in the wall between a house and its wing (the wing has no outside door)."""
+    return (f"block({x}, {y}, {z}, 'oak_door[facing={facing},half=lower,hinge=left,open=false]')\n"
+            f"block({x}, {y + 1}, {z}, 'oak_door[facing={facing},half=upper,hinge=left,open=false]')\n")
+
+
 def code():
     w = dict(width=2, height=2, box="birch_trapdoor")      # birch shutters, lintel and box (a pale wall), poppies
     w1 = dict(w, width=1)
@@ -21,6 +27,7 @@ def code():
         # main house 11 x 9, two floors (posts on the corners, beams on the floor lines); a wing to the east, 7 x 6
         P.framed_house(0, 0, 10, 8, Y, floors=2, storey=4, style="light", spacing=10),
         P.framed_house(10, 1, 16, 6, Y, floors=1, storey=3, style="light", spacing=6, skip=["west"], clear=True),
+        _door(10, Y, 4, "east"),                            # the wing opens off the main house
         # windows: front (south) beside the porch, back (north), west end, wing
         P.window_with_box(2, Y + 1, 8, "south", **w1),
         P.window_with_box(8, Y + 1, 8, "south", **w1),

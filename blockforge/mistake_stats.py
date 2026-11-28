@@ -25,16 +25,20 @@ FIX_LINES = {
     "wrong_facing": "Stairs, doors and trapdoors face the way people walk; check each facing after you place it",
     "blocked_doors": "Keep the 2 blocks in front of every door free, with a floor to stand on",
     "overwritten": "Plan parts so you don't fill and then carve the same blocks",
+    "house": "Every house: a door at ground level (or one stair step up), 2-high walkable rooms, a light every 6 blocks, "
+             "a closed roof, walls on the ground",
 }
 LABELS = {"buried_path": "buried paths", "jump_steps": "jump steps", "size_off": "wrong size", "floating": "floating parts",
           "removed": "removed blocks", "corner_turns": "corner turns", "wrong_facing": "wrong facings",
-          "blocked_doors": "blocked doors", "overwritten": "overwritten blocks"}
+          "blocked_doors": "blocked doors", "overwritten": "overwritten blocks", "house": "house problems"}
 TYPES = tuple(FIX_LINES)
 # checks.py names (and the bench score names) -> mistake types
 CHECK_MAP = {"floating": "floating", "buried_path": "buried_path", "headroom": "buried_path", "jump_step": "jump_steps",
              "jump_steps": "jump_steps", "corner_turn": "corner_turns", "corner_turns": "corner_turns",
              "wrong_facing": "wrong_facing", "door_blocked": "blocked_doors", "blocked_doors": "blocked_doors",
-             "size_off": "size_off", "removed": "removed", "overwritten": "overwritten"}
+             "size_off": "size_off", "removed": "removed", "overwritten": "overwritten", "house": "house",
+             "door_unreachable": "house", "interior_unreachable": "house", "low_headroom": "house",
+             "dark_spawn_spot": "house", "roof_hole": "house", "wall_over_air": "house", "land_against_wall": "house"}
 
 
 def _load():

@@ -20,7 +20,7 @@
 ## Doors and interiors
 - Keep the blocks in front of and behind every door clear; nothing solid there.
 - Build doors as a lower and upper half with the same facing and hinge.
-- Make every doorway at least 1 wide and 2 high; make every room reachable by walking.
+- Put each house door at the ground's level (or one stair step up); make every room reachable by walking, 2 free blocks overhead.
 - Place windows so they do not face a wall or a neighbouring building.
 - Stairs inside need a hole in the floor above and 2 free blocks over every step.
 - Furnish rooms with a few useful items (bed, table, chest) instead of leaving them empty.
@@ -32,7 +32,7 @@
 - Roof stairs face downhill on the slope: the high side toward the ridge.
 
 ## Lighting
-- Light every room and every path (light level 8 or more) so mobs cannot spawn.
+- Light every room (a lantern every 6 blocks inside) and every path (light level 8 or more) so mobs cannot spawn.
 - Put outdoor light on posts, eaves and gateways, one every 6-8 blocks along paths.
 - Hide light sources in the style: lanterns for old styles, sea lanterns or light blocks for modern.
 

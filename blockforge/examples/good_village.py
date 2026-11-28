@@ -17,6 +17,12 @@ def _windows(spots, width=1, house=0):
             for (x, y, z, facing) in spots]
 
 
+def _door(x, y, z, facing):
+    """A door in the wall between a house and its wing (the wing has no outside door)."""
+    return (f"block({x}, {y}, {z}, 'oak_door[facing={facing},half=lower,hinge=left,open=false]')\n"
+            f"block({x}, {y + 1}, {z}, 'oak_door[facing={facing},half=upper,hinge=left,open=false]')\n")
+
+
 def code():
     parts = [P.site(-26, -6, 48, 46, Y - 1),
              # the hall: landmark, two floors (birch fill, oak log frame), a storey band, teal layered roof, porch with
@@ -52,6 +58,7 @@ def code():
              # house D, south-east: ridge along z with a lower wing to the east, door west
              P.framed_house(24, 26, 32, 38, Y),
              P.framed_house(32, 28, 40, 36, Y, storey=3, skip=["west"], clear=True),
+             _door(32, Y, 32, "east"),                      # the wing opens off the house
              *_windows([(26, Y + 1, 38, "south"), (30, Y + 1, 38, "south"), (26, Y + 1, 26, "north"),
                         (24, Y + 1, 28, "west"), (24, Y + 1, 36, "west"), (38, Y + 1, 36, "south"), (40, Y + 1, 30, "east")],
                       house=1),
