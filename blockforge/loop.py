@@ -16,7 +16,7 @@ PREFIX = "mcp__blockforge__"
 TOOLS = ("block_info", "style_sheet", "lessons", "pattern", "start_build", "build_step", "view", "check", "walk_test", "undo", "history", "ground", "plan_layout", "describe", "review", "save_build",
          "get_build_guide")
 TIMEOUT = 1200                  # seconds, same kill timer as the script path
-MAX_TURNS = 80
+MAX_TURNS = int(__import__("os").environ.get("BLOCKFORGE_MAX_TURNS", "200"))
 
 
 def mcp_config(work):
@@ -267,11 +267,15 @@ def run(text, model, usage, exe, log=print, image_path=None, terrain=None, title
 
         res = turn(user_text(text, pre.id if pre else None))
         usage.add_claude_code(res, 0)
-        if res.get("is_error") and not saved_id:
-            msg = str(res.get("result") or res.get("error") or res)
-            if "login" in msg.lower() or "/login" in msg:
+        out_of_turns = res.get("subtype") == "error_max_turns"
+        if out_of_turns and sid:                                       # the turn cap ends the conversation, not the build: keep and improve it
+            log("Reached the step limit for one run; keeping the build and finishing it.")
+        elif res.get("is_error") and not saved_id:
+            msg = str(res.get("result") or res.get("error") or res.get("subtype") or "")
+            low = msg.lower()
+            if "login" in low or "/login" in msg:
                 raise EngineError("Claude Code isn't signed in. Open Settings and click 'Sign in to Claude'.")
-            if "limit" in msg.lower():
+            if "usage limit" in low or "rate limit" in low or "limit will reset" in low or "limit reached" in low:
                 raise EngineError("You've hit your Claude usage limit for now: " + msg[:300])
             raise EngineError("Claude returned an error: " + msg[:800])
         if sid:                                                         # check -> fix -> check until clean, before anything is saved
