@@ -527,10 +527,15 @@ export class Viewer {
     });
     el.addEventListener('pointerleave', () => { showBox(null); this.onHover?.(null); });
     el.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; });
+    // a single click only shows what a block is; a DOUBLE click (or the materials list) highlights every block of that kind,
+    // so a stray click while looking around never turns the rest of the build into ghosts
+    let lastUp = null;
     el.addEventListener('pointerup', e => {
       if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5 || e.button !== 0) { down = null; return; }
       down = null;
-      this.onPick?.(pick(e));
+      const now = performance.now(), dbl = lastUp && now - lastUp.t < 450 && Math.hypot(e.clientX - lastUp.x, e.clientY - lastUp.y) < 8;
+      lastUp = dbl ? null : { t: now, x: e.clientX, y: e.clientY };
+      if (dbl) this.onPick?.(pick(e));
     });
   }
 
