@@ -9,7 +9,7 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 - build_step(session, code, note) - run a short script ON TOP of what is already built. Reports what changed, overwrites,
   warnings and the checks with coordinates. build_step(session, parts=[{note, code}, ...]) runs up to 4 INDEPENDENT snippets
   in parallel and merges them (a clash on one block: the first part wins, it is reported); then view and check once.
-- make_terrain(session, kind, x1, z1, x2, z2, y?, height?, seed?, snowline?, river?) - real-looking land: mountain, range,
+- make_terrain(session, kind, x1, z1, x2, z2, y?, height?, seed?, snowline?, river?, ruggedness?, ledges?, snow_mix?) - real-looking land: mountain, range,
   valley (with river) or hills. Use it for EVERY mountain, hill or valley, then build on it (same as natural_terrain() in a script).
 - ground(session, x1, z1, x2, z2, step?) - the ground height map (y of the top solid block per column, trees skipped).
 - plan_layout(session, area, parts, street_width) - spots for many buildings and the streets between them (see Big builds).

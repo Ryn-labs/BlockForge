@@ -184,7 +184,10 @@ TOOLS = [
             "seed": {"type": "integer", "default": 0, "description": "Another seed = another mountain of the same kind"},
             "snowline": {"type": "integer", "description": "y where snow starts (default: 72% up a mountain, none on hills)"},
             "river": {"type": "boolean", "description": "Winding river along the valley floor (default on for valley)"},
-            "trees": {"type": "boolean", "default": True}},
+            "trees": {"type": "boolean", "default": True},
+            "ruggedness": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.6, "description": "Several summits and saddles, a blunt main top, crags; 0 = one smooth massif"},
+            "ledges": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.6, "description": "Irregular benches and shoulders on some slopes (never even terraces); 0 = even slopes"},
+            "snow_mix": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.6, "description": "Snow on ledges and gentle ground, dark rock on steep faces, in streaks and patches; 0 = a clean white cap"}},
             "required": ["session", "x1", "z1", "x2", "z2"], "additionalProperties": False},
     },
     {
@@ -435,7 +438,8 @@ def _session_call(name, args):
                 raise ToolError("build_step needs some code (or parts).")
             return session.step(s, args["code"], args.get("note"))
         if name == "make_terrain":
-            keys = ("x1", "z1", "x2", "z2", "y", "height", "kind", "seed", "snowline", "river", "trees")
+            keys = ("x1", "z1", "x2", "z2", "y", "height", "kind", "seed", "snowline", "river", "trees", "ruggedness", "ledges",
+                    "snow_mix")
             kw = ", ".join(f"{k}={args[k]!r}" for k in keys if args.get(k) is not None)
             from . import terrain_quality as _tq
             text = session.step(s, f"natural_terrain({kw})", args.get("note") or f"natural terrain ({args.get('kind', 'mountain')})")
