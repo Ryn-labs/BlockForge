@@ -387,7 +387,8 @@ def check_text(s):
     a = selfimprove.assess(s.blocks, s.ground(), s.terrain_blocks, s.size_hint, found=s.findings(),
                            q=s.quality(s.size_hint, s.title) if s.blocks else None)
     if not a["found"]:
-        ok = "No problems found: no floating parts, buried or jumpy paths, wrong stairs or blocked doors."
+        ok = ("No problems found: no floating parts, buried or jumpy paths, wrong stairs or blocked doors, and every house "
+              "can be walked into and through, is lit, roofed and on the ground.")
         if a["low_quality"]:                                  # clean checks, but a plain building: not done once it is finished
             return (ok + f"\nBut the quality is {a['qtotal']}/100, under the minimum of {selfimprove.quality.QUALITY_MIN}. "
                     "If this build is finished it is NOT DONE YET - improve the weakest parts, then check again:\n"

@@ -7,7 +7,8 @@ from tests import _env  # noqa: F401
 from blockforge import engine, examples, prompts, quality
 
 BOX = ("fill(0,0,0,8,0,8,'cobblestone')\nwalls(0,1,0,8,4,8,'cobblestone')\nfill(0,5,0,8,5,8,'cobblestone')\n"
-       "block(4,1,8,B('oak_door',facing='south',half='lower'))\nblock(4,2,8,B('oak_door',facing='south',half='upper'))\n")
+       "block(4,1,8,B('oak_door',facing='south',half='lower'))\nblock(4,2,8,B('oak_door',facing='south',half='upper'))\n"
+       "block(4,4,4,B('lantern',hanging=True))\n")                  # lit inside: plain, but no check problem
 
 
 def fake(first, second):

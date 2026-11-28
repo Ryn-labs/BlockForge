@@ -1,4 +1,5 @@
-"""Build checks shared by the app and the AI: walkable paths, doors, floating parts.
+"""Build checks shared by the app and the AI: walkable paths, doors, floating parts, and the house check (house.py:
+every building can be walked into and through, is lit, roofed and stands on the ground).
 
 run(blocks) takes {(x, y, z): "minecraft:state[props]"} and returns findings:
   {"check": name, "at": [x, y, z], "text": "plain sentence with coordinates", "count": n}
@@ -11,7 +12,9 @@ CAP = 25                                                   # findings kept per c
 CHECK_LABELS = {
     "floating": "floating parts", "buried_path": "buried path", "jump_step": "jump step",
     "corner_turn": "corner turn", "wrong_facing": "wrong facing", "door_blocked": "blocked door",
-    "headroom": "headroom",
+    "headroom": "headroom", "door_unreachable": "door not reachable", "interior_unreachable": "rooms not reachable",
+    "low_headroom": "low headroom inside", "dark_spawn_spot": "dark spawn spot", "roof_hole": "roof hole",
+    "wall_over_air": "wall over air", "land_against_wall": "land against wall",
 }
 
 DV = {"north": (0, -1), "south": (0, 1), "east": (1, 0), "west": (-1, 0)}
@@ -410,6 +413,8 @@ def run(blocks, size=None, ground=None):
                                       f"Door at {_fmt((x, y, z))} has a solid block {word} it at {_fmt(p2)}, so nobody can get through"))
                         break
 
+    from . import house                                    # every building: way in, walk through, light, roof, ground
+    found += house.findings(C, ground)
     return _cap(found)
 
 
@@ -428,12 +433,23 @@ BURIED_ADVICE = ("Buried paths: lay streets with road(points, width=...) - it cl
                  "or retaining wall with grass.")
 
 
+HOUSE_CHECKS = ("door_unreachable", "interior_unreachable", "low_headroom", "dark_spawn_spot", "roof_hole",
+                "wall_over_air", "land_against_wall")
+HOUSE_ADVICE = ("Houses: every building needs a door (or a 2-high opening) at the level of the ground outside or one "
+                "bottom-stair step above it, a walkable floor inside with 2 free blocks over it everywhere (3 is better; "
+                "no step up right inside a 2-high door), every storey reached by a stair, a light every 6 blocks or so "
+                "inside (framed_house hangs lanterns under its ceilings), a closed roof, and the foundation flush with the "
+                "land: walls on the ground or on posts, never hanging over air, and no land piled up the walls.")
+
+
 def advice(findings):
     """Lines that tell the AI which proven patterns fix these findings (stairs: straight_stair_run, external_stair ...;
-    buried paths: road)."""
+    buried paths: road; houses: what the house check wants)."""
     out = [STAIR_ADVICE] if any(f["check"] in STAIR_CHECKS for f in findings) else []
     if any(f["check"] == "buried_path" for f in findings):
         out.append(BURIED_ADVICE)
+    if any(f["check"] in HOUSE_CHECKS for f in findings):
+        out.append(HOUSE_ADVICE)
     return out
 
 
