@@ -208,6 +208,73 @@ class ChatFlow(unittest.TestCase):
         self.assertTrue(chat.load(c["id"])["messages"][-1].get("error"))
 
 
+COTTAGE_WALLS = ("fill(0,0,0,10,0,8,'cobblestone')\n"
+                 "walls(0,1,0,10,4,8,'oak_planks')\n"
+                 "fill(0,5,0,10,5,8,'spruce_planks')\n"
+                 "block(5,1,8,B('oak_door',facing='south',half='lower'))\n"
+                 "block(5,2,8,B('oak_door',facing='south',half='upper'))\n")
+PARTS_REPLY = ("I've built the plot and the cottage body.\n\nNext is part 2: a steep gable roof in red or green with an "
+               "oak trim, and a chimney.")
+
+
+class ChatPlanCard(unittest.TestCase):
+    """The plan card always shows for a build in parts, and improvement rounds keep the plan and the next step true."""
+
+    def test_derive_plan_from_the_parts_named(self):
+        plan = chat.derive_plan(PARTS_REPLY)
+        self.assertEqual([p["id"] for p in plan], ["p1", "p2", "p3", "p4"])
+        self.assertEqual(plan[0]["name"], "Base and walls")
+        self.assertTrue(plan[1]["name"].startswith("Steep gable roof in red or green"))
+        self.assertEqual([p["name"] for p in plan[2:]], ["Windows and details", "Garden and path"])
+        self.assertIsNone(chat.derive_plan("Built the house."))         # one part, nothing next: no card forced
+        six = chat.derive_plan("Part 1: walls. Part 6: a tower.")
+        self.assertEqual(len(six), 6)
+        self.assertEqual(six[5]["name"], "Tower")
+        self.assertEqual(chat.next_line(plan), "Next is part 1: base and walls.")
+        self.assertEqual(chat.next_line([dict(p, status="done") for p in plan]), "Every part of the plan is done.")
+
+    def test_card_shows_when_the_reply_has_no_plan_block(self):
+        ai = Ai(self, [([("build_step", {"code": COTTAGE_WALLS, "note": "body"})], PARTS_REPLY)])
+        c = chat.create("A small timber cottage with a garden.", size="small")
+        cid = ai.cid = c["id"]
+        chat._one_turn(cid, "A small timber cottage with a garden.", None, lambda m: None, False)
+        c = chat.load(cid)
+        self.assertEqual(len(c["plan"]), 4)
+        self.assertEqual([p["status"] for p in c["plan"]], ["done", "pending", "pending", "pending"])
+        self.assertEqual(c["plan"][0]["bbox"][0], 0)
+        self.assertTrue(chat.view(cid)["plan"])
+
+    def test_improve_round_marks_parts_done_and_the_next_line_follows(self):
+        from blockforge import examples
+        cottage = "clear(-10,-10,-10,80,80,80)\n" + examples.code("good_cottage")
+        ai = Ai(self, [([("build_step", {"code": COTTAGE_WALLS + "block(30,20,30,'stone')\n", "note": "body"})],
+                        PARTS_REPLY),
+                       ([("build_step", {"code": cottage, "note": "better"}), ("check", {})], "Fixed it.")])
+        c = chat.create("A small timber cottage with a garden.", size="small")
+        cid = ai.cid = c["id"]
+        res = chat.run_turn(cid, "A small timber cottage with a garden.", add_user=False, log=lambda m: None)
+        self.assertEqual(res["rounds"], 1)
+        c = chat.load(cid)
+        self.assertEqual([p["status"] for p in c["plan"]], ["done"] * 4)   # the round built the roof, windows, garden
+        texts = [m["text"] for m in c["messages"] if m["role"] == "ai"]
+        self.assertFalse(any("Next is part 2" in t for t in texts), texts)
+        self.assertIn("Every part of the plan is done.", texts[0])
+        self.assertIn("That also built steep gable roof", texts[-1])
+        self.assertTrue(texts[-1].endswith("Every part of the plan is done."))
+        self.assertEqual(c["next"], "Every part of the plan is done.")
+
+    def test_covered_reads_the_blocks(self):
+        from blockforge import examples, sandbox
+        walls = sandbox.run_safe(COTTAGE_WALLS)[0]
+        full = sandbox.run_safe(examples.code("good_cottage"))[0]
+        self.assertTrue(chat.covered("Base and walls", walls))
+        self.assertFalse(chat.covered("A steep gable roof and a chimney", walls))
+        self.assertTrue(chat.covered("A steep gable roof and a chimney", full))
+        self.assertTrue(chat.covered("Garden and path", full))
+        self.assertFalse(chat.covered("Garden and path", walls))
+        self.assertFalse(chat.covered("Something else", full))           # unknown words are never guessed
+
+
 class ChatRoutes(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

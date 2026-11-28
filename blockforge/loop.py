@@ -75,6 +75,8 @@ def user_text(text, session_id=None):
             "the light reference palette (birch, oak or stripped wood fill in an oak or spruce log frame, a teal or "
             "colored layered roof with an oak trim, big white-framed windows with a flower box under each) and a "
             "balcony; dark oak, deepslate or blackstone and black roofs only if the request asks for a dark look. "
+            "Big houses: central tall block + front gable, stepped wings, varied roof heights, no wall run over 9 "
+            "blocks; call manor_layout(x, y, z, facing) (and every pattern) directly in build_step code. Windows are clear glass_pane in a light frame, flowers only in a box under them. "
             "Before save_build call review and fix "
             "every part you score below 4. Finish with save_build and tell the user the preview link exactly as returned.")
 

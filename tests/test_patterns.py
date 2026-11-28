@@ -5,6 +5,11 @@ from tests.test_bench_score import S, build
 from blockforge import checks, examples, patterns, sandbox
 
 KINDS = ("buried_path", "jump_step", "door_blocked", "floating", "headroom", "wrong_facing", "corner_turn")
+HILL = ("for x in range(-24, 25):\n"                              # uneven ground for the manor on stilts
+        "  for z in range(-24, 25):\n"
+        "    h = int(2 + 3 * noise(x, z, 9))\n"
+        "    fill(x, 0, z, x, h, z, 'dirt')\n"
+        "    block(x, h + 1, z, 'grass_block')\n")
 
 CASES = {
     "stair_run_east": lambda: patterns.straight_stair_run(2, 1, 2, "east", 6, 3),
@@ -68,11 +73,23 @@ CASES = {
     "gable_roof_teal": lambda: patterns.gable_roof_trim(0, 0, 10, 6, 1, "teal", "oak", overhang=2),
     "cross_gable_green": lambda: patterns.cross_gable_roof(0, 0, 16, 10, 1, "green", "spruce", front="south", overhang=2),
     "hip_roof_gray": lambda: patterns.hip_roof_trim(0, 0, 8, 6, 1, "gray", "dark_oak"),
+    "manor_layout": lambda: patterns.manor_layout(0, 2, 0),
+    "manor_layout_north": lambda: patterns.manor_layout(0, 2, 0, "north", raised=2),
+    "manor_layout_east": lambda: patterns.manor_layout(0, 2, 0, "east", "plaster", "red", raised=5),
+    "manor_layout_west": lambda: patterns.manor_layout(0, 2, 0, "west", raised=1),
+    "manor_layout_stilts": lambda: (HILL + patterns.manor_layout(0, 8, 0, raised=3, stilts=True, ground=1)),
+    "bay_window": lambda: (patterns.framed_house(0, 0, 12, 8, 1, floors=2, storey=4)
+                           + patterns.bay_window(6, 1, 8, "south", 3, floors=2)),
+    "bay_window_wide": lambda: (patterns.framed_house(0, 0, 12, 8, 1, floors=1, storey=4)
+                                + patterns.bay_window(0, 1, 4, "west", 5, depth=2)),
+    "dormer": lambda: (patterns.framed_house(0, 0, 14, 8, 1, floors=1, storey=4)
+                       + patterns.gable_roof_trim(0, 0, 14, 8, 6, overhang=2) + patterns.dormer(7, 9, 8, "south")),
 }
 # every pattern that people walk up: 0 jump steps and 0 corner turns by checks.run AND by bench/score.py
 STAIRS = ("stair_run_east", "stair_run_north", "stair_run_west", "switchback", "switchback_east", "porch_steps",
           "external_stair", "external_stair_north", "external_stair_narrow", "balcony_access", "storey_band",
-          "storey_band_gaps")
+          "storey_band_gaps", "manor_layout", "manor_layout_north", "manor_layout_east", "manor_layout_west",
+          "manor_layout_stilts")
 
 
 class Patterns(unittest.TestCase):
@@ -177,8 +194,8 @@ class Patterns(unittest.TestCase):
                     self.assertEqual(len(bottom), width)
                     flowers = {p for p, s in blocks.items() if "poppy" in s}
                     soil = {p for p, s in blocks.items() if "grass_block" in s}
-                    self.assertEqual(flowers, {(x + dx, y, z + dz) for x, y, z in bottom})    # in front of each bottom pane
-                    self.assertEqual(soil, {(x + dx, y - 1, z + dz) for x, y, z in bottom})   # the box right under it
+                    self.assertEqual(flowers, {(x + dx, y - 1, z + dz) for x, y, z in bottom})    # under each bottom pane, never in front of a pane
+                    self.assertEqual(soil, {(x + dx, y - 2, z + dz) for x, y, z in bottom})   # the box right under it
                     self.assertEqual(len({s for p, s in blocks.items() if "poppy" in s}), 1)  # one flower kind
 
     def test_stilts_reach_the_ground(self):
@@ -209,3 +226,75 @@ class Patterns(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DirectCalls(unittest.TestCase):
+    """Every pattern is callable by name inside a build script (the runner runs the text the pattern returns)."""
+
+    SITE = "site(-30, -30, 30, 30, 1)\n"
+
+    def _build(self, code):
+        from blockforge import quality
+        blocks, _ = sandbox.run_safe(self.SITE + code)
+        return blocks, checks.run(blocks), quality.score(blocks)
+
+    def test_manor_layout_by_name_equals_the_pattern_text(self):
+        direct, found, q = self._build("manor_layout(0, 2, 0)\n")
+        text, _ = sandbox.run_safe(self.SITE + patterns.manor_layout(0, 2, 0))
+        self.assertEqual(direct, text)
+        self.assertEqual([f for f in found if f["check"] in KINDS], [])
+        self.assertGreaterEqual(q["total"], 85)
+
+    def test_framed_house_by_name(self):
+        direct, found, q = self._build("framed_house(0, 0, 12, 8, 2, 2, 4)\n")
+        text, _ = sandbox.run_safe(self.SITE + patterns.framed_house(0, 0, 12, 8, 2, 2, 4))
+        self.assertEqual(direct, text)
+        self.assertEqual([f for f in found if f["check"] in KINDS], [])
+
+    def test_keywords_and_variables_stay_separate(self):
+        blocks, _ = sandbox.run_safe("x = 5\nwindow_with_box(0, 3, 0, 'south', width=2, height=2, wall='oak_planks')\n"
+                                     "block(x, 0, 0, 'stone')\n")
+        self.assertIn("stone", blocks[(5, 0, 0)])
+
+    def test_unknown_name_still_errors(self):
+        with self.assertRaises(sandbox.ScriptError) as c:
+            sandbox.run_safe("not_a_pattern(0, 0, 0)\n")
+        self.assertIn("not_a_pattern", str(c.exception))
+
+    def test_private_helpers_are_not_exposed(self):
+        with self.assertRaises(sandbox.ScriptError):
+            sandbox.run_safe("_code(['x'])\n")
+
+    def test_build_step_with_only_a_pattern_call(self):
+        from blockforge import session
+        s = session.start("Manor", "large")
+        session.step(s, self.SITE)
+        session.step(s, "manor_layout(0, 2, 0)\n", "manor")
+        self.assertGreater(len(session.load(s.id).blocks), 1000)
+
+
+class WindowsReadAsGlass(unittest.TestCase):
+    def test_pattern_houses_have_no_bad_windows(self):
+        from blockforge import quality
+        for code in (patterns.manor_layout(0, 2, 0), patterns.framed_house(0, 0, 12, 8, 2, 2, 4)):
+            blocks, _ = sandbox.run_safe("site(-30, -30, 30, 30, 1)\n" + code)
+            m = quality._Model(blocks)
+            self.assertEqual(quality._bad_window_cells(m), [])
+            self.assertFalse(any("do not read as clear glass" in f for f in quality.score(blocks)["findings"]))
+
+    def test_red_filled_windows_score_lower(self):
+        from blockforge import quality
+        code = "site(-30, -30, 30, 30, 1)\n" + patterns.manor_layout(0, 2, 0)
+        blocks, _ = sandbox.run_safe(code)
+        good = quality.score(blocks)
+        red = dict(blocks)
+        n = 0
+        for p, s in blocks.items():
+            if "glass_pane" in s:
+                red[p] = "minecraft:red_stained_glass"
+                n += 1
+        self.assertGreater(n, 10)
+        bad = quality.score(red)
+        self.assertLess(bad["parts"]["windows"], good["parts"]["windows"])
+        self.assertTrue(any("do not read as clear glass" in f for f in bad["findings"]), bad["findings"])
+        self.assertTrue(any("red glass at x" in f for f in bad["findings"]))

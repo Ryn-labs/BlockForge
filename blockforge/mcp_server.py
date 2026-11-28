@@ -124,7 +124,7 @@ TOOLS = [
     },
     {
         "name": "pattern",
-        "description": 'A proven build part as buildkit text you pass to build_step: house parts (framed_house, framed_wall, window_with_box, porch, balcony, gable_roof_trim, hip_roof_trim, cross_gable_roof, chimney, stilt_base, fence_garden, farm_plot, site, road, plaza) and stairs, landings, doorway, lantern post, bridge, tree, spiral stairs. Unknown or empty name lists the patterns with their arguments.',
+        "description": 'A proven build part as buildkit text (every pattern is also a function you can call by name directly in build_step / create_build code, e.g. manor_layout(0, 2, 0)): a whole manor (manor_layout: tall central block with a front gable, stepped wings, grand stair), house parts (framed_house, bay_window, dormer, framed_wall, window_with_box, porch, balcony, gable_roof_trim, hip_roof_trim, cross_gable_roof, chimney, stilt_base, fence_garden, farm_plot, site, road, plaza) and stairs, landings, doorway, lantern post, bridge, tree, spiral stairs. Unknown or empty name lists the patterns with their arguments.',
         "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "args": {"type": "object", "description": "Keyword arguments of the pattern, e.g. {\"x\": 3, \"y\": 1, \"z\": 4, \"facing\": \"south\"}"}}, "additionalProperties": False},
     },
     {

@@ -21,7 +21,8 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 - save_build(session, title) - final fix-up pass, saves the build, returns the 3D preview link. Give the link to the
   user exactly as returned.
 - lessons() - what earlier builds taught. style_sheet(style) - palette, shapes and details of a style (unknown name lists them).
-- pattern(name, args) - proven parts as script text for build_step: house bodies, framed walls, windows with boxes, porch,
+- Every pattern below is also a function: call manor_layout(...), framed_house(...) etc. directly in build_step code.
+- pattern(name, args) - the same proven parts as script text (to read them): a whole manor (manor_layout), house bodies, framed walls, windows with boxes, porch,
   balcony, trimmed roofs, chimney, stilts, garden, farm, road, plaza, stairs, bridge, tree (unknown name lists them all).
 - block_info(blocks) - what a block state is: solid or not, what it needs to stay, light, properties.
 - create_build / update_build still exist for writing one whole script at once.
@@ -36,11 +37,16 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 ## Houses and towns: start from the proven parts (default)
 House default (unless the user asks otherwise): 2+ storeys, the reference palette - light oak, birch or stripped wood
 fill in an oak or spruce log frame, a teal (or green, red, warm oak) layered roof with an oak trim, big white-framed
-windows (birch shutters and lintel) with a flower box directly under each, a balcony. The house must read LIGHT: the
+windows (clear glass_pane, never coloured or red glass, in a white or birch or oak frame; birch shutters and lintel) with a flower box directly under each (flowers only in that box, never in front of or inside the panes), a balcony. The house must read LIGHT: the
 quality score measures the colours on the rendered side views and holds a house that reads dark below the gate. Dark
 oak, deepslate, blackstone walls and black or grey roofs only when the user asks for a dark look (dark, gothic, spooky,
 haunted, night, a stronghold). A small hut or cottage may have one storey. Every house starts from pattern() parts;
 fill in between them, never a bare box:
+- Big houses: central tall block + front gable, stepped wings, varied roof heights, no wall run over 9 blocks;
+  call manor_layout(x, y, z, facing) directly in build_step code (every pattern is a
+  function you can call by name in build_step, create_build and scripts; the pattern tool only shows its text). x, z = middle, y = ground; stilts=True on uneven ground.
+  Small cottages need no wings but still: a porch, lean-to or dormer, a chimney, a loft or 2nd storey, a birch
+  or plaster fill between the logs (bay_window, dormer help).
 - Plan the mass first: a main volume plus a lower wing, a porch and balconies; 3 roof heights; 3-6 materials with roles
   (oak or spruce logs for the frame, a light wall fill, a roof in its own colour, accents).
 - framed_house(..., floors=2) (or framed_wall; default style 'light' = birch fill in oak logs, also 'oak', 'stripped',
