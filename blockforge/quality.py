@@ -1105,6 +1105,37 @@ def _storeys(m):
     return sum(a * v for a, v in parts) / area, find[:4], fix[:4]
 
 
+def _bad_window_cells(m):
+    """Window openings that do not read as clear glass: a red (or other saturated red) stained pane, a flower or any
+    plant right in front of a pane, or a red block filling a hole in a window (3 of its 4 in-wall neighbours are panes).
+    Returns [(x, y, z, why)] sorted."""
+    bad = {}
+    red = lambda n: n.startswith("red_") or n in ("redstone_block", "poppy", "rose_bush", "red_tulip")   # noqa: E731
+    for p, k in m.K.items():
+        if k == "glass" and m.N[p].startswith("red_"):
+            bad[p] = "red glass"
+    for d, q, fk, mat, t, fr, box in _faces(m):
+        if m.K.get(q) != "glass":
+            continue
+        o = (q[0] + d[0], q[1], q[2] + d[1])
+        if m.K.get(o) == "nature":
+            bad[o] = "a flower or plant in front of a pane"
+    glass = {p for p, k in m.K.items() if k == "glass"}
+    cand = set()
+    for g in glass:
+        for a, b, c in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)):
+            q = (g[0] + a, g[1] + b, g[2] + c)
+            if q in m.N and q not in glass:
+                cand.add(q)
+    for q in cand:
+        for ax in ((1, 0), (0, 1)):                                  # the wall runs along x or along z
+            n = sum(((q[0] + sx * ax[0], q[1], q[2] + sx * ax[1]) in glass) for sx in (1, -1))
+            n += sum(((q[0], q[1] + sy, q[2]) in glass) for sy in (1, -1))
+            if n >= 3 and (red(m.N[q]) or n == 4):
+                bad[q] = "a non-glass block inside a window"
+    return sorted((x, y, z, why) for (x, y, z), why in bad.items())
+
+
 def _windows(m):
     side = collections.defaultdict(lambda: [0, 0])
     glass = {}
@@ -1147,6 +1178,13 @@ def _windows(m):
     n = len(glass)
     score = 55 * per + 20 * (framed / n if n else 0) + 25 * (big / n if n else 0)
     find, fix = [], []
+    holes = _bad_window_cells(m)
+    if holes:
+        score = max(0, score - min(60, 12 * len(holes)))
+        find.append(f"Windows: {len(holes)} window opening(s) do not read as clear glass: "
+                    + "; ".join(f"{w} at x {x}, y {y}, z {z}" for x, y, z, w in holes[:6]) + ".")
+        fix.append("Windows are glass_pane (clear or white-tinted) in a white or birch or oak frame; put the flowers only "
+                   "in a box directly under the window (pattern window_with_box), never in front of or inside the panes.")
     worst = min(shares, key=lambda d: shares[d])
     if shares[worst] < 0.12 or len(shares) < 4:
         find.append("Windows: glass on each facade: " + ", ".join(f"{SIDE[d]} {round(100 * shares[d])}%" for d in sorted(
