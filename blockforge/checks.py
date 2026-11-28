@@ -48,6 +48,10 @@ HEAD_BLOCKERS = ("_stairs", "_slab", "_fence", "_fence_gate", "_wall")
 
 PATH_BLOCKS = ("gravel", "dirt_path", "cobblestone", "stone_bricks", "mossy_cobblestone", "polished_andesite", "packed_mud",
                "coarse_dirt")
+# natural ground: on top of a path block it means the street runs on under the ground (cut into a slope without clearing
+# above, a wall capped with grass, or a street paved with natural stone). Same list as the bench scorer (bench/score.py).
+NATURAL_COVER = ("dirt", "grass_block", "stone", "andesite", "diorite", "granite", "tuff", "coarse_dirt", "podzol", "gravel",
+                 "rooted_dirt", "deepslate", "sand")
 
 
 _MEMO_MAX = 50000                                          # distinct block states are few; the caches never grow past this
@@ -292,6 +296,25 @@ def _terrain_burials(C, ground, cells):
     return out
 
 
+def _covered_path(C, stand, x, y, z):
+    """A path block with natural ground right on top that carries on as a street: path blocks on both sides along x or
+    z and a standing path cell within 8 along that line (bench/score.py v2 'buried path'). The finding names the cell and
+    the block on it."""
+    g = C.get
+    cover = name(g((x, y + 1, z)))
+    if cover not in NATURAL_COVER:
+        return None
+    for a, c in ((1, 0), (0, 1)):
+        if name(g((x + a, y, z + c))) in PATH_BLOCKS and name(g((x - a, y, z - c))) in PATH_BLOCKS and any(
+                (x + a * k * sg, z + c * k * sg, y) in stand and name(g((x + a * k * sg, y, z + c * k * sg))) in PATH_BLOCKS
+                for k in range(1, 9) for sg in (1, -1)):
+            return ("buried_path", (x, y, z),
+                    f"Path block at {_fmt((x, y, z))} has {cover} on top of it at {_fmt((x, y + 1, z))}, so the street "
+                    f"runs on under the ground there: clear the 2 blocks above the path (road() does), and pave with "
+                    f"path blocks, never {cover} or other natural stone/dirt, nor grass on a path or wall top")
+    return None
+
+
 def run(blocks, size=None, ground=None):
     """All findings for a build, capped per check. `size` is accepted for callers that have it; no check needs it yet.
     `ground` (terrain.Ground) = the build sits on terrain: floating is measured against the land, and paths that run into
@@ -305,13 +328,20 @@ def run(blocks, size=None, ground=None):
 
     walk = {}
     cells = C.items() if ground is None else [(p, s) for p, s in C.items() if not ground.untouched(C, p)]
+    reported = set()
     if ground is not None:
         found += _terrain_burials(C, ground, cells)
+        reported = {f[1] for f in found if f[0] == "buried_path"}
     pathish = {s for s in set(C.values()) if shape(s) in ("bottom_stair", "bottom_slab") or name(s) in PATH_BLOCKS}
     for (x, y, z), s in cells:
         if s not in pathish:
             continue                                              # most blocks are no path: skip them by their state
         n, sh = name(s), shape(s)
+        if n in PATH_BLOCKS and (x, y, z) not in reported:
+            hit = _covered_path(C, stand, x, y, z)
+            if hit:
+                found.append(hit)
+                continue
         if n in PATH_BLOCKS and not _is_ground_path(C, x, y, z):
             continue                                              # wall and roof tops are not paths
         if sh in ("bottom_stair", "bottom_slab") and _is_roof_step(C, x, y, z):
@@ -391,9 +421,20 @@ STAIR_ADVICE = ("Stairs and steps: build them from the proven patterns, which ha
                 "a stair that turns on one block.")
 
 
+BURIED_ADVICE = ("Buried paths: lay streets with road(points, width=...) - it clears 3 blocks above every cell, fills the "
+                 "gap under it and follows the ground (y=None) or the plan_layout corner heights ([x, z, y] points); "
+                 "straight_stair_run and switchback_landing clear above their steps too. Pave with path blocks (stone "
+                 "bricks, cobblestone, gravel, dirt path), never andesite, stone, dirt or grass, and never cap a path "
+                 "or retaining wall with grass.")
+
+
 def advice(findings):
-    """Lines that tell the AI which proven patterns fix these findings (stairs: straight_stair_run, external_stair ...)."""
-    return [STAIR_ADVICE] if any(f["check"] in STAIR_CHECKS for f in findings) else []
+    """Lines that tell the AI which proven patterns fix these findings (stairs: straight_stair_run, external_stair ...;
+    buried paths: road)."""
+    out = [STAIR_ADVICE] if any(f["check"] in STAIR_CHECKS for f in findings) else []
+    if any(f["check"] == "buried_path" for f in findings):
+        out.append(BURIED_ADVICE)
+    return out
 
 
 def _cap(found):
