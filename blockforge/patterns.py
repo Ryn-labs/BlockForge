@@ -504,7 +504,9 @@ def framed_house(x1, z1, x2, z2, y, floors=1, storey=4, fill=None, frame=None, f
     blocks and a frame sticking out 1 block (posts, a beam on every floor line, thick corners). The ceiling is at
     y + floors * (storey + 1) - 1: the roof's eaves go one higher. skip = sides without a wall (a wing joined to another
     building, e.g. ['east']); flat = sides whose frame stays in the wall (where a lower wing and its roof join);
-    clear=True empties the rooms first. Then add windows, a porch or door, and the roof.
+    clear=True empties the rooms first. Then add windows (window_with_box with box=trapdoor_of(frame): a planter of
+    soft mixed plants under every second window of the lower floors, planter=False - a sill - under the rest), a porch
+    or door, and the roof.
     style = a WALL_STYLES name for fill and frame not given: 'light' (birch planks in oak logs, the reference look and
     the default), 'oak' (oak planks in spruce logs), 'stripped', 'plaster', 'classic'; 'dark' (spruce planks in dark
     oak logs) only when the user asks for a dark build.
@@ -553,20 +555,47 @@ def framed_house(x1, z1, x2, z2, y, floors=1, storey=4, fill=None, frame=None, f
     return _code(out)
 
 
+# Window box planting: soft, pale and green plants mixed in each box. One strong colour (poppies) under every window
+# reads as a row of red squares from afar (reviewer, 1.15.0 manor), so it is never the default.
+BOX_PLANTS = ("azure_bluet", "fern", "oxeye_daisy", "lily_of_the_valley", "azalea")
+
+
+def _box_plants(flower):
+    if flower is None:
+        return BOX_PLANTS
+    if isinstance(flower, (list, tuple)):
+        return tuple(str(f) for f in flower) or BOX_PLANTS
+    return (str(flower),)
+
+
+def trapdoor_of(frame):
+    """The trapdoor in a frame's wood: oak_log -> oak_trapdoor, stripped_spruce_log -> spruce_trapdoor (oak for stone)."""
+    n = str(frame or "oak_log").replace("minecraft:", "").split("[")[0].replace("stripped_", "")
+    for suf in ("_log", "_wood", "_planks", "_stem", "_hyphae"):
+        if n.endswith(suf):
+            n = n[: -len(suf)]
+            break
+    return n + "_trapdoor" if n in WOOD_NAMES else "oak_trapdoor"
+
+
 def window_with_box(x, y, z, facing, width=1, height=2, glass="glass_pane", shutter="birch_trapdoor",
-                    box="oak_trapdoor", flower="poppy", lintel="stripped_birch_log", wall=None):
+                    box="oak_trapdoor", flower=None, lintel="stripped_birch_log", wall=None, planter=True):
     """A white-framed window in a wall: `width` x `height` panes, the lowest-left pane at (x, y, z) (width runs east or
-    south along the wall), a light (stripped birch) lintel over it, open birch trapdoor shutters on both sides and a
-    flower box directly under the panes (a grass block in front of the wall row under each bottom pane with one `flower` kind on it, never in front of a pane, trapdoors
-    round its front, sides and bottom), all on the `facing` (outside) side. Flowers go only in these boxes under
-    windows, one kind per window, never scattered over the walls.
+    south along the wall), a light (stripped birch) lintel over it, open birch trapdoor shutters on both sides and,
+    with planter=True, a planter directly under the panes (a grass block in front of the wall row under each bottom
+    pane with a plant on it, never in front of a pane, `box` trapdoors round its front, sides and bottom - give it the
+    frame's wood, trapdoor_of(frame)). The plants default to a soft mix (BOX_PLANTS: azure bluet, fern, oxeye daisy,
+    lily of the valley, azalea); `flower` = one kind or a list to mix. planter=False puts a plain `box` trapdoor sill
+    under the panes instead. Put planters only under SOME windows (every second one, ground and first floor): a strong
+    flower colour under every window reads as a row of red squares from afar. All on the `facing` (outside) side.
     wall = a block for a small wall piece round it (a window on its own); None keeps the wall already built."""
     dx, dz = _dir(facing)
     ax, az = (1, 0) if _AXIS[facing] == "x" else (0, 1)
     width, height = max(1, int(width)), max(1, int(height))
     conn = {"east": True, "west": True} if ax else {"north": True, "south": True}
     neg, pos = ("west", "east") if ax else ("north", "south")
-    out = [f"# window {width} x {height} facing {facing} with shutters and a flower box"]
+    plants = _box_plants(flower)
+    out = [f"# window {width} x {height} facing {facing} with shutters and " + ("a planter" if planter else "a sill")]
     if wall:
         out.append(f"fill({x - 2 * ax}, {y - 2}, {z - 2 * az}, {x + (width + 1) * ax}, {y + height + 1}, "
                    f"{z + (width + 1) * az}, {wall!r})")
@@ -574,8 +603,12 @@ def window_with_box(x, y, z, facing, width=1, height=2, glass="glass_pane", shut
         cx, cz = x + ax * i, z + az * i
         for k in range(height):
             out.append(f"block({cx}, {y + k}, {cz}, {_st(glass, **conn) if glass.endswith('_pane') else repr(glass)})")
+        if not planter:
+            out.append(f"block({cx + dx}, {y - 1}, {cz + dz}, {_st(box, facing=facing, half='top', open=False)})")
+            continue
+        plant = plants[(i + abs(x) + abs(z) + abs(y)) % len(plants)]            # mixed along the box, not one colour
         out.append(f"block({cx + dx}, {y - 2}, {cz + dz}, 'grass_block')")      # the box sits under the sill row,
-        out.append(f"block({cx + dx}, {y - 1}, {cz + dz}, {flower!r})")         # so no flower hides a pane
+        out.append(f"block({cx + dx}, {y - 1}, {cz + dz}, {plant!r})")          # so no plant hides a pane
         out.append(f"block({cx + 2 * dx}, {y - 2}, {cz + 2 * dz}, {_st(box, facing=facing, half='bottom', open=True)})")
         out.append(f"block({cx + dx}, {y - 3}, {cz + dz}, {_st(box, facing=facing, half='top', open=False)})")
     out.append(f"fill({x - ax}, {y + height}, {z - az}, {x + width * ax}, {y + height}, {z + width * az}, "
@@ -583,7 +616,8 @@ def window_with_box(x, y, z, facing, width=1, height=2, glass="glass_pane", shut
     for side, (sx, sz) in ((neg, (x - ax, z - az)), (pos, (x + width * ax, z + width * az))):
         for k in range(height):
             out.append(f"block({sx + dx}, {y + k}, {sz + dz}, {_st(shutter, facing=facing, half='bottom', open=True)})")
-        out.append(f"block({sx + dx}, {y - 1}, {sz + dz}, {_st(box, facing=side, half='bottom', open=True)})")
+        if planter:
+            out.append(f"block({sx + dx}, {y - 1}, {sz + dz}, {_st(box, facing=side, half='bottom', open=True)})")
     return _code(out)
 
 
@@ -1329,13 +1363,15 @@ def dormer(x, y, z, facing, width=3, roof=ROOF_DEFAULT, trim=TRIM_DEFAULT, wall=
 
 
 def manor_layout(x, y, z, facing="south", style="light", roof=ROOF_DEFAULT, trim=TRIM_DEFAULT, raised=4, stilts=False,
-                 ground=None, flower="poppy", chimney_block="bricks"):
+                 ground=None, flower=None, chimney_block="bricks"):
     """A whole manor in the shape of the reference houses, not one long box: a taller central block (17 x 11, 3 storeys
     of 5, its big gable facing the front) with a 3-storey entrance bay standing 3 out of the middle of the front (a lower
     gable in front of the big one) and a 2-storey bay at the back, two 2-storey wings (9 x 9, set back 3, their own
     front gables 12 lower than the central ridge) stepping down on both sides, a porch at the door and a grand front
-    stair in flights with landings up to it, a balcony with a door on each wing, 2 x 2 framed windows with flower boxes,
-    storey bands and a chimney. No straight wall is longer than 9 blocks.
+    stair in flights with landings up to it, a balcony with a door on each wing, 2 x 2 framed windows (planters of soft
+    mixed plants under every second window of the ground and first floor, trapdoor sills under the rest, in the
+    frame's wood; `flower` = one plant or a list instead of the mix), storey bands and a chimney. No straight wall is
+    longer than 9 blocks.
     (x, z) is the middle of the central block, y the ground level (the top of the ground is y-1), `facing` the entrance
     side. The house stands `raised` blocks up (1-8) on a stone terrace with railings, or on log stilts down to the ground
     (stilts=True, for uneven ground or water: the posts go down until they meet the ground; `ground` = the lowest
@@ -1350,19 +1386,25 @@ def manor_layout(x, y, z, facing="south", style="light", roof=ROOF_DEFAULT, trim
     fill, frame = _style(style, None, None)
     low = int(ground) if ground is not None else y - 1
     sd = F.side
-    W = dict(width=2, height=2, flower=flower)
+    W = dict(width=2, height=2, flower=flower, box=trapdoor_of(frame))
     out = [f"# manor layout facing {facing} round x {x}, z {z}: central block, entrance bay, two stepped wings, "
            f"grand stair\n"]
+    n_win = [0]
+
+    def planter(wy):
+        """Every second window of the ground and first floor gets a planter; the others and the top floor a sill."""
+        n_win[0] += 1
+        return wy <= Y + 1 + S + 1 and n_win[0] % 2 == 1
 
     def win(l1, l2, wy, lz, n, **kw):
         a = dict(W, **kw)
         a["width"] = abs(l2 - l1) + 1
         wx, wz = F.run(l1, l2, lz)
-        return window_with_box(wx, wy, wz, sd(n), **a)
+        return window_with_box(wx, wy, wz, sd(n), planter=planter(wy), **a)
 
     def win_side(lz1, lz2, wy, lx, n):
         wx, wz = min(F.at(lx, lz1), F.at(lx, lz2))
-        return window_with_box(wx, wy, wz, sd(n), **dict(W, width=abs(lz2 - lz1) + 1))
+        return window_with_box(wx, wy, wz, sd(n), planter=planter(wy), **dict(W, width=abs(lz2 - lz1) + 1))
 
     def line(lx1, lz1, lx2, lz2, yy, st):
         x1, z1, x2, z2 = F.rect(lx1, lz1, lx2, lz2)

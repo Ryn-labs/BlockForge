@@ -427,8 +427,8 @@ def quality_fix_message(result):
             "wall fill (birch, oak or "
             "stripped wood) in an oak or spruce log frame that sticks out of the walls (no dark oak or deepslate walls "
             "unless the request asks for a dark look), a pitched roof in its own colour (teal, green, red) with an oak "
-            "trim, overhang and lower roofs at other heights, big 2 x 2 white-framed windows with a flower box directly "
-            "under each, a porch and "
+            "trim, overhang and lower roofs at other heights, big 2 x 2 white-framed windows with sills, planters of soft mixed "
+            "plants (azure bluet, oxeye daisy, fern) under only some lower windows, a porch and "
             "balconies, a chimney, a path and a garden. Keep the size and keep the paths, doors and stairs working. Reply "
             "with the complete improved script in one ```python block.")
 

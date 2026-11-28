@@ -75,7 +75,7 @@ def user_text(text, session_id=None):
             "Keep the overall size asked for. For a house, building or town start from "
             "the proven pattern() parts (see 'Houses and towns'), never a bare box; a house by default has 2+ storeys, "
             "the light reference palette (birch, oak or stripped wood fill in an oak or spruce log frame, a teal or "
-            "colored layered roof with an oak trim, big white-framed windows with a flower box under each) and a "
+            "colored layered roof with an oak trim, big white-framed windows, a planter of soft mixed plants under every second lower window, never red flowers under every window) and a "
             "balcony; dark oak, deepslate or blackstone and black roofs only if the request asks for a dark look. "
             "Big houses: central tall block + front gable, stepped wings, varied roof heights, no wall run over 9 "
             "blocks; call manor_layout(x, y, z, facing) (and every pattern) directly in build_step code. Windows are clear glass_pane in a light frame, flowers only in a box under them. "

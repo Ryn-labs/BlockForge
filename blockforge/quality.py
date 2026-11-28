@@ -749,6 +749,10 @@ WALL_KINDS = ("full", "frame", "stairs", "slab", "trapdoor", "fence")
 FILL_L = 62                          # lightness from here up reads as a pale fill (birch, stripped birch, plaster), not oak
 LIGHT_L = 45                         # CIE lightness from here up reads as a light wall (oak, birch, stripped logs, plaster)
 LOOK_CLOSE = (0.35, 0.6)             # histogram closeness to the nearest reference: 0 points at the first, full at the second
+ROW_CHROMA = 58                      # CIE chroma of a strong colour patch: poppy 70, red tulip 72, dandelion 75, cornflower 68
+                                     # (grass 54, fern 48, teal roof 26, wood 25-33 stay under it)
+ROW_PATCHES = 4                      # this many patches of one strong colour in one row of a side view = a row of squares
+ROW_PENALTY = (10, 20)               # looks points off per row found, at most
 DARK_CAP = (35, 65)                  # a house that reads dark (not asked for) scores at most 35 + 65 x brightness (_bright)
 
 
@@ -971,6 +975,49 @@ def _view(m):
     return v
 
 
+def _hue_name(rgb):
+    h, s_, v = colorsys.rgb_to_hsv(*[c / 255 for c in rgb])
+    deg = h * 360
+    for top, word in ((15, "red"), (45, "orange"), (70, "yellow"), (160, "green"), (200, "cyan"), (255, "blue"),
+                      (290, "purple"), (340, "pink"), (361, "red")):
+        if deg < top:
+            return word
+    return "bright"
+
+
+def _colour_rows(m):
+    """Rows of saturated same-colour patches along a facade, on the four side views of the house WITH its plants (the
+    nearest block in every cell): e.g. red flowers under every window, which read as a row of red squares from afar.
+    A patch is a run of cells of one strong colour (CIE chroma ROW_CHROMA+, the same 30-degree hue sector) in one row;
+    ROW_PATCHES or more patches in one row of one side is a finding. Returns [{side, y, colour, patches, span}]."""
+    if getattr(m, "rows", None) is not None:
+        return m.rows
+    house = {p: st for p, st in m.S.items() if (p[0], p[2]) in m.F2 and p[1] > m.g}
+    cache, out = {}, []
+    for side in ("north", "east", "south", "west"):
+        rows = collections.defaultdict(list)
+        for (a, b), (_near, p, st) in nearest(house, side).items():
+            k = m.K.get(p)
+            if k == "glass" or (k in ("stairs", "slab") and "half=top" not in st and "type=top" not in st):
+                continue                                             # windows and roof slopes are not facade patches
+            got = cache.get(st)
+            if got is None:
+                rgb = block_color(st)
+                L_, A, B = lab(rgb)
+                h = colorsys.rgb_to_hsv(*[c / 255 for c in rgb])[0]
+                got = cache[st] = (int(((h * 360 + 15) % 360) // 30) if (A * A + B * B) ** 0.5 >= ROW_CHROMA else None, rgb)
+            if got[0] is not None:
+                rows[(b, got[0])].append((a, got[1]))
+        for (y, _hue), cells in sorted(rows.items()):
+            xs = sorted(c[0] for c in cells)
+            patches = 1 + sum(1 for u, v in zip(xs, xs[1:]) if v - u > 1)
+            if patches >= ROW_PATCHES:
+                out.append({"side": side, "y": y, "colour": _hue_name(cells[0][1]), "patches": patches,
+                            "span": (xs[0], xs[-1]), "axis": "x" if side in ("north", "south") else "z"})
+    m.rows = out
+    return out
+
+
 def _contrast(m):
     """Frame against fill, measured on the render (_view): the lightness gap between the log frame and the wall fill and
     the share of the wall the eye sees as light."""
@@ -1011,12 +1058,22 @@ def _looks(m):
     v = _view(m)
     x1, z1, x2, z2 = m.box
     find, fix = [], []
+    rows = _colour_rows(m)
+    off = min(ROW_PENALTY[1], ROW_PENALTY[0] * len(rows))
+    for r in rows[:3]:
+        find.append(f"Looks: a row of {r['patches']} {r['colour']} patches along the {r['side']} side at y={r['y']} "
+                    f"({r['axis']} {r['span'][0]}..{r['span'][1]}) reads as {r['colour']} squares from afar (one strong "
+                    f"colour repeated, like the same flower under every window).")
+    if rows:
+        fix.append("Break the colour rows: soft mixed plants in the window planters (azure bluet, oxeye daisy, lily of "
+                   "the valley, fern, azalea - window_with_box's default) and a planter under only every second window "
+                   "of the lower floors (window_with_box(..., planter=False) gives the others a trapdoor sill).")
     hs = _clamp((v["closeness"] - LOOK_CLOSE[0]) / (LOOK_CLOSE[1] - LOOK_CLOSE[0])) if v["ref"] else 0.5
     if m.dark:
-        return 100.0, [], []
+        return 100.0 - off, find, fix
     bright = _clamp((v["wall_l"] - 35) / 15)
     rc = v["roof_colour"] if v["roof_cells"] else 0.0
-    score = 100 * (0.4 * bright + 0.25 * rc + 0.35 * hs)
+    score = 100 * (0.4 * bright + 0.25 * rc + 0.35 * hs) - off
     if bright < 0.75:
         find.append(f"Looks: the house reads dark on the render: mean wall lightness {round(v['wall_l'])} (the reference "
                     f"houses: 50 or more), {round(100 * v['light'])}% of the wall light.")
@@ -1950,7 +2007,8 @@ RUBRIC = """Score your build 1-5 on each part (5 = like the reference survival m
    1 = the house reads near-black.
 2. Storeys - 2-3 floors (a small hut or cottage may have 1), as tall as it is long, not a long low bar.
    5 = 2-3 storeys with a storey band between them, 1 = one long low floor.
-3. Windows - big 2 x 2 windows in every bay of every facade with shutters and a flower box. 5 = 12-20% glass on each
+3. Windows - big 2 x 2 windows in every bay of every facade with shutters and a sill; soft mixed plants in planters
+   under only some lower windows (a row of red flowers under every window reads as red squares). 5 = 12-20% glass on each
    side, 1 = a few small panes.
 4. Balconies - balconies and terraces with railings on the upper floors, an outside stair with landings up to one.
    5 = two or more and a stair, 1 = none.

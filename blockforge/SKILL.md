@@ -37,7 +37,7 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 ## Houses and towns: start from the proven parts (default)
 House default (unless the user asks otherwise): 2+ storeys, the reference palette - light oak, birch or stripped wood
 fill in an oak or spruce log frame, a teal (or green, red, warm oak) layered roof with an oak trim, big white-framed
-windows (clear glass_pane, never coloured or red glass, in a white or birch or oak frame; birch shutters and lintel) with a flower box directly under each (flowers only in that box, never in front of or inside the panes), a balcony. The house must read LIGHT: the
+windows (clear glass_pane, never coloured or red glass, in a white or birch or oak frame; birch shutters and lintel) with a sill, and a planter of soft mixed plants (azure bluet, oxeye daisy, lily of the valley, fern - window_with_box's default) under only every second window of the lower floors (never in front of or inside the panes; the same strong flower under every window reads as a row of red squares from afar), a balcony. The house must read LIGHT: the
 quality score measures the colours on the rendered side views and holds a house that reads dark below the gate. Dark
 oak, deepslate, blackstone walls and black or grey roofs only when the user asks for a dark look (dark, gothic, spooky,
 haunted, night, a stronghold). A small hut or cottage may have one storey. Every house starts from pattern() parts;

@@ -161,9 +161,12 @@ stair with landings up to a porch, balconies on the wings, stilts or a stone ter
 a porch at the front.
 
 **Windows and detail.** Big 2 x 2 panes in every bay of every floor (12-20% of each facade is glass), white-framed:
-a stripped birch lintel over, birch trapdoor shutters on both sides, a flower box directly under the panes (grass block
-with one kind of flower, trapdoors round its front, sides and bottom). Flowers only in those boxes and in the garden,
-never scattered over the walls (on the render they read as coloured noise). Lanterns by the door and on posts, a
+a stripped birch lintel over, birch trapdoor shutters on both sides, a sill or a planter directly under the panes
+(grass block with soft mixed plants - azure bluet, oxeye daisy, lily of the valley, fern, azalea - trapdoors in the
+frame's wood round its front, sides and bottom). Planters under only some windows (every second one, ground and first
+floor); the same strong flower under every window reads as a row of red squares from afar, and the looks part takes
+points off for each such row of saturated same-colour patches on the side views (round 5). Flowers only in those
+planters and in the garden, never scattered over the walls (on the render they read as coloured noise). Lanterns by the door and on posts, a
 brick chimney 2+ blocks above the ridge, fences on porches and balconies.
 
 **Surroundings.** A dirt or gravel path from the porch to a garden gate, a fenced garden with flowers and bushes, a
