@@ -6,7 +6,7 @@ import sys
 import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from blockforge import buildkit  # noqa: E402
+from blockforge import buildkit, patterns  # noqa: E402
 
 SAFE_BUILTINS = {k: getattr(builtins, k) for k in (
     "abs", "all", "any", "bool", "dict", "divmod", "enumerate", "filter", "float", "frozenset", "int",
@@ -27,6 +27,24 @@ def _import(name, *a, **k):
 SAFE_BUILTINS["__import__"] = _import
 
 
+def _pattern_wrappers(g):
+    """Every public pattern in patterns.py, callable by name in a script: the pattern returns buildkit code text and the
+    trusted runner executes it here, so scripts still cannot call exec themselves."""
+    import inspect
+
+    def make(fn):
+        def wrapper(*a, **k):
+            text = fn(*a, **k)
+            if text:
+                exec(compile(text, "<pattern " + fn.__name__ + ">", "exec"), dict(g))   # copy: its loop variables stay out of the script's
+        wrapper.__name__ = fn.__name__
+        wrapper.__doc__ = fn.__doc__
+        return wrapper
+    for n, fn in inspect.getmembers(patterns, inspect.isfunction):
+        if not n.startswith("_") and fn.__module__ == patterns.__name__ and n not in g:
+            g[n] = make(fn)
+
+
 def main():
     code = sys.stdin.buffer.read().decode("utf-8")
     real_out = sys.stdout
@@ -34,6 +52,7 @@ def main():
     g = {"__builtins__": SAFE_BUILTINS, "__name__": "build"}
     for n in buildkit.EXPORTS:
         g[n] = getattr(buildkit, n)
+    _pattern_wrappers(g)
     err = None
     base = {}
     base_path = os.environ.get("BLOCKFORGE_BASE")
