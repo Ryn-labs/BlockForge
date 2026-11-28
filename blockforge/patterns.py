@@ -400,6 +400,15 @@ def _spiral_tower(interior, wall_cells, ring, y, height, wall, stair, door, wind
         if (x, z) in hole or (x, z) == final:
             continue
         out.append(f"block({x}, {ytop}, {z}, {(rail if (x, z) in rails else wall)!r})")
+    shell, pillar = set(wall_cells), set(core)                      # a wall torch over every 6th step: no dark spot
+    for k, (x, z, yy, _kind, _f) in enumerate(items):
+        if k % 6 != 1:
+            continue
+        for side, (a, b) in DIRS.items():
+            if (((x + a, z + b) in shell and (x + a, yy + 2, z + b) not in glass)
+                    or ((x + a, z + b) in pillar and yy + 2 <= ytop - 1)):
+                out.append(f"block({x}, {yy + 2}, {z}, {_st('wall_torch', facing=OPP[side])})")
+                break
     return _code(out)
 
 
@@ -459,7 +468,9 @@ def square_spiral_stair(x1, z1, size, y, height, block="stone_brick_stairs", wal
     inner = set(interior)
     wall_cells = [(x, z) for x in range(x1, x1 + size) for z in range(z1, z1 + size) if (x, z) not in inner]
     wins = [(x1 + size - 1, z1 + size // 2), (x1, z1 + size // 2), (x1 + size // 2, z1 + size - 1)]
-    return _spiral_tower(interior, wall_cells, ring, y, height, wall, block, (xa + 1, z1, "north"), wins)
+    # the door opens onto the flat corner cell, not straight onto the first step: stepping up inside a 2-high door
+    # leaves no room for the head (house check)
+    return _spiral_tower(interior, wall_cells, ring, y, height, wall, block, (xa, z1, "north"), wins)
 
 
 # ------------------------------------------------------------------ house parts (quality: docs/QUALITY.md)
@@ -506,7 +517,7 @@ def framed_wall(x1, z1, x2, z2, y, h, facing, fill=None, frame=None, spacing=4, 
 
 
 def framed_house(x1, z1, x2, z2, y, floors=1, storey=4, fill=None, frame=None, floor="spruce_planks",
-                 foundation="cobblestone", spacing=4, skip=(), clear=False, flat=(), style=None):
+                 foundation="cobblestone", spacing=4, skip=(), clear=False, flat=(), style=None, lights=True):
     """The body of a timber-framed house: foundation at y-1, `floors` storeys of `storey` free blocks (walls on the
     outline x1..x2, z1..z2), plank floors between storeys and a ceiling on top, log posts in the walls every `spacing`
     blocks and a frame sticking out 1 block (posts, a beam on every floor line, thick corners). The ceiling is at
@@ -519,7 +530,9 @@ def framed_house(x1, z1, x2, z2, y, floors=1, storey=4, fill=None, frame=None, f
     the default), 'oak' (oak planks in spruce logs), 'stripped', 'plaster', 'classic'; 'dark' (spruce planks in dark
     oak logs) only when the user asks for a dark build.
     Tip: a side of 4k+1 blocks with spacing 4 leaves 3-block bays, a window or door in the middle of each; 5k+1 blocks
-    with spacing 5 leaves 4-block bays for 2-wide windows."""
+    with spacing 5 leaves 4-block bays for 2-wide windows.
+    lights=True hangs a lantern under every ceiling, one per 8 x 8 blocks of room, so no floor inside is dark (mobs
+    spawn at block light 0); lights=False when the rooms get their own lights."""
     fill, frame = _style(style, fill, frame)
     x1, x2 = sorted((x1, x2))
     z1, z2 = sorted((z1, z2))
@@ -560,7 +573,18 @@ def framed_house(x1, z1, x2, z2, y, floors=1, storey=4, fill=None, frame=None, f
                              (x1 - 1, z2 + 1, "west", "south"), (x2 + 1, z2 + 1, "east", "south")):
         if not ({s1, s2} & (skip | flat)):
             out.append(f"fill({cx}, {y - 1}, {cz}, {cx}, {top}, {cz}, {_st(frame, axis='y')})")
+    if lights:
+        out += _ceiling_lights(x1 + 1, z1 + 1, x2 - 1, z2 - 1, lines)
     return _code(out)
+
+
+def _ceiling_lights(x1, z1, x2, z2, ceilings):
+    """Lanterns hanging under each ceiling (y = a ceiling row) over the room x1..x2, z1..z2: one per 8 x 8 blocks."""
+    def spots(a, b):
+        n = max(1, -(-(b - a + 1) // 8))
+        return [a + (2 * i + 1) * (b - a + 1) // (2 * n) for i in range(n)]
+    lantern = _st("lantern", hanging=True)
+    return [f"block({cx}, {yc - 1}, {cz}, {lantern})" for yc in ceilings for cx in spots(x1, x2) for cz in spots(z1, z2)]
 
 
 # Window box planting: soft, pale and green plants mixed in each box. One strong colour (poppies) under every window

@@ -16,8 +16,9 @@ Y = 2                                   # ground level: the grass is at y 1
 def code():
     parts = [P.site(-26, -30, 36, 30, Y - 1),
              P.manor_layout(0, Y, 0, "east", style="plaster", roof="red", raised=3, stilts=True, flower="cornflower"),
-             # the stair foot is 17 east of the middle; a path on to the lane with lantern posts
-             P.road([[18, 0], [34, 0]], Y - 1, width=3),
+             # the stair foot is 18 east of the middle; a path from the cell after it on to the lane with lantern posts
+             # (a road clears 3 blocks over its cells, so it must not start on the stair's bottom step)
+             P.road([[19, 0], [34, 0]], Y - 1, width=3),
              P.lantern_post(20, Y, -3, "medieval"),
              P.lantern_post(20, Y, 3, "medieval"),
              P.fence_garden(14, -20, 30, -7, Y, gates=("south",), flowers=("cornflower", "allium", "azure_bluet")),
