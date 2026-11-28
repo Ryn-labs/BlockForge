@@ -25,9 +25,26 @@ def _path(sid):
     return os.path.join(DIR, sid + ".json")
 
 
+def _dumps(d):
+    """json.dumps (the C encoder). json.dump(d, file) streams through the pure-Python encoder: 5+ s for a big session."""
+    return json.dumps(d, separators=(",", ":"))
+
+
+_LOADED = {}                    # sid -> (file stamp, Session parts): a tool call reuses what the last one read or saved
+_RESULTS = {}                   # (what, session content key, ...) -> checks / quality / ground of that content
+_KEEP = {id(_LOADED): 2, id(_RESULTS): 32}     # sessions are big (a copy of every block): keep the last two
+
+
+def _remember(cache, key, value):
+    if len(cache) >= _KEEP[id(cache)] and key not in cache:
+        cache.pop(next(iter(cache)))
+    cache[key] = value
+    return value
+
+
 class Session:
     def __init__(self, sid, title="Untitled build", size_hint="", blocks=None, tiles=None, entities=None, history=None,
-                 terrain_blocks=None, terrain_top=None):
+                 terrain_blocks=None, terrain_top=None, terrain=None, hist_json=None):
         self.id = sid
         self.title = title
         self.size_hint = size_hint
@@ -36,29 +53,82 @@ class Session:
         self.entities = entities or []          # [x, y, z, entity]
         self.history = history or []            # [{"note", "code", "diff": [[x,y,z,old,new]], "entities": n, "time"}]
         self.terrain_blocks = terrain_blocks or {}   # the land the build started on: {pos: original state} (own file)
-        self.terrain = set(self.terrain_blocks)      # its positions
+        self.terrain = terrain if terrain is not None else set(self.terrain_blocks)   # its positions
         self.terrain_top = terrain_top or {}         # original ground height {(x, z): y}
+        self._hj = hist_json if hist_json is not None else {}   # id(history entry) -> (entry, its JSON): saved once
+
+    def key(self):
+        """Identifies the content of the build now: a step, an undo or a chat fix changes it."""
+        last = self.history[-1].get("time") if self.history else None
+        return (self.id, len(self.history), last, len(self.blocks))
 
     def ground(self):
-        """The Ground object the checks use, or None when the build did not start on terrain."""
-        return terr.Ground(self.blocks, self.terrain_blocks) if self.terrain_blocks else None
+        """The Ground object the checks use, or None when the build did not start on terrain. Worked out once per
+        content of the build (the land does not change between tool calls unless a step touches it)."""
+        if not self.terrain_blocks:
+            return None
+        k = ("ground", self.key())
+        got = _RESULTS.get(k)
+        return got if got is not None else _remember(_RESULTS, k, terr.Ground(self.blocks, self.terrain_blocks))
+
+    def findings(self):
+        """checks.run of the build now (cached per content: check, review and save_build after a step reuse it)."""
+        k = ("checks", self.key())
+        got = _RESULTS.get(k)
+        return got if got is not None else _remember(_RESULTS, k, checks.run(self.blocks, ground=self.ground()))
+
+    def top(self):
+        """terrain.ground_top of the build now {(x, z): y} (cached per content)."""
+        k = ("top", self.key())
+        got = _RESULTS.get(k)
+        return got if got is not None else _remember(_RESULTS, k, terr.ground_top(self.blocks, self.terrain_blocks))
+
+    def terrain_score(self):
+        """(is_terrain, terrain_quality.score) of what was built (cached per content)."""
+        from . import terrain_quality
+        k = ("terrain", self.key())
+        got = _RESULTS.get(k)
+        if got is None:
+            built = selfimprove.quality.built_only(self.blocks, self.terrain_blocks)
+            sc = terrain_quality.score(built)
+            got = _remember(_RESULTS, k, (sc["terrain"], sc))
+        return got
+
+    def quality(self, size=None, prompt=None):
+        """quality.score of what was built (cached per content, size hint and prompt)."""
+        k = ("quality", self.key(), size, prompt)
+        got = _RESULTS.get(k)
+        if got is None:
+            got = _remember(_RESULTS, k, selfimprove.quality.score(
+                selfimprove.quality.built_only(self.blocks, self.terrain_blocks), size, prompt))
+        return got
 
     def save_terrain(self):
         d = {"blocks": [[x, y, z, s] for (x, y, z), s in self.terrain_blocks.items()],
              "top": [[x, z, y] for (x, z), y in self.terrain_top.items()]}
         with open(_terrain_path(self.id), "w", encoding="utf-8") as f:
-            json.dump(d, f, separators=(",", ":"))
+            f.write(_dumps(d))
 
     def save(self):
         os.makedirs(DIR, exist_ok=True)
         data = {"id": self.id, "title": self.title, "size_hint": self.size_hint,
                 "blocks": [[x, y, z, s] for (x, y, z), s in self.blocks.items()],
                 "tiles": [[x, y, z, t] for (x, y, z), t in self.tiles.items()],
-                "entities": self.entities, "history": self.history, "terrain": bool(self.terrain_blocks)}
+                "entities": self.entities, "terrain": bool(self.terrain_blocks)}
+        hist = []
+        for e in self.history:                       # each step's JSON is made once, not again on every later save
+            got = self._hj.get(id(e))
+            if got is None or got[0] is not e:
+                got = self._hj[id(e)] = (e, _dumps(e))
+            hist.append(got[1])
+        keep = {id(e) for e in self.history}
+        for k in [k for k in self._hj if k not in keep]:
+            del self._hj[k]
         tmp = _path(self.id) + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, separators=(",", ":"))
+            f.write(_dumps(data)[:-1] + ',"history":[' + ",".join(hist) + "]}")
         os.replace(tmp, _path(self.id))
+        _cache(self)
 
 
 def _terrain_path(sid):
@@ -83,7 +153,27 @@ def start(title="Untitled build", size_hint="", terrain=None):
     return s
 
 
+def _stamp(sid):
+    try:
+        st = os.stat(_path(sid))
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _cache(s):
+    """Keep a copy of the session as it is on disk now, so the next tool call does not read and parse the file again."""
+    stamp = _stamp(s.id)
+    if stamp:
+        _remember(_LOADED, s.id, (stamp, s.title, s.size_hint, dict(s.blocks), dict(s.tiles), list(s.entities),
+                                  list(s.history), s.terrain_blocks, s.terrain_top, s.terrain, s._hj))
+
+
 def load(sid):
+    got = _LOADED.get(sid)
+    if got and got[0] == _stamp(sid):            # unchanged on disk since this process read or wrote it: no parse
+        _, title, hint, blocks, tiles, ents, hist, tb, top, tset, hj = got
+        return Session(sid, title, hint, dict(blocks), dict(tiles), list(ents), list(hist), tb, top, tset, hj)
     try:
         with open(_path(sid), encoding="utf-8") as f:
             d = json.load(f)
@@ -95,8 +185,11 @@ def load(sid):
             td = json.load(f)
         tb = {(x, y, z): s for x, y, z, s in td["blocks"]}
         top = {(x, z): y for x, z, y in td["top"]}
-    return Session(d["id"], d.get("title"), d.get("size_hint", ""), {(x, y, z): s for x, y, z, s in d["blocks"]},
-                   {(x, y, z): t for x, y, z, t in d.get("tiles", [])}, d.get("entities", []), d.get("history", []), tb, top)
+    s = Session(d["id"], d.get("title"), d.get("size_hint", ""), {(x, y, z): s for x, y, z, s in d["blocks"]},
+                {(x, y, z): t for x, y, z, t in d.get("tiles", [])}, d.get("entities", []), d.get("history", []), tb, top)
+    if s.id == sid:
+        _cache(s)
+    return s
 
 
 def _fmt(p):
@@ -110,8 +203,8 @@ def _short(st):
 def _size_words(blocks):
     if not blocks:
         return "empty"
-    lo = [min(p[i] for p in blocks) for i in range(3)]
-    hi = [max(p[i] for p in blocks) for i in range(3)]
+    axes = list(zip(*blocks))                            # one pass in C, not six generator walks over a big build
+    lo, hi = [min(a) for a in axes], [max(a) for a in axes]
     return (f"x {lo[0]}..{hi[0]}, y {lo[1]}..{hi[1]}, z {lo[2]}..{hi[2]} "
             f"({hi[0] - lo[0] + 1} x {hi[1] - lo[1] + 1} x {hi[2] - lo[2] + 1})")
 
@@ -124,18 +217,26 @@ def _popts():
         return {}
 
 
-def _run(s, code, popts):
+def _run(s, code, popts, base_text=None):
     base = (dict(s.blocks), dict(s.tiles)) if s.blocks else None
     try:
-        return sandbox.run_safe(code, placement_opts=popts, base=base)
+        return sandbox.run_safe(code, placement_opts=popts, base=base, base_text=base_text if base else None)
     except sandbox.ScriptError as e:
         raise SessionError("That step failed, nothing was changed:\n" + str(e)) from None
 
 
-def _diff(old, new):
+def _diff(old, new, keys=None):
+    """[[x, y, z, old, new]] of every cell that differs, bottom-up. keys = the only cells that can differ (the runner's
+    changed cells and their neighbours), so a small step on a big build does not compare every block."""
+    cells = (set(old) | set(new)) if keys is None else keys
     return [[x, y, z, old.get((x, y, z)), new.get((x, y, z))]
-            for (x, y, z) in sorted(set(old) | set(new), key=lambda q: (q[1], q[0], q[2]))
+            for (x, y, z) in sorted(cells, key=lambda q: (q[1], q[0], q[2]))
             if old.get((x, y, z)) != new.get((x, y, z))]
+
+
+def _changed_keys(meta):
+    """The cells a step on an existing build may have changed (None = unknown, compare everything)."""
+    return sandbox.scope(meta)
 
 
 def terrain_total(s):
@@ -171,7 +272,7 @@ def _commit(s, new, tiles, new_ents, diff, note, code, lines):
                    + "; ".join(f"{_fmt(d[:3])} {_short(d[3])} -> {_short(d[4])}" for d in over[:3])
                    + ". Fine if you meant it.")
     out += lines
-    out += _check_lines(new, MAX_LINES, s.ground())
+    out += _check_lines(s, MAX_LINES)
     return "\n".join(out)
 
 
@@ -187,7 +288,7 @@ def _meta_lines(meta, prefix=""):
 def step(s, code, note=""):
     """Run `code` on top of the session's blocks. Returns a plain-words report."""
     new, meta = _run(s, code, _popts())
-    diff = _diff(s.blocks, new)
+    diff = _diff(s.blocks, new, _changed_keys(meta))
     return _commit(s, new, sandbox.tiles_of(meta), [list(e) for e in (meta.get("entities") or [])], diff, note, code,
                    _meta_lines(meta))
 
@@ -208,10 +309,11 @@ def step_parts(s, parts, note=""):
         items.append((str(p.get("note") or f"part {i}")[:80], p["code"]))
     popts = _popts()
     results = [None] * len(items)
+    base_text = sandbox.base_json((s.blocks, s.tiles)) if s.blocks else None   # written once for all the parts
 
     def work(i):
         try:
-            results[i] = _run(s, items[i][1], popts)
+            results[i] = _run(s, items[i][1], popts, base_text)
         except SessionError as e:
             results[i] = e
 
@@ -228,7 +330,8 @@ def step_parts(s, parts, note=""):
             continue
         blocks_i, meta = r
         n_clash = 0
-        for pos in set(old) | set(blocks_i):
+        keys = _changed_keys(meta)
+        for pos in (set(old) | set(blocks_i)) if keys is None else keys:
             st = blocks_i.get(pos)
             if old.get(pos) == st:
                 continue
@@ -257,15 +360,16 @@ def step_parts(s, parts, note=""):
         lines.insert(0, "Clashes, e.g. " + "; ".join(clashes))
     lines = failed + lines
     tiles = {p: tl for p, tl in tiles.items() if p in new}
-    diff = _diff(old, new)
+    diff = _diff(old, new, set(owner))
     code = "\n\n".join(c for _n, c in items)
     note = note or "; ".join(n_ for n_, _c in items)
     head = f"Ran {len(items) - len(failed)} of {len(items)} parts in parallel. "
     return head + _commit(s, new, tiles, ents, diff, note, code, lines)
 
 
-def _check_lines(blocks, limit, ground=None):
-    found = checks.run(blocks, ground=ground)
+def _check_lines(s, limit, ground=None):
+    """The check lines of a step report. s = a Session (its cached findings) or a blocks dict."""
+    found = s.findings() if isinstance(s, Session) else checks.run(s, ground=ground)
     if not found:
         return ["Checks: no problems found."]
     tips = checks.advice(found)
@@ -280,7 +384,8 @@ def _check_lines(blocks, limit, ground=None):
 def check_text(s):
     if not s.blocks:
         return "The build is empty, nothing to check."
-    a = selfimprove.assess(s.blocks, s.ground(), s.terrain_blocks, s.size_hint)
+    a = selfimprove.assess(s.blocks, s.ground(), s.terrain_blocks, s.size_hint, found=s.findings(),
+                           q=s.quality(s.size_hint, s.title) if s.blocks else None)
     if not a["found"]:
         ok = "No problems found: no floating parts, buried or jumpy paths, wrong stairs or blocked doors."
         if a["low_quality"]:                                  # clean checks, but a plain building: not done once it is finished
@@ -296,8 +401,7 @@ def ground_text(s, x1=None, z1=None, x2=None, z2=None, step=None):
     """The ground height map of the build as it is now."""
     if not s.blocks:
         return "The build is empty, there is no ground yet."
-    top = terr.ground_top(s.blocks, s.terrain_blocks)
-    return terr.ground_text(top, x1, z1, x2, z2, step)
+    return terr.ground_text(s.top(), x1, z1, x2, z2, step)
 
 
 def plan_layout_text(s, area, parts, street_width=5):
@@ -305,9 +409,8 @@ def plan_layout_text(s, area, parts, street_width=5):
     from . import layout
     if not s.blocks:
         raise SessionError("The build is empty, there is no ground to plan on. Start the build with terrain.")
-    top = terr.ground_top(s.blocks, s.terrain_blocks)
     try:
-        plan = layout.plan(top, area, parts, street_width)
+        plan = layout.plan(s.top(), area, parts, street_width)
     except layout.LayoutError as e:
         raise SessionError(str(e)) from None
     return layout.plan_text(plan), plan
@@ -350,7 +453,7 @@ def describe_text(s):
     if not s.blocks:
         return "The build is empty."
     if s.terrain:
-        top = terr.ground_top(s.blocks, s.terrain_blocks)
+        top = s.top()
         span = max(max(c[0] for c in top) - min(c[0] for c in top), max(c[1] for c in top) - min(c[1] for c in top)) + 1
         out = [terr.summary(s.blocks, s.terrain_blocks, top),
                terr.change_words(terrain_total(s)) or "Terrain: untouched so far.",
@@ -372,7 +475,12 @@ def view(s, sides=None):
     bad = [x for x in sides if x not in render.SIDES]
     if bad:
         raise SessionError("Unknown side " + ", ".join(bad) + ". Use north, east, south, west or top.")
-    return [(x, render.render_side(s.blocks, x)) for x in sides]
+    out = []
+    for x in sides:                                      # view then review of the same build draws each side once
+        k = ("view", s.key(), x)
+        png = _RESULTS.get(k)
+        out.append((x, png if png is not None else _remember(_RESULTS, k, render.render_side(s.blocks, x))))
+    return out
 
 
 # ------------------------------------------------------------------ walk test

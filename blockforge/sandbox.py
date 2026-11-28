@@ -42,16 +42,16 @@ def check(code):
             raise ScriptError(f"line {node.lineno}: '{node.id}' is not allowed in build scripts")
 
 
-def run(code, timeout=240, placement_opts=None, base=None):
-    """Returns (blocks_dict {(x,y,z): state}, meta). Raises ScriptError with a readable message."""
+def run(code, timeout=240, placement_opts=None, base=None, base_text=None):
+    """Returns (blocks_dict {(x,y,z): state}, meta). Raises ScriptError with a readable message.
+    base_text = base_json(base) made once by a caller that runs several scripts on the same base (parallel parts)."""
     check(code)
     env, base_file = None, None
     if base:
         import tempfile
         fd, base_file = tempfile.mkstemp(suffix=".json", prefix="bf_base_")
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"blocks": [[x, y, z, s] for (x, y, z), s in base[0].items()],
-                       "tiles": [[x, y, z, t] for (x, y, z), t in (base[1] or {}).items()]}, f)
+            f.write(base_text or base_json(base))
         env = dict(os.environ, BLOCKFORGE_BASE=base_file)
     try:
         proc = subprocess.run(
@@ -74,10 +74,19 @@ def run(code, timeout=240, placement_opts=None, base=None):
         raise ScriptError(res["error"])
     pal = res["palette"]
     f = res["blocks"]
-    blocks = {(f[i], f[i + 1], f[i + 2]): pal[f[i + 3]] for i in range(0, len(f), 4)}
+    meta = res.get("meta") or {}
+    if meta.pop("delta", False) and base:            # an edit came back as the changes only: apply them to the base
+        blocks = dict(base[0])
+        for i in range(0, len(f), 4):
+            p, k = (f[i], f[i + 1], f[i + 2]), f[i + 3]
+            if k < 0:
+                blocks.pop(p, None)
+            else:
+                blocks[p] = pal[k]
+    else:
+        blocks = {(f[i], f[i + 1], f[i + 2]): pal[f[i + 3]] for i in range(0, len(f), 4)}
     if not blocks:
         raise ScriptError("The script ran but placed no blocks.")
-    meta = res.get("meta") or {}
     meta["redstone_warnings"] = list(meta.get("warnings") or [])
     try:
         from . import placement
@@ -96,6 +105,16 @@ def run(code, timeout=240, placement_opts=None, base=None):
     if not blocks:
         raise ScriptError("The script ran but placed no blocks.")
     return blocks, meta
+
+
+def base_json(base):
+    """The base (blocks, tiles) as the runner reads it: a palette and flat [x, y, z, palette index, ...] (json.dumps, the
+    fast C encoder: json.dump to a file is the slow pure-Python one)."""
+    pal, flat = {}, []
+    for (x, y, z), s in base[0].items():
+        flat += (x, y, z, pal.setdefault(s, len(pal)))
+    return json.dumps({"palette": list(pal), "blocks": flat,
+                       "tiles": [[x, y, z, t] for (x, y, z), t in (base[1] or {}).items()]}, separators=(",", ":"))
 
 
 def restore_modules(blocks, meta):
@@ -150,8 +169,8 @@ def tiles_of(meta):
     return {(x, y, z): t for x, y, z, t in meta.get("tiles") or []}
 
 
-def run_safe(code, timeout=240, placement_opts=None, base=None):
+def run_safe(code, timeout=240, placement_opts=None, base=None, base_text=None):
     try:
-        return run(code, timeout, placement_opts, base)
+        return run(code, timeout, placement_opts, base, base_text)
     except subprocess.TimeoutExpired:
         raise ScriptError(f"The script took longer than {timeout}s (too many blocks or an endless loop).")

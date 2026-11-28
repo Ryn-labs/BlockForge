@@ -10,13 +10,16 @@ LOOP_ROUNDS = 2                 # extra turns of the step-by-step engine before 
 SHOW = 6                        # findings listed per check kind in a message
 
 
-def assess(blocks, ground=None, terrain_blocks=None, size=None, with_quality=True, prompt=None):
+def assess(blocks, ground=None, terrain_blocks=None, size=None, with_quality=True, prompt=None, found=None, q=None):
     """Checks plus quality of `blocks`. with_quality=False leaves quality out of the verdict (a build that is not finished).
-    prompt = what was asked or the build's title (a small cottage may have one storey, a dark/gothic build may be dark)."""
+    prompt = what was asked or the build's title (a small cottage may have one storey, a dark/gothic build may be dark).
+    found / q = checks.run / quality.score of these blocks when the caller has them already (a session caches them)."""
     blocks = blocks or {}
-    found = checks.run(blocks, ground=ground) if blocks else []
-    q = None
-    if blocks and with_quality:
+    if found is None:
+        found = checks.run(blocks, ground=ground) if blocks else []
+    if not (blocks and with_quality):
+        q = None
+    elif q is None:
         q = quality.score(quality.built_only(blocks, terrain_blocks), size, prompt)
     qtotal = q["total"] if q and q.get("building") else None
     low = qtotal is not None and qtotal < quality.QUALITY_MIN

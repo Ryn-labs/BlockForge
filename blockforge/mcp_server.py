@@ -368,7 +368,7 @@ def _review(s):
     """review(session): the side views and the top, the quality score with what to fix, and the rubric."""
     if not s.blocks:
         raise ToolError("The build is empty, there is nothing to review yet.")
-    q = quality.score(quality.built_only(s.blocks, s.terrain_blocks), s.size_hint, s.title)
+    q = s.quality(s.size_hint, s.title)
     if q["building"]:
         head = (f"Quality {quality.summary(q)}; save_build needs {quality.QUALITY_MIN} or more.\n"
                 + "\n".join("- " + f for f in q["findings"][:12]))
@@ -439,7 +439,7 @@ def _session_call(name, args):
             kw = ", ".join(f"{k}={args[k]!r}" for k in keys if args.get(k) is not None)
             from . import terrain_quality as _tq
             text = session.step(s, f"natural_terrain({kw})", args.get("note") or f"natural terrain ({args.get('kind', 'mountain')})")
-            q = _tq.score(quality.built_only(s.blocks, s.terrain_blocks))
+            q = s.terrain_score()[1]
             return (text if isinstance(text, str) else json.dumps(text)) + "\nTerrain: " + _tq.summary(q)
         if name == "ground":
             return session.ground_text(s, args.get("x1"), args.get("z1"), args.get("x2"), args.get("z2"), args.get("step"))
@@ -466,8 +466,7 @@ def _session_call(name, args):
         if name == "describe":
             return session.describe_text(s)
         if name == "save_build":
-            from . import checks as _ck
-            found = _ck.run(s.blocks, ground=s.ground())
+            found = s.findings()
             if found and not (args.get("accept_problems") or "").strip():      # the AI looks at its problems before it may finish
                 raise ToolError("Not saved yet: check still finds problems. Fix them with build_step (look with view, test paths with walk_test), "
                                 "then call save_build again. If one can't be fixed or is intended, call save_build with accept_problems "
@@ -479,7 +478,7 @@ def _session_call(name, args):
                                 "keep the detail), then call save_build again. accept_problems does not cover the size. "
                                 + ("" if os.environ.get("BLOCKFORGE_UNATTENDED") else "If you are talking with the user, ask them: keep this size or fix it to the target? "
                                    "Only if they say keep it, call save_build with keep_size_user_answer set to their words."))
-            q = quality.score(quality.built_only(s.blocks, s.terrain_blocks), s.size_hint, s.title)
+            q = s.quality(s.size_hint, s.title)
             unattended = bool(os.environ.get("BLOCKFORGE_UNATTENDED"))
             user_q = bool((args.get("keep_quality_user_answer") or "").strip()) and not unattended
             if q["building"] and q["total"] < quality.QUALITY_MIN and not user_q:   # a plain box is never waived by the AI itself
@@ -490,10 +489,9 @@ def _session_call(name, args):
                                 "cover the quality." + ("" if unattended else " If the user asked for a plain building on purpose, ask "
                                 "them; only if they say keep it, call save_build with keep_quality_user_answer set to their words."))
             from . import terrain_quality as _tq                              # AI-made land must look like land, not a house
-            built = quality.built_only(s.blocks, s.terrain_blocks)
             user_t = bool((args.get("keep_terrain_user_answer") or "").strip()) and not unattended
-            if not q["building"] and _tq.is_terrain(built):
-                tqs = _tq.score(built)
+            if not q["building"] and s.terrain_score()[0]:
+                tqs = s.terrain_score()[1]
                 if tqs["total"] < _tq.TERRAIN_MIN and not user_t:
                     raise ToolError("Not saved yet: " + _tq.gate_text(tqs) + " Rebuild the land with make_terrain (or "
                                     "natural_terrain in build_step), then save_build again. accept_problems does not cover the terrain."
