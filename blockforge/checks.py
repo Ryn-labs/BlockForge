@@ -48,10 +48,26 @@ HEAD_BLOCKERS = ("_stairs", "_slab", "_fence", "_fence_gate", "_wall")
 
 PATH_BLOCKS = ("gravel", "dirt_path", "cobblestone", "stone_bricks", "mossy_cobblestone", "polished_andesite", "packed_mud",
                "coarse_dirt")
+# natural ground: on top of a path block it means the street runs on under the ground (cut into a slope without clearing
+# above, a wall capped with grass, or a street paved with natural stone). Same list as the bench scorer (bench/score.py).
+NATURAL_COVER = ("dirt", "grass_block", "stone", "andesite", "diorite", "granite", "tuff", "coarse_dirt", "podzol", "gravel",
+                 "rooted_dirt", "deepslate", "sand")
+
+
+_MEMO_MAX = 50000                                          # distinct block states are few; the caches never grow past this
+_NAME, _SOLID, _SHAPE = {}, {}, {}
+
+
+def _memo(cache, state, value):
+    if len(cache) > _MEMO_MAX:
+        cache.clear()
+    cache[state] = value
+    return value
 
 
 def name(state):
-    return (state or "minecraft:air").split("[")[0].replace("minecraft:", "")
+    n = _NAME.get(state)
+    return n if n is not None else _memo(_NAME, state, (state or "minecraft:air").split("[")[0].replace("minecraft:", ""))
 
 
 def props(state):
@@ -62,10 +78,12 @@ def props(state):
 
 def is_solid(state):
     """True for a full block you cannot stand inside."""
-    n = name(state)
-    if not state or n in THIN_NAMES or n.endswith(THIN_SUFFIXES):
-        return False
-    return n in SOLID_NAMES or n.endswith(SOLID_SUFFIXES)
+    r = _SOLID.get(state)
+    if r is None:
+        n = name(state)
+        r = _memo(_SOLID, state, bool(state) and not (n in THIN_NAMES or n.endswith(THIN_SUFFIXES))
+                  and (n in SOLID_NAMES or n.endswith(SOLID_SUFFIXES)))
+    return r
 
 
 def is_step(state):
@@ -78,6 +96,11 @@ def blocks_head(state):
 
 def shape(state):
     """'full', 'bottom_stair', 'top_stair', 'bottom_slab', 'top_slab' or None (not something you stand on)."""
+    r = _SHAPE.get(state, _SHAPE)
+    return r if r is not _SHAPE else _memo(_SHAPE, state, _shape(state))
+
+
+def _shape(state):
     n, p = name(state), props(state)
     if n.endswith("_stairs"):
         return "bottom_stair" if p.get("half", "bottom") == "bottom" else "top_stair"
@@ -113,28 +136,67 @@ def _label(state):
 
 
 def _floating(C):
+    """Groups of blocks (6-neighbour) that do not reach the lowest layer. Worked out on vertical runs: each column is cut
+    into runs of stacked blocks and runs in next-door columns that overlap are joined (union-find), so a big build or a
+    whole mountain is a few hundred thousand runs, not millions of cells."""
     out = []
     ground = min(p[1] for p in C)
-    seen = set()
-    for p in sorted(C, key=lambda q: (q[1], q[0], q[2])):
-        if p in seen:
+    cols = collections.defaultdict(list)
+    for (x, y, z) in C:
+        cols[(x, z)].append(y)
+    runs, col_runs = [], {}
+    for (x, z), ys in cols.items():
+        ys.sort()
+        mine = []
+        start = prev = ys[0]
+        for y in ys[1:]:
+            if y != prev + 1:
+                mine.append(len(runs))
+                runs.append((x, z, start, prev))
+                start = y
+            prev = y
+        mine.append(len(runs))
+        runs.append((x, z, start, prev))
+        col_runs[(x, z)] = mine
+    parent = list(range(len(runs)))
+
+    def find(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    for (x, z), mine in col_runs.items():
+        for nb in ((x + 1, z), (x, z + 1)):
+            other = col_runs.get(nb)
+            if not other:
+                continue
+            i = j = 0
+            while i < len(mine) and j < len(other):
+                a, b = runs[mine[i]], runs[other[j]]
+                if a[2] <= b[3] and b[2] <= a[3]:
+                    ra, rb = find(mine[i]), find(other[j])
+                    if ra != rb:
+                        parent[ra] = rb
+                if a[3] < b[3]:
+                    i += 1
+                else:
+                    j += 1
+    groups = {}
+    for i, (x, z, y0, y1) in enumerate(runs):
+        r = find(i)
+        g = groups.get(r)
+        if g is None:
+            g = groups[r] = [False, 0, (y0, x, z)]
+        g[0] = g[0] or y0 == ground
+        g[1] += y1 - y0 + 1
+        if (y0, x, z) < g[2]:
+            g[2] = (y0, x, z)
+    for grounded, n, (y, x, z) in sorted(groups.values(), key=lambda g: g[2]):
+        if grounded:
             continue
-        comp = [p]
-        seen.add(p)
-        k, grounded = 0, False
-        while k < len(comp):
-            x, y, z = comp[k]
-            k += 1
-            grounded = grounded or y == ground
-            for a, b, c in ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)):
-                q = (x + a, y + b, z + c)
-                if q in C and q not in seen:
-                    seen.add(q)
-                    comp.append(q)
-        if not grounded:
-            at = min(comp, key=lambda q: (q[1], q[0], q[2]))
-            out.append(("floating", at, f"A group of {len(comp)} block{'s' if len(comp) != 1 else ''} near {_fmt(at)} "
-                                        f"is not connected to the ground, so it floats"))
+        at = (x, y, z)
+        out.append(("floating", at, f"A group of {n} block{'s' if n != 1 else ''} near {_fmt(at)} "
+                                    f"is not connected to the ground, so it floats"))
     return out
 
 
@@ -234,6 +296,25 @@ def _terrain_burials(C, ground, cells):
     return out
 
 
+def _covered_path(C, stand, x, y, z):
+    """A path block with natural ground right on top that carries on as a street: path blocks on both sides along x or
+    z and a standing path cell within 8 along that line (bench/score.py v2 'buried path'). The finding names the cell and
+    the block on it."""
+    g = C.get
+    cover = name(g((x, y + 1, z)))
+    if cover not in NATURAL_COVER:
+        return None
+    for a, c in ((1, 0), (0, 1)):
+        if name(g((x + a, y, z + c))) in PATH_BLOCKS and name(g((x - a, y, z - c))) in PATH_BLOCKS and any(
+                (x + a * k * sg, z + c * k * sg, y) in stand and name(g((x + a * k * sg, y, z + c * k * sg))) in PATH_BLOCKS
+                for k in range(1, 9) for sg in (1, -1)):
+            return ("buried_path", (x, y, z),
+                    f"Path block at {_fmt((x, y, z))} has {cover} on top of it at {_fmt((x, y + 1, z))}, so the street "
+                    f"runs on under the ground there: clear the 2 blocks above the path (road() does), and pave with "
+                    f"path blocks, never {cover} or other natural stone/dirt, nor grass on a path or wall top")
+    return None
+
+
 def run(blocks, size=None, ground=None):
     """All findings for a build, capped per check. `size` is accepted for callers that have it; no check needs it yet.
     `ground` (terrain.Ground) = the build sits on terrain: floating is measured against the land, and paths that run into
@@ -247,12 +328,20 @@ def run(blocks, size=None, ground=None):
 
     walk = {}
     cells = C.items() if ground is None else [(p, s) for p, s in C.items() if not ground.untouched(C, p)]
+    reported = set()
     if ground is not None:
         found += _terrain_burials(C, ground, cells)
+        reported = {f[1] for f in found if f[0] == "buried_path"}
+    pathish = {s for s in set(C.values()) if shape(s) in ("bottom_stair", "bottom_slab") or name(s) in PATH_BLOCKS}
     for (x, y, z), s in cells:
+        if s not in pathish:
+            continue                                              # most blocks are no path: skip them by their state
         n, sh = name(s), shape(s)
-        if sh not in ("bottom_stair", "bottom_slab") and n not in PATH_BLOCKS:
-            continue
+        if n in PATH_BLOCKS and (x, y, z) not in reported:
+            hit = _covered_path(C, stand, x, y, z)
+            if hit:
+                found.append(hit)
+                continue
         if n in PATH_BLOCKS and not _is_ground_path(C, x, y, z):
             continue                                              # wall and roof tops are not paths
         if sh in ("bottom_stair", "bottom_slab") and _is_roof_step(C, x, y, z):
@@ -309,8 +398,9 @@ def run(blocks, size=None, ground=None):
                                       f"Stair at {_fmt((x, y, z))} is followed by a stair at {_fmt(p2)} that turns 90 degrees, "
                                       f"so put a flat landing at the turn"))
 
+    doors = {s for s in set(C.values()) if name(s).endswith("_door") and props(s).get("half") == "lower"}
     for (x, y, z), s in cells:
-        if name(s).endswith("_door") and props(s).get("half") == "lower":
+        if s in doors:
             dv = DV.get(props(s).get("facing"))
             if dv:
                 for sgn, word in ((1, "in front of"), (-1, "behind")):
@@ -331,9 +421,20 @@ STAIR_ADVICE = ("Stairs and steps: build them from the proven patterns, which ha
                 "a stair that turns on one block.")
 
 
+BURIED_ADVICE = ("Buried paths: lay streets with road(points, width=...) - it clears 3 blocks above every cell, fills the "
+                 "gap under it and follows the ground (y=None) or the plan_layout corner heights ([x, z, y] points); "
+                 "straight_stair_run and switchback_landing clear above their steps too. Pave with path blocks (stone "
+                 "bricks, cobblestone, gravel, dirt path), never andesite, stone, dirt or grass, and never cap a path "
+                 "or retaining wall with grass.")
+
+
 def advice(findings):
-    """Lines that tell the AI which proven patterns fix these findings (stairs: straight_stair_run, external_stair ...)."""
-    return [STAIR_ADVICE] if any(f["check"] in STAIR_CHECKS for f in findings) else []
+    """Lines that tell the AI which proven patterns fix these findings (stairs: straight_stair_run, external_stair ...;
+    buried paths: road)."""
+    out = [STAIR_ADVICE] if any(f["check"] in STAIR_CHECKS for f in findings) else []
+    if any(f["check"] == "buried_path" for f in findings):
+        out.append(BURIED_ADVICE)
+    return out
 
 
 def _cap(found):

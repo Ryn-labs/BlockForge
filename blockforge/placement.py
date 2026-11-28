@@ -63,12 +63,17 @@ class Ctx:
         self.fixes = Counter()
         self.where = {}                                    # removal text -> positions
         self.cnt = Counter()
-        fences = Counter(_name(s) for s in blocks.values() if _is_fence(_name(s)))
+        fences = Counter()
+        for s, k in Counter(blocks.values()).items():      # per block state, not per block
+            if _is_fence(_name(s)):
+                fences[_name(s)] += k
         self.fence = fences.most_common(1)[0][0] if fences else "oak_fence"
 
     only = None                                            # positions to check (None = the whole build)
 
     def scoped(self):
+        if self.only is not None and len(self.only) < len(self.b):     # a small edit of a big build: walk the edit only
+            return [(p, self.b[p]) for p in sorted(self.only, key=lambda q: (q[1], q[0], q[2])) if p in self.b]
         return [(p, st) for p, st in self.b.items() if self.only is None or p in self.only]
 
     def get(self, p, d=None):
@@ -460,8 +465,11 @@ def process(blocks, final=False, version=None, pack="auto", only=None, check_ids
     except Exception as e:                                 # noqa: BLE001
         _checker_error(c, "block state check", e)
     crashed = []
-    for p in sorted(blocks if only is None else [q for q in blocks if q in only],
-                    key=lambda q: (q[1], q[0], q[2])):          # bottom-up so supports are settled first
+    if only is None:
+        todo = blocks
+    else:
+        todo = [q for q in only if q in blocks] if len(only) < len(blocks) else [q for q in blocks if q in only]
+    for p in sorted(todo, key=lambda q: (q[1], q[0], q[2])):    # bottom-up so supports are settled first
         st = blocks.get(p)
         if st is None:
             continue

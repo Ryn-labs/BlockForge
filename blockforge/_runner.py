@@ -45,6 +45,18 @@ def _pattern_wrappers(g):
             g[n] = make(fn)
 
 
+def _around(cells, r):
+    """The cells and every cell within r of them (a cube)."""
+    out = set()
+    rng = range(-r, r + 1)
+    for (x, y, z) in cells:
+        for a in rng:
+            for b in rng:
+                for c in rng:
+                    out.add((x + a, y + b, z + c))
+    return out
+
+
 def main():
     code = sys.stdin.buffer.read().decode("utf-8")
     real_out = sys.stdout
@@ -59,8 +71,12 @@ def main():
     if base_path:                                    # editing an existing build: its blocks are already placed
         with open(base_path, encoding="utf-8") as f:
             b = json.load(f)
-        for x, y, z, s in b["blocks"]:
-            buildkit._blocks[(x, y, z)] = s
+        if "palette" in b:                           # compact: a palette and flat [x, y, z, palette index, ...]
+            pal, f_ = b["palette"], b["blocks"]
+            buildkit._blocks.update(((f_[i], f_[i + 1], f_[i + 2]), pal[f_[i + 3]]) for i in range(0, len(f_), 4))
+        else:
+            for x, y, z, s in b["blocks"]:
+                buildkit._blocks[(x, y, z)] = s
         for x, y, z, t in b.get("tiles") or []:
             buildkit._tiles[(x, y, z)] = t
         base = dict(buildkit._blocks)
@@ -86,13 +102,20 @@ def main():
                    ". Never place, replace or wire blocks inside a machine made by item_sorter() etc. Move your own blocks "
                    "outside its footprint.")
     if not err and blocks:
+        # editing a build: auto-wiring and its check only look round the changed cells (2 out), not the whole build
+        small = base and len(changed) * 40 < len(blocks)
+        work = {q: blocks[q] for q in _around(changed, 2) if q in blocks} if small else blocks
         try:
-            buildkit._meta["warnings"] = buildkit._redstone.finalize(blocks)
+            buildkit._meta["warnings"] = buildkit._redstone.finalize(work)
             if buildkit._modules:                    # proven machines are checked in game, not by the simple checker
                 cells = {p for m in buildkit._modules for p in m["cells"]}
-                buildkit._meta["warnings"] = buildkit._redstone.check({p: s for p, s in blocks.items() if p not in cells})
+                buildkit._meta["warnings"] = buildkit._redstone.check({p: s for p, s in work.items() if p not in cells})
         except Exception as e:                       # noqa: BLE001 - never lose a build over the checker
             buildkit._meta["warnings"] = [f"redstone check failed: {e}"]
+        if work is not blocks:
+            for p in changed:                        # copy the wiring of the changed cells back
+                if p in work:
+                    blocks[p] = work[p]
         buildkit._modules_lib.restore(blocks, buildkit._modules)
         for p, s in base.items():                    # auto-wiring must not touch the parts of the build left alone
             if p not in changed:
@@ -103,7 +126,13 @@ def main():
         if span > buildkit.MAX_SPAN:
             err = f"Build is {span} blocks across; the limit is {buildkit.MAX_SPAN}."
     pal, flat = {}, []
-    if not err:
+    if not err and base:                             # an edit sends back only what differs from the base (-1 = removed)
+        for p in changed:
+            st = blocks.get(p)
+            if st != base.get(p):
+                flat += [p[0], p[1], p[2], -1 if st is None else pal.setdefault(st, len(pal))]
+        buildkit._meta["delta"] = True
+    elif not err:
         for (x, y, z), st in blocks.items():
             flat += [x, y, z, pal.setdefault(st, len(pal))]
     if not err:

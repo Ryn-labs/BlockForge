@@ -94,6 +94,47 @@ class SessionTools(unittest.TestCase):
         self.assertLess(guide.index("HOW TO BUILD, PART BY PART"), guide.index("The build script"))
 
 
+class BigBuildSpeed(unittest.TestCase):
+    """A step on an existing build sends back only its changes, sessions are cached between tool calls and the check,
+    quality and view results are reused until the build changes."""
+
+    def test_step_on_a_base_is_exact(self):
+        from blockforge import sandbox
+        base = {(x, 0, z): "minecraft:stone" for x in range(30) for z in range(30)}
+        base[(5, 1, 5)] = "minecraft:oak_planks"
+        blocks, meta = sandbox.run_safe("block(5, 1, 5, 'air')\nblock(7, 1, 7, 'dirt')\n", base=(base, {}))
+        want = dict(base)
+        del want[(5, 1, 5)]
+        want[(7, 1, 7)] = "minecraft:dirt"
+        self.assertEqual({p: s.split("[")[0] for p, s in blocks.items() if not s.endswith(":air")}, want)
+        self.assertNotIn("delta", meta)
+
+    def test_cached_session_follows_the_file(self):
+        s = session.start("cache")
+        session.step(s, FLOOR)
+        a = session.load(s.id)
+        a.blocks[(0, 5, 0)] = "minecraft:stone"                   # a caller changing its copy never changes the cache
+        b = session.load(s.id)
+        self.assertNotIn((0, 5, 0), b.blocks)
+        session.step(b, "block(3, 1, 3, 'stone')\n")
+        session._LOADED.clear()                                    # a fresh process reads the same from disk
+        c = session.load(s.id)
+        self.assertEqual(c.blocks, b.blocks)
+        self.assertEqual(len(c.history), 2)
+        with open(os.path.join(session.DIR, s.id + ".json"), encoding="utf-8") as f:
+            self.assertEqual(len(json.load(f)["history"]), 2)
+
+    def test_results_follow_the_build(self):
+        s = session.start("results")
+        session.step(s, FLOOR)
+        self.assertEqual(s.findings(), [])
+        session.step(s, "block(3,1,3,B('oak_stairs', facing='north', half='bottom'))\nblock(3,2,3,'stone_bricks')\n")
+        self.assertIn("buried_path", [f["check"] for f in s.findings()])
+        session.undo(s, 1)
+        self.assertEqual(s.findings(), [])
+        self.assertIs(session.view(s, ["top"])[0][1], session.view(s, ["top"])[0][1])
+
+
 class McpStdio(unittest.TestCase):
     def test_stdio(self):
         tmp = tempfile.mkdtemp(prefix="bf_mcp_")

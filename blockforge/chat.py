@@ -93,7 +93,7 @@ def _copy_session(src, dst_sid, new_id):
     os.makedirs(session.DIR, exist_ok=True)
     tmp = _sfile(dst_sid) + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(d, f, separators=(",", ":"))
+        f.write(json.dumps(d, separators=(",", ":")))
     os.replace(tmp, _sfile(dst_sid))
 
 

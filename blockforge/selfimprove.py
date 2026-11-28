@@ -7,16 +7,22 @@ from . import checks, quality
 
 CHAT_ROUNDS = 3                 # improvement rounds per user request in the chat panel
 LOOP_ROUNDS = 2                 # extra turns of the step-by-step engine before it saves
+LOOP_SECONDS = 22 * 60          # the step-by-step build and its improvement rounds aim to be done within this
+ROUND_MIN_SECONDS = 4 * 60      # an improvement round starts only with this much of the budget left
 SHOW = 6                        # findings listed per check kind in a message
+EXACT_CELLS = ("buried_path",)  # kinds whose message also lists every kept cell (x, y, z)
 
 
-def assess(blocks, ground=None, terrain_blocks=None, size=None, with_quality=True, prompt=None):
+def assess(blocks, ground=None, terrain_blocks=None, size=None, with_quality=True, prompt=None, found=None, q=None):
     """Checks plus quality of `blocks`. with_quality=False leaves quality out of the verdict (a build that is not finished).
-    prompt = what was asked or the build's title (a small cottage may have one storey, a dark/gothic build may be dark)."""
+    prompt = what was asked or the build's title (a small cottage may have one storey, a dark/gothic build may be dark).
+    found / q = checks.run / quality.score of these blocks when the caller has them already (a session caches them)."""
     blocks = blocks or {}
-    found = checks.run(blocks, ground=ground) if blocks else []
-    q = None
-    if blocks and with_quality:
+    if found is None:
+        found = checks.run(blocks, ground=ground) if blocks else []
+    if not (blocks and with_quality):
+        q = None
+    elif q is None:
         q = quality.score(quality.built_only(blocks, terrain_blocks), size, prompt)
     qtotal = q["total"] if q and q.get("building") else None
     low = qtotal is not None and qtotal < quality.QUALITY_MIN
@@ -37,6 +43,8 @@ def findings_lines(a, show=SHOW):
     for k, fs in groups.items():
         out.append(f"{checks.CHECK_LABELS.get(k, k)} ({a['by_check'][k]}):")
         out += ["- " + f["text"] for f in fs[:show]]
+        if k in EXACT_CELLS and len(fs) > show:                 # every cell, so the fix can go straight to them
+            out.append("- all cells: " + ", ".join("(%d, %d, %d)" % tuple(f["at"]) for f in fs))
         if a["by_check"][k] > min(len(fs), show):
             out.append(f"- ...and {a['by_check'][k] - min(len(fs), show)} more of the same kind (call check to list them).")
     return out
@@ -69,7 +77,7 @@ def improve_message(a, k=None, n=None):
     head = "Automatic improvement" + (f" round {k} of {n}" if k else "") + ". Your last step left things to fix."
     out = [head]
     if a["found"]:
-        out += ["", f"Check problems ({a['problems']}):"] + findings_lines(a)
+        out += ["", f"Check problems ({a['problems']}):"] + findings_lines(a) + checks.advice(a["found"])
     if a["low_quality"]:
         out += ["", f"Quality {a['qtotal']}/100, the minimum is {quality.QUALITY_MIN}. The weakest parts and their fixes:"]
         out += quality_lines(a)

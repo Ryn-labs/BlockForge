@@ -163,7 +163,7 @@ def save_build(blocks, title, prompt="", code=None, source="app", parent=None, m
         "redstone": redstone, "warnings": warnings or [], "fixes": fixes or [], "modpack": modpack, "modules": modules or [], "base": base, "tested": tested, "checks": checks, "mobs": len(entities or []),
     }
     with open(os.path.join(d, "blocks.json"), "w", encoding="utf-8") as f:
-        json.dump(data, f, separators=(",", ":"))
+        f.write(json.dumps(data, separators=(",", ":")))       # the C encoder: json.dump streams in pure Python
     if code:
         with open(os.path.join(d, "code.py"), "w", encoding="utf-8") as f:
             f.write(code)

@@ -70,10 +70,12 @@ def user_text(text, session_id=None):
             "Do not write one big script. " + start + "Plan the build in parts, then for "
             "each part: build_step it (about 10-40 lines), view it, and check it. Fix every problem the check lists with "
             "another build_step (or undo and redo the part). When paths, stairs or doors exist, walk_test the routes people "
-            "will use and fix what it finds. Keep the overall size asked for. For a house, building or town start from "
+            "will use and fix what it finds. Several houses (a street, a town, terraces): build them in ONE build_step "
+            "with parts, one part per house (4 run at the same time), then view and check once - not one call per house. "
+            "Keep the overall size asked for. For a house, building or town start from "
             "the proven pattern() parts (see 'Houses and towns'), never a bare box; a house by default has 2+ storeys, "
             "the light reference palette (birch, oak or stripped wood fill in an oak or spruce log frame, a teal or "
-            "colored layered roof with an oak trim, big white-framed windows with a flower box under each) and a "
+            "colored layered roof with an oak trim, big white-framed windows, a planter of soft mixed plants under every second lower window, never red flowers under every window) and a "
             "balcony; dark oak, deepslate or blackstone and black roofs only if the request asks for a dark look. "
             "Big houses: central tall block + front gable, stepped wings, varied roof heights, no wall run over 9 "
             "blocks; call manor_layout(x, y, z, facing) (and every pattern) directly in build_step code. Windows are clear glass_pane in a light frame, flowers only in a box under them. "
@@ -145,12 +147,19 @@ def _look(sid):
         return None
 
 
-def _improve(sid, request, turn, usage, log):
-    """After the AI ended: up to LOOP_ROUNDS more turns while the session has check problems or low quality."""
+def _improve(sid, request, turn, usage, log, started=None):
+    """After the AI ended: up to LOOP_ROUNDS more turns while the session has check problems or low quality, within
+    the time budget (selfimprove.LOOP_SECONDS from `started`): a round starts only with ROUND_MIN_SECONDS left and is
+    stopped when the budget runs out (the session is saved as it is then)."""
     from . import selfimprove
     from .engine import EngineError
     n = selfimprove.LOOP_ROUNDS
+    started = started or time.time()
     for k in range(1, n + 1):
+        left = selfimprove.LOOP_SECONDS - (time.time() - started)
+        if left < selfimprove.ROUND_MIN_SECONDS:
+            log(f"No time left for improvement round {k} (the build has used {round((time.time() - started) / 60)} minutes).")
+            return
         a = _look(sid)
         if a is None or a["ok"]:
             return
@@ -160,7 +169,7 @@ def _improve(sid, request, turn, usage, log):
                + f"\n\nPass session=\"{sid}\" to every tool and do not call start_build. Fix, check until it says no problems, "
                "call review, then call save_build.")
         try:
-            res = turn(msg, first=False)
+            res = turn(msg, first=False, timeout=max(60, int(left)))
         except EngineError as e:
             log("Could not keep improving: " + str(e)[:160])
             return
@@ -196,13 +205,13 @@ def run(text, model, usage, exe, log=print, image_path=None, terrain=None, title
         log("Asking Claude to build it step by step (via Claude Code)...")
         saved_id, sid = None, (pre.id if pre else None)
 
-        def turn(message, first=True):
+        def turn(message, first=True, timeout=None):
             """One claude -p run on the session tools; returns its result event (None when it stopped without one)."""
             nonlocal saved_id, sid
             proc = _spawn(cmd, work, dict(os.environ))
             proc.stdin.write(message.encode("utf-8"))
             proc.stdin.close()
-            timer = threading.Timer(TIMEOUT, proc.kill)
+            timer = threading.Timer(min(TIMEOUT, timeout or TIMEOUT), proc.kill)
             timer.start()
             res, uses = None, {}
             try:
@@ -267,7 +276,7 @@ def run(text, model, usage, exe, log=print, image_path=None, terrain=None, title
             raise EngineError("Claude returned an error: " + msg[:800])
         if sid:                                                         # check -> fix -> check until clean, before anything is saved
             first_saved = saved_id
-            _improve(sid, text, turn, usage, log)
+            _improve(sid, text, turn, usage, log, started)
             if first_saved and saved_id != first_saved:                 # the improved build replaces the flawed one saved earlier in this run
                 try:
                     store.delete_build(first_saved)

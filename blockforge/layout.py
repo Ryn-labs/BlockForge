@@ -209,7 +209,7 @@ def _streets(plist, H, geom, sw, warnings):
         if path is None:
             warnings.append(f"No street found between {a['name']} and {b['name']}.")
             continue
-        ys, bad = _profile(path, H, (ax1, az1), used, a["level"], b["level"])
+        ys, bad = _profile(path, H, (ax1, az1), used, a["level"], b["level"], sw // 2 + 1)
         for c, y in zip(path, ys):
             used.setdefault(c, y)
         if bad:
@@ -253,8 +253,9 @@ def _route(H, wall, geom, start, goal, used):
         for nd, (dx, dz) in enumerate(dirs):
             if d >= 0 and nd != d and (dx, dz) == (-dirs[d][0], -dirs[d][1]):
                 continue
-            if d >= 0 and nd != d and run < MIN_LEG and (x, z) != g:
-                continue                                     # a leg is at least MIN_LEG long: no zigzags
+            if d >= 0 and nd != d and run < MIN_LEG and (x, z) != g and h(x, z) >= MIN_LEG:
+                continue                                     # a leg is at least MIN_LEG long: no zigzags (but near
+                                                             # the goal a short leg may end it: no loop round to reach it)
             nx, nz = x + dx, z + dz
             if not (0 <= nx < W and 0 <= nz < L):
                 continue
@@ -275,7 +276,7 @@ def _route(H, wall, geom, start, goal, used):
     return None
 
 
-def _profile(path, H, org, used, y_start, y_end):
+def _profile(path, H, org, used, y_start, y_end, landing=1):
     """Street height per cell: the ground, smoothed to rise at most 1 block in 2 (so streets are cut or filled),
     with a flat landing at each corner, cells of earlier streets and both ends pinned. Returns (heights, problem text)."""
     n = len(path)
@@ -306,11 +307,18 @@ def _profile(path, H, org, used, y_start, y_end):
         hi_p = min([py + cap(abs(i - pi)) for pi, py in pins.items()] + [10 ** 6])
         lo_p = max([py - cap(abs(i - pi)) for pi, py in pins.items()] + [-10 ** 6])
         ys.append(min(max(base, lo_p), hi_p))
-    # landings: the corner and the cell on each side are level (when that keeps the slope limit)
+    # landings: the corner and the cells round it are level (when that keeps the slope limit): as far out as the
+    # street is wide, so the corner cells of a wide street (road() lays them) never step up twice in a row
     for c in corners:
-        for j in (c - 1, c + 1):
-            if 0 <= j < n and j not in pins and ys[c] != ys[j] and _fits(ys, j, ys[c], cap, pins):
-                ys[j] = ys[c]
+        for e in range(1, landing + 1):
+            for j in (c - e, c + e):
+                if 0 <= j < n and j not in pins and ys[c] != ys[j] and _fits(ys, j, ys[c], cap, pins):
+                    ys[j] = ys[c]
+    steep = [c for c in corners if any(0 <= j < n and ys[j] != ys[c] for j in range(c - landing, c + landing + 1))]
+    if steep:
+        notes.append("too steep for a flat landing at the corner" + ("s" if len(steep) > 1 else "") + " "
+                     + ", ".join(f"({path[c][0]}, {path[c][1]})" for c in steep[:4])
+                     + ": put a straight_stair_run or switchback_landing there, or give the street a gentler way round")
     for i in range(n):
         for j in range(max(0, i - 6), i):
             if abs(ys[i] - ys[j]) > cap(i - j):
@@ -349,6 +357,13 @@ def _street_dict(a, b, path, ys):
             "landings": [[path[i][0], path[i][1], ys[i]] for i in corners], "total_rise": sum(rises)}
 
 
+def street_code(street, width):
+    """The build_step line that lays a planned street: road() through its corners at their heights. road clears the
+    room above every cell and fills under it, so the street is never buried in the slope it is cut into."""
+    pts = ", ".join(f"[{p[0]}, {p[1]}, {p[2]}]" for p in street["points"])
+    return f"road([{pts}], width={width})"
+
+
 def plan_text(plan):
     out = [f"Layout plan for x {plan['area'][0]}..{plan['area'][2]}, z {plan['area'][1]}..{plan['area'][3]} "
            f"(street width {plan['street_width']}). Rectangles are x1,z1 -> x2,z2 (inclusive); level = the y of the ground "
@@ -360,8 +375,10 @@ def plan_text(plan):
     for s in plan["streets"]:
         out.append(f"Street {s['from']} - {s['to']}: {s['length']} cells, climbs {s['total_rise']} in total. Centre line "
                    "(x,z,y) corners, landings flat: " + " -> ".join(f"({p[0]},{p[1]},{p[2]})" for p in s["points"]))
+        out.append(f"  lay it with: {street_code(s, plan['street_width'])}")
     for w in plan["warnings"]:
         out.append("Warning: " + w)
+    out.append("Build every house of the plan in ONE build_step with parts (one part per house, 4 run at the same time).")
     out.append("Full plan as JSON follows (each street has 'cells' with every x,z,y):")
     import json
     slim = dict(plan, streets=[{k: v for k, v in s.items() if k != "cells"} for s in plan["streets"]])

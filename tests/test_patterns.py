@@ -192,11 +192,30 @@ class Patterns(unittest.TestCase):
                     glass = {p for p, s in blocks.items() if "glass" in s}
                     bottom = {p for p in glass if (p[0], p[1] - 1, p[2]) not in glass}
                     self.assertEqual(len(bottom), width)
-                    flowers = {p for p, s in blocks.items() if "poppy" in s}
+                    flowers = {p for p, s in blocks.items() if s.split("[")[0].replace("minecraft:", "") in patterns.BOX_PLANTS}
                     soil = {p for p, s in blocks.items() if "grass_block" in s}
                     self.assertEqual(flowers, {(x + dx, y - 1, z + dz) for x, y, z in bottom})    # under each bottom pane, never in front of a pane
                     self.assertEqual(soil, {(x + dx, y - 2, z + dz) for x, y, z in bottom})   # the box right under it
-                    self.assertEqual(len({s for p, s in blocks.items() if "poppy" in s}), 1)  # one flower kind
+                    self.assertFalse(any("poppy" in s for s in blocks.values()))      # no strong red by default
+                    if width >= 2:
+                        self.assertGreater(len({blocks[p] for p in flowers}), 1)       # a mix, not one colour
+
+    def test_window_without_planter_has_a_sill(self):
+        blocks, _ = sandbox.run_safe(patterns.window_with_box(5, 4, 5, "south", 2, 2, wall="oak_planks", planter=False,
+                                                              box="spruce_trapdoor"))
+        self.assertFalse(any("grass_block" in s for s in blocks.values()))
+        self.assertIn("spruce_trapdoor", blocks[(5, 3, 6)])                  # a sill under the pane, outside
+        self.assertEqual(patterns.trapdoor_of("stripped_spruce_log"), "spruce_trapdoor")
+        self.assertEqual(patterns.trapdoor_of("dark_oak_log"), "dark_oak_trapdoor")
+
+    def test_manor_planters_only_under_some_windows(self):
+        blocks, _ = sandbox.run_safe("site(-30, -30, 30, 30, 1)\n" + patterns.manor_layout(0, 2, 0))
+        panes = [p for p, s in blocks.items() if "glass_pane" in s]
+        plants = [p for p, s in blocks.items() if s.split("[")[0].replace("minecraft:", "") in patterns.BOX_PLANTS]
+        self.assertFalse(any("poppy" in s for s in blocks.values()))
+        self.assertGreater(len(plants), 0)
+        self.assertLess(len(plants), len(panes) // 4)                      # far from a planter under every window
+        self.assertLessEqual(max(p[1] for p in plants), 2 + 4 + 1 + 5 + 1)   # ground and first floor only
 
     def test_stilts_reach_the_ground(self):
         code = "fill(-2, 0, -2, 10, 0, 8, 'dirt')\nfill(4, 1, -2, 10, 2, 8, 'dirt')\n" + patterns.stilt_base(0, 0, 8, 6, 8)

@@ -108,7 +108,8 @@ class Calibration(unittest.TestCase):
         # no longer held by its colours, only by its shape (one long box with a 37-block ridge, round 4)
         self.assertGreaterEqual(r["total"], quality.QUALITY_MIN, quality.summary(r))
         self.assertEqual(r["total"], r["looks"]["shape_cap"], quality.summary(r))
-        self.assertEqual(r["parts"]["looks"], 100)
+        rows = sum(1 for f in r["findings"] if "row of" in f)              # its red and blue flower rows (round 5) are
+        self.assertEqual(r["parts"]["looks"], 100 - min(quality.ROW_PENALTY[1], quality.ROW_PENALTY[0] * rows))  # not darkness
         self.assertFalse(any("reads dark" in f for f in r["findings"]))
         for p in ("spooky witch house", "Haunted mansion at night", "a medieval stronghold", "Blackstone fortress"):
             self.assertTrue(quality.dark_asked(p), p)
@@ -223,6 +224,28 @@ class Looks(unittest.TestCase):
         self.assertGreater(lit["roof_colour"], 0.8)                               # teal
         self.assertLess(dark["roof_colour"], 0.1)                                 # deepslate
         self.assertGreater(lit["closeness"], dark["closeness"])
+
+    def test_manor_facade_has_no_saturated_row(self):
+        q = quality.score(blocks_of("site(-30, -30, 30, 30, 1)\n" + patterns.manor_layout(0, 2, 0)))
+        self.assertFalse([f for f in q["findings"] if "row of" in f])
+        self.assertEqual(q["parts"]["looks"], 100)
+
+    def test_red_flowers_under_every_window_are_a_finding(self):
+        code = "site(-10, -10, 30, 25, 1)\n" + patterns.framed_house(0, 0, 20, 10, 2, floors=2, storey=4)
+        soft = code
+        for f in range(2):
+            for x in (2, 6, 10, 14, 17):
+                code += patterns.window_with_box(x, 3 + f * 5, 10, "south", 2, 2, flower="poppy")
+                soft += patterns.window_with_box(x, 3 + f * 5, 10, "south", 2, 2, planter=(f == 0 and x in (2, 10, 17)))
+        roof = patterns.gable_roof_trim(0, 0, 20, 10, 12, ridge="x")
+        red = quality.score(blocks_of(code + roof))
+        rows = [f for f in red["findings"] if "row of" in f]
+        self.assertTrue(rows)
+        self.assertIn("red patches along the south side", rows[0])
+        calm = quality.score(blocks_of(soft + roof))
+        self.assertFalse([f for f in calm["findings"] if "row of" in f])
+        self.assertEqual(calm["parts"]["looks"] - red["parts"]["looks"], quality.ROW_PENALTY[1])   # small, capped
+        self.assertIn("planter=False", " ".join(red["fixes"]["looks"]))
 
     def test_reference_palette_is_derived_numbers_only(self):
         refs = quality.ref_palette()

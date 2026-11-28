@@ -37,7 +37,7 @@ step tools you build one part at a time, LOOK at it, CHECK it, and fix mistakes 
 ## Houses and towns: start from the proven parts (default)
 House default (unless the user asks otherwise): 2+ storeys, the reference palette - light oak, birch or stripped wood
 fill in an oak or spruce log frame, a teal (or green, red, warm oak) layered roof with an oak trim, big white-framed
-windows (clear glass_pane, never coloured or red glass, in a white or birch or oak frame; birch shutters and lintel) with a flower box directly under each (flowers only in that box, never in front of or inside the panes), a balcony. The house must read LIGHT: the
+windows (clear glass_pane, never coloured or red glass, in a white or birch or oak frame; birch shutters and lintel) with a sill, and a planter of soft mixed plants (azure bluet, oxeye daisy, lily of the valley, fern - window_with_box's default) under only every second window of the lower floors (never in front of or inside the panes; the same strong flower under every window reads as a row of red squares from afar), a balcony. The house must read LIGHT: the
 quality score measures the colours on the rendered side views and holds a house that reads dark below the gate. Dark
 oak, deepslate, blackstone walls and black or grey roofs only when the user asks for a dark look (dark, gothic, spooky,
 haunted, night, a stronghold). A small hut or cottage may have one storey. Every house starts from pattern() parts;
@@ -60,7 +60,8 @@ fill in between them, never a bare box:
 - Stairs and steps only from patterns: straight_stair_run, external_stair, switchback_landing, porch(steps=...),
   balcony(gap=...) with external_stair; they have no jump steps and no corner turns.
 Towns: plan_layout first, then houses of different sizes, storeys and ridge directions along streets that bend and
-follow the ground (road with several points, stair runs on slopes), a plaza with a well, trees and gardens between the
+follow the ground (road(points) with y left out follows the ground and clears 3 blocks above every cell - never
+pave a street with andesite, stone or dirt or cap a path or terrace wall with grass; stair runs on slopes), a plaza with a well, trees and gardens between the
 houses, one landmark (a hall, temple or castle clearly bigger or taller). Never one straight row of equal houses.
 save_build refuses a building or town that scores below 60; only the user can keep it (keep_quality_user_answer).
 
@@ -84,8 +85,11 @@ start_build with terrain, ground(), plan_layout(), then build part by part, dist
    (median of its footprint), not the highest corner. A big area is sampled with a step: ground() a small area for detail.
 3. plan_layout(area=[x1,z1,x2,z2], parts=[{name, w, l, kind: house|plaza|castle|shrine|park, near?}], street_width=5):
    returns each part's rectangle, ground level, cut/fill and the street centre lines as (x,z,y) points with flat landings
-   at the corners. Streets never climb more than 1 block in 2. Build the parts where it says; if a street warning says it
-   is too steep, add a stair run (pattern straight_stair_run) between the points or move a part.
+   at the corners. Streets never climb more than 1 block in 2. Each street comes with its build line
+   ("lay it with: road([[x, z, y], ...], width=5)"): it follows the ground between the corner heights, clears the room
+   above, fills under it and puts half steps (slabs) on the rises, so no street is buried in the slope. Build the parts
+   where it says; if a street warning says it is too steep, add a stair run (pattern straight_stair_run) between the
+   points or move a part.
 4. Build district by district: first the streets and terraces, then the buildings of one street with build_step(parts=[...]),
    one view and check after the batch. check() on terrain flags a path running into the hill (buried path) and a building
    floating over the ground (gap below it): fix them by cutting the hill away or filling under the building.

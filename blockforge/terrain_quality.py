@@ -32,9 +32,12 @@ def _base(state):
 
 def surface(blocks):
     """{(x, z): (y, state)} of the top ground block (logs, leaves, plants and water skipped)."""
-    top = {}
+    top, ground = {}, {}
     for (x, y, z), st in blocks.items():
-        if not terrain.is_ground_block(st):
+        g = ground.get(st)
+        if g is None:
+            g = ground[st] = terrain.is_ground_block(st)                # per block state, not per block
+        if not g:
             continue
         c = (x, z)
         if c not in top or y > top[c][0]:
@@ -42,10 +45,11 @@ def surface(blocks):
     return top
 
 
-def is_terrain(blocks, min_columns=400, min_relief=8):
+def is_terrain(blocks, min_columns=400, min_relief=8, top=None):
     """True when the build is mostly natural land: 60%+ of the surface is natural ground, it covers 400+ columns and
-    rises 8+ blocks. Houses, castles and towns are not terrain (their own quality score handles them)."""
-    top = surface(blocks)
+    rises 8+ blocks. Houses, castles and towns are not terrain (their own quality score handles them).
+    top = surface(blocks) when the caller has it already."""
+    top = surface(blocks) if top is None else top
     if len(top) < min_columns:
         return False
     nat = sum(1 for y, st in top.values() if _base(st) in NATURAL)
@@ -59,7 +63,7 @@ def is_terrain(blocks, min_columns=400, min_relief=8):
 def score(blocks):
     top = surface(blocks)
     h = {c: v[0] for c, v in top.items()}
-    out = {"terrain": is_terrain(blocks), "total": 100, "parts": {}, "notes": [], "columns": len(h)}
+    out = {"terrain": is_terrain(blocks, top=top), "total": 100, "parts": {}, "notes": [], "columns": len(h)}
     if len(h) < 16:
         out["parts"] = {k: v for k, v in PARTS.items()}
         return out
